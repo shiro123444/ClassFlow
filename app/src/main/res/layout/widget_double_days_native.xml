@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:id="@+id/inner_content_card"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_bg_rounded"
+        android:orientation="vertical"
+        android:padding="14dp"
+        tools:visibility="visible">
+
+        <TextView
+            android:id="@+id/tv_current_week"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:textColor="@color/widget_text_secondary"
+            android:textSize="10dp"
+            tools:text="第 18 周" />
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_marginTop="2dp">
+
+            <ImageView
+                android:id="@+id/widget_divider"
+                android:layout_width="1dp"
+                android:layout_height="match_parent"
+                android:layout_centerHorizontal="true"
+                android:layout_marginVertical="8dp"
+                android:background="@color/widget_divider" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_toStartOf="@id/widget_divider"
+                android:layout_marginEnd="8dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tv_today_date"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/widget_text_secondary"
+                    android:textSize="11dp"
+                    android:textStyle="bold"
+                    tools:text="今日 1.07 周三" />
+
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1">
+
+                    <LinearLayout
+                        android:id="@+id/container_today"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:orientation="vertical">
+                        <include layout="@layout/widget_item_course_common" />
+                        <include layout="@layout/widget_divider_horizontal" />
+                        <include layout="@layout/widget_item_course_common" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/empty_today"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:text="@string/text_no_course"
+                        android:textColor="@color/widget_text_hint"
+                        android:textSize="12dp"
+                        android:visibility="gone"
+                        tools:visibility="gone" />
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/tv_today_footer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:textColor="@color/widget_text_hint"
+                    android:textSize="8dp"
+                    tools:text="今日剩余 2 节" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_toEndOf="@id/widget_divider"
+                android:layout_marginStart="8dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tv_tomorrow_date"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/widget_text_secondary"
+                    android:textSize="11dp"
+                    android:textStyle="bold"
+                    tools:text="明日 1.08 周四" />
+
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1">
+
+                    <LinearLayout
+                        android:id="@+id/container_tomorrow"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:orientation="vertical">
+                        <include layout="@layout/widget_item_course_common" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/empty_tomorrow"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:text="@string/text_no_course"
+                        android:textColor="@color/widget_text_hint"
+                        android:textSize="12dp"
+                        android:visibility="gone"
+                        tools:visibility="gone" />
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/tv_tomorrow_footer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:textColor="@color/widget_text_hint"
+                    android:textSize="8dp"
+                    tools:text="明日共有 4 节" />
+            </LinearLayout>
+        </RelativeLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/container_vacation"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_bg_rounded"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:padding="14dp"
+        tools:visibility="gone">
+
+        <TextView
+            android:id="@+id/tv_vacation_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@color/widget_text_primary"
+            android:textSize="18dp"
+            android:textStyle="bold"
+            tools:text="暑假快乐" />
+
+        <TextView
+            android:id="@+id/tv_vacation_msg"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="@color/widget_text_secondary"
+            android:textSize="13dp"
+            tools:text="愿你的假期充满阳光" />
+    </LinearLayout>
+
+</RelativeLayout>

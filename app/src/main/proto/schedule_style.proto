@@ -1,0 +1,58 @@
+﻿// src/main/proto/schedule_style.proto
+
+syntax = "proto3";
+
+package com.xingheyuzhuan.classflow.data.model;
+
+option java_package = "com.xingheyuzhuan.classflow.data.model.schedule_style";
+option java_multiple_files = true;
+
+// 颜色对：包含浅色和深色模式下的 ARGB 值
+message DualColorProto {
+  int64 light_color = 1;
+  int64 dark_color = 2;
+}
+
+// 课表网格样式配置
+message ScheduleGridStyleProto {
+
+  // 基础布局尺寸 (单位: DP)
+  optional float time_column_width_dp = 1;   // 时间列宽度
+  optional float day_header_height_dp = 2;   // 星期表头高度
+  optional float section_height_dp = 3;      // 每节课格子的高度
+
+  // 课程块外观 (单位: DP / 比例)
+  // 使用 optional 以支持在代码中区分“0值”与“未配置状态”
+  optional float course_block_corner_radius_dp = 4; // 圆角半径
+  optional float course_block_outer_padding_dp = 5; // 块与网格线的间距
+  optional float course_block_inner_padding_dp = 6; // 块内文字填充
+  optional float course_block_alpha_float = 7;      // 不透明度 (0.0 - 1.0)
+
+  // 冲突颜色配置 (ARGB Long)
+  optional int64 conflict_course_color_long = 9;      // 浅色模式冲突色
+  optional int64 conflict_course_color_dark_long = 10; // 深色模式冲突色
+
+  // 课程颜色池：用于循环分配或自定义颜色方案
+  repeated DualColorProto course_color_maps = 11;
+
+  // 界面开关
+  bool hide_section_time = 12;   // 隐藏具体时间段 (如 08:00-08:45)
+  bool hide_date_under_day = 13; // 隐藏日期 (如 06-23)
+  bool show_start_time = 14;     // 课程格内是否显示开始时间
+  bool hide_grid_lines = 20;     // 是否隐藏网格线
+
+  // 字体配置
+  optional float course_block_font_scale = 15; // 文字缩放比例 (默认 1.0)
+
+  bool hide_location = 16;       // 是否隐藏上课地点 (默认 false，即不隐藏)
+  bool hide_teacher = 17;        // 是否隐藏授课老师 (默认 false，即不隐藏)
+  bool remove_location_at = 18;  // 是否移除地点前的 @ 符号 (默认 false，即不移除)
+
+  string background_image_path = 19; // 存储图片在私有目录下的绝对路径
+  optional int32 glass_preset = 21; // 0=清透, 1=液态玻璃, 2=磨砂
+  optional float background_dim_alpha = 22; // 背景遮罩透明度 (0.0 - 1.0)
+  optional int32 course_font_family_preset = 23; // 0=默认, 1=圆润, 2=苹果风, 3=衬线
+  optional float background_scale = 24; // 背景缩放 (默认 1.0)
+  optional float background_offset_x = 25; // 背景水平偏移比例 (-0.5 ~ 0.5)
+  optional float background_offset_y = 26; // 背景垂直偏移比例 (-0.5 ~ 0.5)
+}
