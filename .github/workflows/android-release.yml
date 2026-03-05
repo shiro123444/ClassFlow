@@ -2,18 +2,18 @@ name: Android Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release tag, e.g. v1.0.0.0"
-        required: true
-        default: "v1.0.0.0"
+        description: "Release tag, optional (default: release)"
+        required: false
+        default: ""
       release_name:
-        description: "Release title"
-        required: true
-        default: "ClassFlow v1.0.0.0"
+        description: "Release title, optional (default: ClassFlow Release)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -47,12 +47,15 @@ jobs:
         id: meta
         shell: bash
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            TAG_NAME="${{ github.event.inputs.tag_name }}"
-            RELEASE_NAME="${{ github.event.inputs.release_name }}"
+          INPUT_TAG_NAME="${{ github.event.inputs.tag_name }}"
+          INPUT_RELEASE_NAME="${{ github.event.inputs.release_name }}"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && -n "${INPUT_TAG_NAME}" ]]; then
+            TAG_NAME="${INPUT_TAG_NAME}"
+            RELEASE_NAME="${INPUT_RELEASE_NAME:-ClassFlow ${INPUT_TAG_NAME}}"
           else
-            TAG_NAME="${GITHUB_REF_NAME}"
-            RELEASE_NAME="ClassFlow ${GITHUB_REF_NAME}"
+            TAG_NAME="release"
+            RELEASE_NAME="${INPUT_RELEASE_NAME:-ClassFlow Release}"
           fi
           echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
           echo "release_name=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
@@ -60,11 +63,28 @@ jobs:
       - name: Build prodRelease APK
         run: bash ./gradlew :app:assembleProdRelease --console=plain
 
+      - name: Verify release APK split count
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t apks < <(find app/build/outputs/apk/prod/release -maxdepth 1 -type f -name '*.apk' | sort)
+          echo "Detected APKs:"
+          printf ' - %s\n' "${apks[@]}"
+          if [[ "${#apks[@]}" -ne 3 ]]; then
+            echo "Expected exactly 3 ABI APKs, got ${#apks[@]}" >&2
+            exit 1
+          fi
+
       - name: Create GitHub Release and upload APKs
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag_name }}
           name: ${{ steps.meta.outputs.release_name }}
+          target_commitish: ${{ github.sha }}
+          overwrite_files: true
+          fail_on_unmatched_files: true
           generate_release_notes: true
           files: |
-            app/build/outputs/apk/prod/release/*.apk
+            app/build/outputs/apk/prod/release/app-prod-armeabi-v7a-release.apk
+            app/build/outputs/apk/prod/release/app-prod-arm64-v8a-release.apk
+            app/build/outputs/apk/prod/release/app-prod-x86_64-release.apk

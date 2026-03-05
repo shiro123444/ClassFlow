@@ -17,16 +17,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.filled.VpnKey
-import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -61,7 +59,6 @@ import com.shiro.classflow.Screen
 import com.shiro.classflow.data.db.main.CourseWithWeeks
 import com.shiro.classflow.navigation.AddEditCourseChannel
 import com.shiro.classflow.navigation.PresetCourseData
-import com.shiro.classflow.ui.components.DockSafeBottomPadding
 import com.shiro.classflow.ui.schedule.components.ConflictCourseBottomSheet
 import com.shiro.classflow.ui.schedule.components.ScheduleGrid
 import com.shiro.classflow.ui.schedule.components.ScheduleGridStyleComposed
@@ -245,7 +242,7 @@ fun WeeklyScheduleScreen(
                                             val courses = engine.fetchCourseData(activeTableId)
                                             if (!courses.isNullOrEmpty()) {
                                                 viewModel.importCourses(courses)
-                                                snackbarHostState.showSnackbar("?? 已复用登录态，同步成功！")
+                                                snackbarHostState.showSuccessSnackbar("已复用登录态，同步成功！")
                                                 return@launch
                                             }
                                         }
@@ -276,7 +273,24 @@ fun WeeklyScheduleScreen(
                 SnackbarHost(
                     hostState = snackbarHostState,
                     modifier = Modifier.padding(bottom = DockSafeBottomPadding)
-                )
+                ) { snackbarData ->
+                    val visuals = snackbarData.visuals as? AppSnackbarVisuals
+                    Snackbar {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (visuals?.leadingIcon == AppSnackbarLeadingIcon.Success) {
+                                Icon(
+                                    imageVector = Icons.Filled.CheckCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Text(snackbarData.visuals.message)
+                        }
+                    }
+                }
             }
         ) { innerPadding ->
             HorizontalPager(
@@ -400,7 +414,7 @@ fun WeeklyScheduleScreen(
                                     viewModel.importCourses(courses)
                                     wbuSyncStatus = ""
                                     showWbuAuthDialog = false
-                                    snackbarHostState.showSnackbar("?? 课表导入成功！")
+                                    snackbarHostState.showSuccessSnackbar("课表导入成功！")
                                     return@launch
                                 }
                                 wbuSyncStatus = "已保存的会话无法获取课表，尝试重新登录..."
@@ -431,7 +445,7 @@ fun WeeklyScheduleScreen(
                                     viewModel.importCourses(courses)
                                     wbuSyncStatus = ""
                                     showWbuAuthDialog = false
-                                    snackbarHostState.showSnackbar("?? 课表导入成功！")
+                                    snackbarHostState.showSuccessSnackbar("课表导入成功！")
                                     return@launch
                                 }
                                 wbuSyncStatus = "登录成功但未获取到课表数据"
@@ -467,7 +481,7 @@ fun WeeklyScheduleScreen(
                             viewModel.importCourses(courses)
                             wbuSyncStatus = ""
                             showWbuAuthDialog = false
-                            snackbarHostState.showSnackbar("?? 课表导入成功！")
+                            snackbarHostState.showSuccessSnackbar("课表导入成功！")
                         } else {
                             wbuSyncStatus = "未获取到课表数据"
                         }
@@ -520,6 +534,28 @@ fun WeeklyScheduleScreen(
     }
 }
 
+private enum class AppSnackbarLeadingIcon {
+    None,
+    Success
+}
+
+private data class AppSnackbarVisuals(
+    override val message: String,
+    val leadingIcon: AppSnackbarLeadingIcon = AppSnackbarLeadingIcon.None,
+    override val actionLabel: String? = null,
+    override val withDismissAction: Boolean = false,
+    override val duration: SnackbarDuration = SnackbarDuration.Short
+) : SnackbarVisuals
+
+private suspend fun SnackbarHostState.showSuccessSnackbar(message: String) {
+    showSnackbar(
+        AppSnackbarVisuals(
+            message = message,
+            leadingIcon = AppSnackbarLeadingIcon.Success
+        )
+    )
+}
+
 @Composable
 private fun WbuSyncActionButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val isDark = isSystemInDarkTheme()
@@ -557,5 +593,3 @@ private fun WbuSyncActionButtonPreview() {
         WbuSyncActionButton(onClick = {})
     }
 }
-
-
