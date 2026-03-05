@@ -54,7 +54,7 @@ jobs:
             TAG_NAME="${INPUT_TAG_NAME}"
             RELEASE_NAME="${INPUT_RELEASE_NAME:-ClassFlow ${INPUT_TAG_NAME}}"
           else
-            VERSION_NAME="$(grep -Eo 'versionName\\s*=\\s*\"[^\"]+\"' app/build.gradle.kts | head -n1 | sed -E 's/.*\"([^\"]+)\"/\1/')"
+            VERSION_NAME="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' app/build.gradle.kts | head -n1)"
             if [[ -z "${VERSION_NAME}" ]]; then
               echo "Failed to parse versionName from app/build.gradle.kts" >&2
               exit 1
