@@ -1,22 +1,22 @@
-﻿[
+[
   {
     "name": "官方Github仓库",
     "type": "OFFICIAL",
-    "url": "https://github.com/XingHeYuZhuan/classflow_warehouse.git",
+    "url": "https://github.com/shiro123444/classflow_warehouse.git",
     "branch": "main",
     "editable": false
   },
   {
     "name": "Gitee官方仓库镜像站(CN)",
     "type": "PUBLIC_FORK",
-    "url": "https://gitee.com/XingHeYuZhuan-gh/classflow_warehouse.git",
+    "url": "https://gitee.com/shiro123444-gh/classflow_warehouse.git",
     "branch": "main",
     "editable": false
   },
   {
     "name": "ITDONG镜像库(三网优化)",
     "type": "PUBLIC_FORK",
-    "url": "https://git.itdong.me/XingHeYuZhuan/classflow_warehouse.git",
+    "url": "https://git.itdong.me/shiro123444/classflow_warehouse.git",
     "branch": "main",
     "editable": false
   },

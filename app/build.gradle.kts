@@ -1,4 +1,7 @@
-﻿plugins {
+import org.gradle.api.tasks.compile.JavaCompile
+import java.util.Properties
+
+plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
@@ -8,18 +11,60 @@
     alias(libs.plugins.protobuf)
 }
 
+tasks.withType<JavaCompile>().configureEach {
+    options.encoding = "UTF-8"
+}
+
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) {
+        file.inputStream().use { load(it) }
+    }
+}
+
+fun localOrEnv(key: String): String? {
+    return (localProperties.getProperty(key) ?: System.getenv(key))
+        ?.takeIf { it.isNotBlank() }
+}
+
+val releaseStoreFilePath = localOrEnv("CLASSFLOW_RELEASE_STORE_FILE")
+val releaseStorePassword = localOrEnv("CLASSFLOW_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = localOrEnv("CLASSFLOW_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = localOrEnv("CLASSFLOW_RELEASE_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+    releaseStoreFilePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { !it.isNullOrBlank() }
+
 android {
-    namespace = "com.xingheyuzhuan.classflow"
+    namespace = "com.shiro.classflow"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.xingheyuzhuan.classflow"
+        applicationId = "com.shiro.classflow"
         minSdk = 26
         targetSdk = 36
         versionCode = 15
         versionName = "1.0.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        create("release") {
+            if (hasReleaseSigning) {
+                storeFile = file(releaseStoreFilePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
     }
 
     buildTypes {
@@ -30,9 +75,15 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            // 生产签名优先使用自有密钥；若未配置则回退 debug，避免本地构建中断
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
+
     flavorDimensions += "version"
 
     productFlavors {

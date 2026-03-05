@@ -17,3 +17,24 @@ local.properties
 .idea/compiler.xml
 .idea/deploymentTargetSelector.xml
 .idea/deviceManager.xml
+
+# local tool/runtime caches
+.android-home/
+.gradle-home/
+.kotlin/
+
+# build outputs
+app/build/
+build/
+*.apk
+*.aab
+
+# keep widget section local-only (do not commit newly added widget files)
+app/src/main/java/com/shiro/classflow/widget/
+app/src/main/java/com/shiro/classflow/data/db/widget/
+app/src/main/java/com/shiro/classflow/data/repository/WidgetRepository.kt
+app/src/main/java/com/shiro/classflow/data/sync/WidgetDataSynchronizer.kt
+app/src/main/res/layout/widget_*.xml
+app/src/main/res/xml/classflow_*_widget.xml
+app/src/main/res/drawable/widget_*
+app/src/main/proto/widget_snapshot.proto

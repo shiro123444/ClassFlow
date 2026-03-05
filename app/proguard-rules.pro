@@ -1,4 +1,4 @@
-﻿# Add project specific ProGuard rules here.
+# Add project specific ProGuard rules here.
 # You can control the set of applied configuration files using the
 # proguardFiles setting in build.gradle.
 #
@@ -26,7 +26,7 @@
 }
 
 # 保留小组件渲染和业务逻辑包
--keep class com.xingheyuzhuan.classflow.widget.** { *; }
+-keep class com.shiro.classflow.widget.** { *; }
 
 # -------------------------------------------------------------------------
 # 3. WorkManager 规则 (确保同步任务不失效)
@@ -110,8 +110,8 @@
 # -------------------------------------------------------------------------
 
 # 严禁混淆 JavaScript 接口方法名
--keep class com.xingheyuzhuan.classflow.ui.schoolselection.web.AndroidBridge { *; }
--keepclassmembers class com.xingheyuzhuan.classflow.ui.schoolselection.web.AndroidBridge {
+-keep class com.shiro.classflow.ui.schoolselection.web.AndroidBridge { *; }
+-keepclassmembers class com.shiro.classflow.ui.schoolselection.web.AndroidBridge {
     @android.webkit.JavascriptInterface <methods>;
 }
 
@@ -121,8 +121,8 @@
 
 # 彻底删除了 Gson 规则。
 # 保留 Room 实体类和 Data Model，防止数据库字段解析失败
--keep class com.xingheyuzhuan.classflow.data.db.** { *; }
--keep class com.xingheyuzhuan.classflow.data.model.** { *; }
+-keep class com.shiro.classflow.data.db.** { *; }
+-keep class com.shiro.classflow.data.model.** { *; }
 
 # -------------------------------------------------------------------------
 # 10. 极简优化：Release 版本自动删除所有 Log.d (调试日志)
