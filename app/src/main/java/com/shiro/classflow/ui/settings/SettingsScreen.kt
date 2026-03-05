@@ -136,7 +136,14 @@ fun SettingsScreen(
                             .onGloballyPositioned {
                                 OnboardingTargets.semesterStartDateBoundsInWindow = it.boundsInWindow()
                             },
-                        onClick = { showDatePickerModal = true }
+                        onClick = {
+                            // Finish onboarding before opening DatePicker, otherwise the
+                            // showcase overlay can block dialog interactions on this step.
+                            if (forceShowSemesterStartDateCard) {
+                                onSemesterStartDateSet?.invoke()
+                            }
+                            showDatePickerModal = true
+                        }
                     )
                     SettingDivider()
                     SettingTile(
