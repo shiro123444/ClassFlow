@@ -1,11 +1,11 @@
 ﻿syntax = "proto3";
 
-package com.xingheyuzhuan.classflow.widget;
+package com.shiro.classflow.widget;
 
 // 1. 确保导入路径正确（如果两个文件在同一目录下，直接写文件名）
 import "schedule_style.proto";
 
-option java_package = "com.xingheyuzhuan.classflow.widget";
+option java_package = "com.shiro.classflow.widget";
 option java_multiple_files = true;
 
 message WidgetCourseProto {
@@ -24,5 +24,5 @@ message WidgetSnapshot {
   repeated WidgetCourseProto courses = 1;
   int32 current_week = 2;
 
-  .com.xingheyuzhuan.classflow.data.model.ScheduleGridStyleProto style = 3;
+  .com.shiro.classflow.data.model.ScheduleGridStyleProto style = 3;
 }
