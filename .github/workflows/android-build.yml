@@ -26,8 +26,11 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Ensure gradlew is executable
+        run: chmod +x gradlew
+
       - name: Build prodRelease APK
-        run: ./gradlew :app:assembleProdRelease --console=plain
+        run: bash ./gradlew :app:assembleProdRelease --console=plain
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
