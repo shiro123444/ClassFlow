@@ -11,7 +11,7 @@ on:
         required: false
         default: ""
       release_name:
-        description: "Release title, optional (default: ClassFlow Release)"
+        description: "Release title, optional (auto generated when empty)"
         required: false
         default: ""
 
@@ -54,8 +54,13 @@ jobs:
             TAG_NAME="${INPUT_TAG_NAME}"
             RELEASE_NAME="${INPUT_RELEASE_NAME:-ClassFlow ${INPUT_TAG_NAME}}"
           else
+            VERSION_NAME="$(grep -Eo 'versionName\\s*=\\s*\"[^\"]+\"' app/build.gradle.kts | head -n1 | sed -E 's/.*\"([^\"]+)\"/\1/')"
+            if [[ -z "${VERSION_NAME}" ]]; then
+              echo "Failed to parse versionName from app/build.gradle.kts" >&2
+              exit 1
+            fi
             TAG_NAME="release"
-            RELEASE_NAME="${INPUT_RELEASE_NAME:-ClassFlow Release}"
+            RELEASE_NAME="${INPUT_RELEASE_NAME:-ClassFlow v${VERSION_NAME}}"
           fi
           echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
           echo "release_name=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
