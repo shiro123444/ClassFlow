@@ -215,9 +215,7 @@ fun AppNavigation() {
             showIntroShowCase = showOnboarding,
             state = introShowcaseState,
             dismissOnClickOutside = false,
-            // Completion is controlled by explicit step actions to avoid race conditions
-            // while transitioning from the sync step to Settings.
-            onShowCaseCompleted = {}
+            onShowCaseCompleted = { completeOnboarding() }
         ) {
             // ── Step 0: Welcome  +  Step 1: Swipe ── both target weekTitle
             val weekTitleTargetModifier =
