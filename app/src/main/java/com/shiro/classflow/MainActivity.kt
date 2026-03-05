@@ -215,7 +215,13 @@ fun AppNavigation() {
             showIntroShowCase = showOnboarding,
             state = introShowcaseState,
             dismissOnClickOutside = false,
-            onShowCaseCompleted = { completeOnboarding() }
+            onShowCaseCompleted = {
+                // Canopas callback fires both on true finish and on temporary missing-target transitions.
+                // Only complete when the index has actually moved beyond the last onboarding step.
+                if (showOnboarding && introShowcaseState.currentTargetIndex > LAST_ONBOARDING_TARGET_INDEX) {
+                    completeOnboarding()
+                }
+            }
         ) {
             // ── Step 0: Welcome  +  Step 1: Swipe ── both target weekTitle
             val weekTitleTargetModifier =
@@ -697,5 +703,4 @@ private fun TapGestureAnimation() {
             .offset(y = offsetY.dp)
     )
 }
-
 
