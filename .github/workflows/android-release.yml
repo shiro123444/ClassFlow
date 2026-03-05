@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release tag, optional (default: release)"
+        description: "Release tag, optional (default: v<versionName>)"
         required: false
         default: ""
       release_name:
@@ -59,7 +59,7 @@ jobs:
               echo "Failed to parse versionName from app/build.gradle.kts" >&2
               exit 1
             fi
-            TAG_NAME="release"
+            TAG_NAME="v${VERSION_NAME}"
             RELEASE_NAME="${INPUT_RELEASE_NAME:-ClassFlow v${VERSION_NAME}}"
           fi
           echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
