@@ -59,7 +59,7 @@ jobs:
               echo "Failed to parse versionName from app/build.gradle.kts" >&2
               exit 1
             fi
-            TAG_NAME="v${VERSION_NAME}"
+            TAG_NAME="v${VERSION_NAME}+build.${GITHUB_RUN_NUMBER}"
             RELEASE_NAME="${INPUT_RELEASE_NAME:-ClassFlow v${VERSION_NAME}}"
           fi
           echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
