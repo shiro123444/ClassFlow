@@ -51,6 +51,36 @@ enum class VpnFullLoginStatus {
     CAS_FAILED
 }
 
+/**
+ * 统一身份认证滑块验证码数据。
+ * 图片为服务端返回的 base64 编码。
+ */
+data class SliderCaptchaData(
+    val smallImageBase64: String,
+    val bigImageBase64: String,
+    val tagWidth: Int,
+    val canvasLength: Int = 280
+)
+
+/**
+ * 用户针对滑块验证码的操作结果。
+ */
+sealed class SliderCaptchaResult {
+    /** 用户拖拽完成，moveLength 为服务端坐标系下的移动距离 (0..canvasLength) */
+    data class Move(val moveLength: Int) : SliderCaptchaResult()
+
+    /** 用户要求换一张验证码 */
+    object Refresh : SliderCaptchaResult()
+
+    /** 用户取消登录 */
+    object Cancel : SliderCaptchaResult()
+}
+
+/**
+ * 滑块验证码回调。接收验证码数据，返回用户的操作结果（挂起等待 UI 交互）。
+ */
+typealias SliderCaptchaProvider = suspend (SliderCaptchaData) -> SliderCaptchaResult
+
 class WbuSyncEngine(
     private val context: Context,
     private val useVpn: Boolean = false,
@@ -125,13 +155,19 @@ class WbuSyncEngine(
 
     /**
      * 第一步：模拟登录获取 Session 和内部校验信息
+     *
+     * @param captchaProvider 当教务统一认证需要滑块验证码时调用，返回用户操作结果；为 null 时遇验证码直接失败
      */
-    suspend fun login(studentId: String, password: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun login(
+        studentId: String,
+        password: String,
+        captchaProvider: SliderCaptchaProvider? = null
+    ): Boolean = withContext(Dispatchers.IO) {
         try {
             val success = if (useVpn) {
-                loginViaVpnCas(studentId, password)
+                loginViaVpnCas(studentId, password, captchaProvider)
             } else {
-                loginDirect(studentId, password)
+                loginDirect(studentId, password, captchaProvider)
             }
             if (success) {
                 prefs.edit()
@@ -333,11 +369,13 @@ class WbuSyncEngine(
     /**
      * 完整 WebVPN 登录流程：密码加密 → SMS 验证 → CAS 登录 → JWXT
      * @param smsCodeProvider 挂起函数，UI 层弹出对话框让用户输入验证码，返回 null 表示取消
+     * @param captchaProvider 当教务统一认证需要滑块验证码时调用，返回用户操作结果；为 null 时遇验证码直接失败
      */
     suspend fun loginVpnFull(
         studentId: String,
         password: String,
         smsCodeProvider: suspend (maskedPhone: String) -> String?,
+        captchaProvider: SliderCaptchaProvider? = null,
         statusCallback: ((VpnFullLoginStatus) -> Unit)? = null
     ): Boolean {
         val step = loginVpnPassword(studentId, password)
@@ -373,7 +411,7 @@ class WbuSyncEngine(
 
         // WebVPN 已认证，接下来走 CAS 登录到教务系统
         val casOk = withContext(Dispatchers.IO) {
-            loginViaVpnCas(studentId, password)
+            loginViaVpnCas(studentId, password, captchaProvider)
         }
         statusCallback?.invoke(if (casOk) VpnFullLoginStatus.CAS_COMPLETED else VpnFullLoginStatus.CAS_FAILED)
         return casOk
@@ -630,7 +668,11 @@ class WbuSyncEngine(
             .trim()
     }
 
-    private fun loginDirect(studentId: String, password: String): Boolean {
+    private suspend fun loginDirect(
+        studentId: String,
+        password: String,
+        captchaProvider: SliderCaptchaProvider? = null
+    ): Boolean {
         // Keep direct campus flow deterministic:
         // jwxt /admin/caslogin -> ids /authserver/login?service=... -> jwxt /admin/?loginType=1
         val directCasEntryUrl = "$baseUrl/admin/caslogin"
@@ -656,7 +698,8 @@ class WbuSyncEngine(
             studentId = studentId,
             password = password,
             idsLoginUrl = discoveredCasUrl,
-            flowTag = "DIRECT-CAS"
+            flowTag = "DIRECT-CAS",
+            captchaProvider = captchaProvider
         )
         if (directCasOk) return true
 
@@ -713,69 +756,110 @@ class WbuSyncEngine(
         }
     }
 
-    private fun loginViaCas(
+    private data class CasLoginPage(
+        val hiddenFields: Map<String, String>,
+        val pwdEncryptSalt: String,
+        val needCaptcha: Boolean
+    )
+
+    private suspend fun fetchCasLoginPage(idsLoginUrl: String, flowTag: String): CasLoginPage? {
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                client.newCall(
+                    Request.Builder().url(idsLoginUrl).get().build()
+                ).execute().use { pageResp ->
+                    val loginHtml = pageResp.body?.string().orEmpty()
+                    if (loginHtml.isBlank()) {
+                        Log.w("WbuSyncEngine", "$flowTag CAS login page is blank. idsLoginUrl=$idsLoginUrl")
+                        return@use null
+                    }
+
+                    val doc = Jsoup.parse(loginHtml)
+                    val pwdForm = doc.selectFirst("form#pwdFromId") ?: run {
+                        val candidates = doc.select("form").filter { form ->
+                            val hasUsername = form.select("input[name=username]").isNotEmpty()
+                            val hasPassword = form.select("input[name=password], input#password").isNotEmpty()
+                            val looksPwdForm = form.id().contains("pwd", ignoreCase = true) ||
+                                form.attr("class").contains("pwd", ignoreCase = true)
+                            hasUsername && (hasPassword || looksPwdForm)
+                        }
+
+                        if (candidates.size == 1) {
+                            Log.w(
+                                "WbuSyncEngine",
+                                "$flowTag CAS missing #pwdFromId; using strict fallback form id='${candidates[0].id()}'"
+                            )
+                            candidates[0]
+                        } else {
+                            val formSummary = doc.select("form").joinToString(" | ") { form ->
+                                val id = form.id().ifBlank { "<no-id>" }
+                                val hasUser = form.select("input[name=username]").isNotEmpty()
+                                val hasPwd = form.select("input[name=password], input#password").isNotEmpty()
+                                "id=$id user=$hasUser pwd=$hasPwd"
+                            }
+                            Log.w("WbuSyncEngine", "$flowTag CAS form is ambiguous. forms=[$formSummary]")
+                            Log.d("WbuSyncEngine", "$flowTag CAS snippet=${loginHtml.take(800)}")
+                            return@use null
+                        }
+                    }
+
+                    val hiddenFields = mutableMapOf<String, String>()
+                    pwdForm.select("input[type=hidden][name]").forEach { input ->
+                        val key = input.attr("name")
+                        if (key.isNotBlank()) {
+                            hiddenFields[key] = input.attr("value")
+                        }
+                    }
+
+                    val pwdEncryptSalt = pwdForm.selectFirst("#pwdEncryptSalt")?.attr("value").orEmpty()
+                    val needCaptcha = Regex("""needCaptcha\s*=\s*['\"]?true['\"]?""", RegexOption.IGNORE_CASE)
+                        .containsMatchIn(loginHtml)
+
+                    CasLoginPage(
+                        hiddenFields = hiddenFields,
+                        pwdEncryptSalt = pwdEncryptSalt,
+                        needCaptcha = needCaptcha
+                    )
+                }
+            }.getOrNull()
+        }
+    }
+
+    private suspend fun loginViaCas(
         studentId: String,
         password: String,
         idsLoginUrl: String,
-        flowTag: String
+        flowTag: String,
+        captchaProvider: SliderCaptchaProvider? = null
     ): Boolean {
-        val hiddenFields = mutableMapOf<String, String>()
-        var pwdEncryptSalt = ""
+        val origin = idsLoginUrl.toHttpUrlOrNull()?.let { "${it.scheme}://${it.host}:${it.port}" }
 
-        client.newCall(
-            Request.Builder().url(idsLoginUrl).get().build()
-        ).execute().use { pageResp ->
-            val loginHtml = pageResp.body?.string().orEmpty()
-            if (loginHtml.isBlank()) {
-                Log.w("WbuSyncEngine", "$flowTag CAS login page is blank. idsLoginUrl=$idsLoginUrl")
-                return false
-            }
+        // 首次获取登录页面（解析表单隐藏域、盐值，并检测是否需要验证码）
+        var page = fetchCasLoginPage(idsLoginUrl, flowTag) ?: return false
 
-            val doc = Jsoup.parse(loginHtml)
-            val pwdForm = doc.selectFirst("form#pwdFromId") ?: run {
-                val candidates = doc.select("form").filter { form ->
-                    val hasUsername = form.select("input[name=username]").isNotEmpty()
-                    val hasPassword = form.select("input[name=password], input#password").isNotEmpty()
-                    val looksPwdForm = form.id().contains("pwd", ignoreCase = true) ||
-                        form.attr("class").contains("pwd", ignoreCase = true)
-                    hasUsername && (hasPassword || looksPwdForm)
-                }
-
-                if (candidates.size == 1) {
-                    Log.w(
-                        "WbuSyncEngine",
-                        "$flowTag CAS missing #pwdFromId; using strict fallback form id='${candidates[0].id()}'"
-                    )
-                    candidates[0]
-                } else {
-                    val formSummary = doc.select("form").joinToString(" | ") { form ->
-                        val id = form.id().ifBlank { "<no-id>" }
-                        val hasUser = form.select("input[name=username]").isNotEmpty()
-                        val hasPwd = form.select("input[name=password], input#password").isNotEmpty()
-                        "id=$id user=$hasUser pwd=$hasPwd"
-                    }
-                    Log.w("WbuSyncEngine", "$flowTag CAS form is ambiguous. forms=[$formSummary]")
-                    Log.d("WbuSyncEngine", "$flowTag CAS snippet=${loginHtml.take(800)}")
-                    return false
-                }
-            }
-
-            pwdForm.select("input[type=hidden][name]").forEach { input ->
-                val key = input.attr("name")
-                if (key.isNotBlank()) {
-                    hiddenFields[key] = input.attr("value")
-                }
-            }
-
-            pwdEncryptSalt = pwdForm.selectFirst("#pwdEncryptSalt")?.attr("value").orEmpty()
-            val scriptNeedCaptcha = Regex("""needCaptcha\s*=\s*['\"]?true['\"]?""", RegexOption.IGNORE_CASE)
-                .containsMatchIn(loginHtml)
-            if (scriptNeedCaptcha) {
-                Log.w("WbuSyncEngine", "$flowTag CAS requires captcha; skip auto submit")
-                return false
-            }
+        // HTML 检测可能失效，再通过服务端接口二次确认是否需要验证码
+        var captchaNeeded = page.needCaptcha
+        if (!captchaNeeded && !origin.isNullOrBlank() && captchaProvider != null) {
+            captchaNeeded = checkNeedCaptcha(studentId, origin)
         }
 
+        if (captchaNeeded) {
+            if (captchaProvider == null || origin.isNullOrBlank()) {
+                Log.w("WbuSyncEngine", "$flowTag CAS requires captcha but no provider available; skip auto submit")
+                return false
+            }
+            val solved = solveSliderCaptcha(origin, flowTag, captchaProvider)
+            if (!solved) {
+                Log.w("WbuSyncEngine", "$flowTag CAS captcha not solved")
+                return false
+            }
+            Log.i("WbuSyncEngine", "$flowTag CAS captcha verified, refresh login page for fresh form fields")
+            // 验证码通过后重新拉取登录页，刷新 execution / 盐值
+            page = fetchCasLoginPage(idsLoginUrl, flowTag) ?: return false
+        }
+
+        val hiddenFields = page.hiddenFields
+        val pwdEncryptSalt = page.pwdEncryptSalt
         val encryptedCasPassword = encryptCasPassword(password, pwdEncryptSalt)
         val formBuilder = FormBody.Builder()
         hiddenFields
@@ -787,7 +871,6 @@ class WbuSyncEngine(
         if (!hiddenFields.containsKey("cllt")) formBuilder.add("cllt", "userNameLogin")
         if (!hiddenFields.containsKey("dllt")) formBuilder.add("dllt", "generalLogin")
 
-        val origin = idsLoginUrl.toHttpUrlOrNull()?.let { "${it.scheme}://${it.host}:${it.port}" }
         val loginPostReq = Request.Builder()
             .url(idsLoginUrl)
             .post(formBuilder.build())
@@ -837,7 +920,11 @@ class WbuSyncEngine(
         return canAccessTermApi()
     }
 
-    private fun loginViaVpnCas(studentId: String, password: String): Boolean {
+    private suspend fun loginViaVpnCas(
+        studentId: String,
+        password: String,
+        captchaProvider: SliderCaptchaProvider? = null
+    ): Boolean {
         // Follow the same order as manual login:
         // 1) Open JWXT login page behind VPN
         // 2) Click unified-auth link (CAS)
@@ -866,12 +953,126 @@ class WbuSyncEngine(
             studentId = studentId,
             password = password,
             idsLoginUrl = idsLoginUrl,
-            flowTag = "VPN-CAS"
+            flowTag = "VPN-CAS",
+            captchaProvider = captchaProvider
         )
         if (!ready) {
             Log.w("WbuSyncEngine", "VPN CAS flow completed but JWXT term API is still unavailable. baseUrl=$baseUrl")
         }
         return ready
+    }
+
+    /**
+     * 查询指定学号是否需要滑块验证码。
+     */
+    private suspend fun checkNeedCaptcha(username: String, origin: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val url = "$origin/authserver/checkNeedCaptcha.htl?username=${URLEncoder.encode(username, "UTF-8")}&_=${System.currentTimeMillis()}"
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("X-Requested-With", "XMLHttpRequest")
+                .addHeader("Referer", "$origin/authserver/login")
+                .addHeader("Accept", "application/json, text/javascript, */*; q=0.01")
+                .get()
+                .build()
+            val body = client.newCall(req).execute().use { it.body?.string().orEmpty() }
+            runCatching { JSONObject(body).optBoolean("isNeed", false) }.getOrDefault(false)
+        } catch (e: Exception) {
+            Log.w("WbuSyncEngine", "checkNeedCaptcha failed", e)
+            false
+        }
+    }
+
+    /**
+     * 获取滑块验证码图片数据。
+     */
+    private suspend fun fetchSliderCaptcha(origin: String): SliderCaptchaData? = withContext(Dispatchers.IO) {
+        try {
+            val url = "$origin/authserver/common/openSliderCaptcha.htl?_=${System.currentTimeMillis()}"
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("X-Requested-With", "XMLHttpRequest")
+                .addHeader("Referer", "$origin/authserver/login")
+                .addHeader("Accept", "application/json, text/javascript, */*; q=0.01")
+                .get()
+                .build()
+            val body = client.newCall(req).execute().use { it.body?.string().orEmpty() }
+            val json = JSONObject(body)
+            SliderCaptchaData(
+                smallImageBase64 = json.optString("smallImage"),
+                bigImageBase64 = json.optString("bigImage"),
+                tagWidth = json.optInt("tagWidth", 50)
+            )
+        } catch (e: Exception) {
+            Log.w("WbuSyncEngine", "fetchSliderCaptcha failed", e)
+            null
+        }
+    }
+
+    /**
+     * 提交滑块位置，返回是否验证通过。
+     */
+    private suspend fun verifySliderCaptcha(origin: String, moveLength: Int): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val url = "$origin/authserver/common/verifySliderCaptcha.htl"
+            val form = FormBody.Builder()
+                .add("canvasLength", "280")
+                .add("moveLength", moveLength.toString())
+                .build()
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("X-Requested-With", "XMLHttpRequest")
+                .addHeader("Referer", "$origin/authserver/login")
+                .addHeader("Accept", "application/json, text/javascript, */*; q=0.01")
+                .post(form)
+                .build()
+            val body = client.newCall(req).execute().use { it.body?.string().orEmpty() }
+            runCatching { JSONObject(body).optInt("errorCode") == 1 }.getOrDefault(false)
+        } catch (e: Exception) {
+            Log.w("WbuSyncEngine", "verifySliderCaptcha failed", e)
+            false
+        }
+    }
+
+    /**
+     * 滑块验证码完整流程：获取图片 → 用户操作 → 校验。
+     * 支持"换一张"（Refresh）与取消（Cancel），校验失败会自动重试拉取新图。
+     */
+    private suspend fun solveSliderCaptcha(
+        origin: String,
+        flowTag: String,
+        captchaProvider: SliderCaptchaProvider
+    ): Boolean {
+        var attempts = 0
+        while (attempts < MAX_CAPTCHA_ATTEMPTS) {
+            attempts++
+            val captcha = fetchSliderCaptcha(origin)
+            if (captcha == null) {
+                Log.w("WbuSyncEngine", "$flowTag fetch slider captcha failed (attempt $attempts)")
+                continue
+            }
+
+            when (val result = captchaProvider(captcha)) {
+                is SliderCaptchaResult.Cancel -> {
+                    Log.w("WbuSyncEngine", "$flowTag captcha cancelled by user")
+                    return false
+                }
+                is SliderCaptchaResult.Refresh -> {
+                    Log.i("WbuSyncEngine", "$flowTag captcha refresh requested")
+                    continue
+                }
+                is SliderCaptchaResult.Move -> {
+                    val ok = verifySliderCaptcha(origin, result.moveLength)
+                    if (ok) {
+                        Log.i("WbuSyncEngine", "$flowTag captcha verified on attempt $attempts")
+                        return true
+                    }
+                    Log.w("WbuSyncEngine", "$flowTag captcha verify failed (attempt $attempts)")
+                }
+            }
+        }
+        Log.w("WbuSyncEngine", "$flowTag captcha attempts exhausted")
+        return false
     }
 
     private fun encryptCasPassword(password: String, salt: String): String {
@@ -1045,6 +1246,7 @@ class WbuSyncEngine(
         private const val KEY_LAST_USE_VPN_SET = "last_use_vpn_set"
         private const val KEY_LAST_STUDENT_ID = "last_student_id"
         private const val KEY_USE_WEBVIEW_VPN_MANUAL_MODE = "use_webview_vpn_manual_mode"
+        private const val MAX_CAPTCHA_ATTEMPTS = 5
 
         fun hasPersistedSession(context: Context): Boolean {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

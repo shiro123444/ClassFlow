@@ -46,7 +46,10 @@ import com.xingheyuzhuan.shiguangschedule.ui.components.WbuAuthBottomSheet
 import com.xingheyuzhuan.shiguangschedule.ui.components.VpnSmsCodeDialog
 import com.xingheyuzhuan.shiguangschedule.ui.components.DockSafeBottomPadding
 import com.xingheyuzhuan.shiguangschedule.ui.components.CourseTablePickerDialog
+import com.xingheyuzhuan.shiguangschedule.ui.components.SliderCaptchaDialog
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.VpnFullLoginStatus
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaData
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaResult
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.model.schedule_style.ScheduleModeProto
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTable
@@ -162,6 +165,10 @@ fun WeeklyScheduleScreen(
     var smsError by remember { mutableStateOf<String?>(null) }
     // 保持 vpnEngine 引用以便 resend
     var activeVpnEngine by remember { mutableStateOf<WbuSyncEngine?>(null) }
+
+    // 滑块验证码对话框状态（统一认证滑块）
+    var captchaDialogData by remember { mutableStateOf<SliderCaptchaData?>(null) }
+    var captchaDeferred by remember { mutableStateOf<CompletableDeferred<SliderCaptchaResult?>?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -316,7 +323,28 @@ fun WeeklyScheduleScreen(
                                 wbuSyncStatus = ""
                                 showWbuAuthDialog = true
                             }
-                        })
+                        },
+                            // 长按：忽略已保存登录态，清除会话并强制走重新登录
+                            onLongClick = {
+                                if (isWbuSyncing) return@WbuSyncActionButton
+                                coroutineScope.launch {
+                                    val activeTableId = viewModel.uiState.value.tableId
+                                    if (activeTableId == null) {
+                                        snackbarHostState.showSnackbar("当前没有可同步的课表")
+                                        return@launch
+                                    }
+
+                                    val savedUseVpn = WbuSyncEngine.getSavedUseVpn(appContext) ?: false
+                                    WbuSyncEngine(context = appContext, useVpn = savedUseVpn)
+                                        .clearPersistedSession()
+                                    snackbarHostState.showSnackbar("已忽略已保存登录态，请重新登录")
+
+                                    wbuInitialUseVpn = savedUseVpn
+                                    wbuInitialStudentId = WbuSyncEngine.getSavedStudentId(appContext)
+                                    wbuSyncStatus = ""
+                                    showWbuAuthDialog = true
+                                }
+                            })
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         // Keep top bar color consistent with schedule background in all states.
@@ -659,6 +687,15 @@ fun WeeklyScheduleScreen(
                                     }
                                     deferred.await()
                                 },
+                                captchaProvider = { captcha ->
+                                    // 切到主线程显示滑块验证码对话框，挂起等待用户拖拽结果
+                                    val deferred = CompletableDeferred<SliderCaptchaResult?>()
+                                    withContext(Dispatchers.Main) {
+                                        captchaDeferred = deferred
+                                        captchaDialogData = captcha
+                                    }
+                                    deferred.await() ?: SliderCaptchaResult.Cancel
+                                },
                                 statusCallback = onVpnStatus
                             )
 
@@ -688,7 +725,17 @@ fun WeeklyScheduleScreen(
                         // 非 VPN（校园网直连）
                         wbuSyncStatus = "正在连接校园网..."
                         val engine = WbuSyncEngine(context = appContext, useVpn = false)
-                        val loginSuccess = engine.login(studentId, password)
+                        val loginSuccess = engine.login(
+                            studentId, password,
+                            captchaProvider = { captcha ->
+                                val deferred = CompletableDeferred<SliderCaptchaResult?>()
+                                withContext(Dispatchers.Main) {
+                                    captchaDeferred = deferred
+                                    captchaDialogData = captcha
+                                }
+                                deferred.await() ?: SliderCaptchaResult.Cancel
+                            }
+                        )
                         if (!loginSuccess) {
                             wbuSyncStatus = "校园网直连失败，请确认已连接校内网络"
                             return@launch
@@ -748,6 +795,23 @@ fun WeeklyScheduleScreen(
                 smsDeferred = null
                 smsVerifying = false
                 smsError = null
+            }
+        )
+    }
+
+    // 统一认证滑块验证码对话框
+    captchaDialogData?.let { captchaData ->
+        SliderCaptchaDialog(
+            captcha = captchaData,
+            onSubmit = { result ->
+                captchaDeferred?.complete(result)
+                captchaDialogData = null
+                captchaDeferred = null
+            },
+            onDismiss = {
+                captchaDeferred?.complete(SliderCaptchaResult.Cancel)
+                captchaDialogData = null
+                captchaDeferred = null
             }
         )
     }
