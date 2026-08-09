@@ -61,6 +61,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -147,7 +148,9 @@ fun ScheduleGridContent(
             AsyncImage(
                 model = style.backgroundImagePath,
                 contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .blur(style.backgroundBlurRadius),
                 contentScale = ContentScale.Crop,
                 alignment = Alignment.TopCenter
             )
@@ -193,7 +196,10 @@ fun StyleSliderItem(
     var showDialog by remember { mutableStateOf(false) }
     val isIntegerStep = stepValue >= 1f
 
-    fun formatValue(v: Float): String = if (isIntegerStep) "${v.toInt()}" else "%.1f".format(v)
+    fun formatValue(v: Float): String {
+        if (isIntegerStep) return "${v.toInt()}"
+        return if (stepValue < 0.1f) "%.2f".format(v) else "%.1f".format(v)
+    }
 
     val steps = remember(range, stepValue) {
         if (stepValue > 0f) {

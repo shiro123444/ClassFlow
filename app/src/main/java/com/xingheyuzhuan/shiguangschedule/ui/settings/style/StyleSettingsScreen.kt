@@ -26,6 +26,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
@@ -214,7 +215,9 @@ private fun SettingsListContent(
                 onLongClick = { viewModel.removeWallpaper(context) },
                 onAdjust = if (currentStyle.backgroundImagePath.isNotEmpty()) onNavigateToAdjust else null
             )
-            StyleSliderItem(stringResource(R.string.label_background_dim), currentStyle.backgroundDimAlpha, 0f..0.7f) { viewModel.updateBackgroundDimAlpha(it) }
+            if (currentStyle.backgroundImagePath.isNotEmpty()) {
+                StyleSliderItem(stringResource(R.string.label_background_dim), currentStyle.backgroundDimAlpha, 0f..0.7f, 0.01f) { viewModel.updateBackgroundDimAlpha(it) }
+            }
             StyleSwitchItem(stringResource(R.string.label_hide_section_time), currentStyle.hideSectionTime) { viewModel.updateHideSectionTime(it) }
             StyleSwitchItem(stringResource(R.string.label_hide_date_under_day), currentStyle.hideDateUnderDay) { viewModel.updateHideDateUnderDay(it) }
             StyleSwitchItem(stringResource(R.string.label_hide_grid_lines), currentStyle.hideGridLines) { viewModel.updateHideGridLines(it) }
@@ -270,7 +273,7 @@ private fun SettingsListContent(
             BorderTypeSelector(currentStyle.borderType) { viewModel.updateBorderType(it) }
 
             // 文字与几何微调（跟随上游：与课程块外观同组）
-            StyleSliderItem(stringResource(R.string.label_font_scale), currentStyle.fontScale, 0.5f..2.0f) { viewModel.updateCourseBlockFontScale(it) }
+            StyleSliderItem(stringResource(R.string.label_font_scale), currentStyle.fontScale, 0.5f..2.0f, 0.1f) { viewModel.updateCourseBlockFontScale(it) }
             StyleSliderItem(stringResource(R.string.label_corner_radius), currentStyle.courseBlockCornerRadius.value, 0f..24f) { viewModel.updateCornerRadius(it) }
             StyleSliderItem(stringResource(R.string.label_inner_padding), currentStyle.courseBlockInnerPadding.value, 0f..12f) { viewModel.updateInnerPadding(it) }
             StyleSliderItem(stringResource(R.string.label_outer_padding), currentStyle.courseBlockOuterPadding.value, 0f..8f) { viewModel.updateOuterPadding(it) }
@@ -438,14 +441,10 @@ internal fun ScheduleGridContent(
                         scaleY = style.backgroundScale
                         translationX = widthPx * style.backgroundOffsetX
                         translationY = heightPx * style.backgroundOffsetY
-                    },
+                    }
+                    .blur(style.backgroundBlurRadius),
                 contentScale = ContentScale.Crop,
                 alignment = Alignment.TopCenter
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = style.backgroundDimAlpha))
             )
         }
         ScheduleGrid(

@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import android.util.Log
@@ -227,13 +228,9 @@ fun WeeklyScheduleScreen(
                         scaleY = composedStyle.backgroundScale
                         translationX = widthPx * composedStyle.backgroundOffsetX
                         translationY = heightPx * composedStyle.backgroundOffsetY
-                    },
+                    }
+                    .blur(composedStyle.backgroundBlurRadius),
                 contentScale = ContentScale.Crop
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = composedStyle.backgroundDimAlpha))
             )
         }
 
