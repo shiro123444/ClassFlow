@@ -53,6 +53,9 @@ import androidx.compose.ui.unit.dp
 import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.Destination
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.hazeEffect
 import kotlin.math.abs
 
 /** Extra bottom content-padding for top-level screens overlaid by the floating dock. */
@@ -74,6 +77,7 @@ fun BottomNavigationBar(
     navBridge: NavBridge,
     currentDestination: Destination?,
     isTransparent: Boolean = false,
+    hazeState: HazeState? = null,
     onTabClickIntercept: ((Destination) -> Boolean)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -154,6 +158,13 @@ fun BottomNavigationBar(
     Box(
         modifier = modifier
             .fillMaxWidth()
+            // Swallow taps on the nav bar's padding/gap regions so they don't
+            // pass through to the screen content underneath. Child tab
+            // clickables still take priority for taps on the icons.
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() }
+            ) { }
             .navigationBarsPadding()
             .padding(horizontal = 14.dp)
             .padding(bottom = 4.dp)
@@ -169,7 +180,22 @@ fun BottomNavigationBar(
                     ambientColor = shadowColor,
                     spotColor = shadowColor
                 )
-                .background(glassTint, glassShape)
+                .then(
+                    if (hazeState != null) {
+                        Modifier.hazeEffect(
+                            state = hazeState,
+                            style = HazeStyle(
+                                backgroundColor = glassTint.copy(
+                                    alpha = if (isDark) 0.28f else 0.42f
+                                ),
+                                tint = null,
+                                blurRadius = 20.dp
+                            )
+                        )
+                    } else {
+                        Modifier.background(glassTint, glassShape)
+                    }
+                )
                 .border(
                     width = 0.75.dp,
                     brush = Brush.verticalGradient(listOf(borderTop, borderBottom)),

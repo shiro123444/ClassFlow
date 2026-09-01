@@ -88,6 +88,8 @@ import com.canopas.lib.showcase.IntroShowcaseScope
 import com.canopas.lib.showcase.component.IntroShowcaseState
 import com.canopas.lib.showcase.component.ShowcaseStyle
 import com.canopas.lib.showcase.component.rememberIntroShowcaseState
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 import com.xingheyuzhuan.shiguangschedule.data.model.AppSettingsModel
 import com.xingheyuzhuan.shiguangschedule.data.model.AppThemeMode
 import com.xingheyuzhuan.shiguangschedule.data.model.StartScreen
@@ -312,6 +314,9 @@ fun AppNavigation(
     // navigation3 转场动画（主页面间无过渡，其余页面滑动+渐变）
     val animSpec = tween<IntOffset>(300)
 
+    // Backdrop blur source for the floating dock (glass nav bar samples content behind it).
+    val dockHazeState = remember { HazeState() }
+
     Box(modifier = Modifier.fillMaxSize()) {
         IntroShowcase(
             showIntroShowCase = showOnboarding,
@@ -441,7 +446,8 @@ fun AppNavigation(
                 onBack = navBridge::popBackStack,
                 modifier = Modifier
                     .fillMaxSize()
-                    .nestedScroll(dockNestedScrollConnection),
+                    .nestedScroll(dockNestedScrollConnection)
+                    .hazeSource(dockHazeState),
                 transitionSpec = {
                     val fromMain = initialState.metadata[ShiguangNavMetadata.IsMainScreenKey] ?: false
                     val toMain = targetState.metadata[ShiguangNavMetadata.IsMainScreenKey] ?: false
@@ -600,6 +606,7 @@ fun AppNavigation(
                         navBridge = navBridge,
                         currentDestination = currentDestination,
                         isTransparent = true,
+                        hazeState = dockHazeState,
                         onTabClickIntercept = {
                             if (showOnboarding && introShowcaseState.currentTargetIndex == LAST_ONBOARDING_TARGET_INDEX) {
                                 completeOnboarding()
