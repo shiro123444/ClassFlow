@@ -73,11 +73,11 @@ message ScheduleGridStyleProto {
 
   optional string background_image_path = 19; // 存储图片在私有目录下的绝对路径
 
-  // ── ClassFlow 自有字段（100+，与上游字段编号区隔，互不冲突）──
-  optional int32 glass_preset = 102;                     // 0=清透, 1=液态玻璃, 2=磨砂
-  optional float background_dim_alpha = 103;             // 背景遮罩透明度 (0.0 - 1.0)
-  optional int32 course_font_family_preset = 104;        // 0=默认, 1=圆润, 2=苹果风, 3=衬线
-  optional float background_scale = 105;                 // 背景缩放 (默认 1.0)
-  optional float background_offset_x = 106;              // 背景水平偏移比例 (-0.5 ~ 0.5)
-  optional float background_offset_y = 107;              // 背景垂直偏移比例 (-0.5 ~ 0.5)
+  // ── ClassFlow 自有字段（1000+，与上游字段编号区隔，更不易冲突）──
+  optional int32 glass_preset = 1002;                     // 0=清透, 1=液态玻璃, 2=磨砂
+  optional float background_dim_alpha = 1003;             // 背景遮罩透明度 (0.0 - 1.0)
+  optional int32 course_font_family_preset = 1004;        // 0=默认, 1=圆润, 2=苹果风, 3=衬线
+  optional float background_scale = 1005;                 // 背景缩放 (默认 1.0)
+  optional float background_offset_x = 1006;              // 背景水平偏移比例 (-0.5 ~ 0.5)
+  optional float background_offset_y = 1007;              // 背景垂直偏移比例 (-0.5 ~ 0.5)
 }
