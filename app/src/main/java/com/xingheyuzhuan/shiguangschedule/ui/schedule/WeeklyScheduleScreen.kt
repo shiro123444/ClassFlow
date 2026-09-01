@@ -98,6 +98,12 @@ import java.time.temporal.TemporalAdjusters
  */
 private const val INFINITE_PAGER_CENTER = Int.MAX_VALUE / 2
 
+/**
+ * 无感登录（复用已保存登录态自动同步）开关。
+ * 置为 false 以禁用，但保留代码。
+ */
+private const val SILENT_LOGIN_ENABLED = false
+
 
 /**
  * 周课表主屏幕组件。
@@ -296,7 +302,7 @@ fun WeeklyScheduleScreen(
                                 val savedUseVpn = WbuSyncEngine.getSavedUseVpn(appContext)
                                 val hasPersistedSession = WbuSyncEngine.hasPersistedSession(appContext)
 
-                                if (savedUseVpn != null && hasPersistedSession) {
+                                if (SILENT_LOGIN_ENABLED && savedUseVpn != null && hasPersistedSession) {
                                     isWbuSyncing = true
                                     val engine = WbuSyncEngine(context = appContext, useVpn = savedUseVpn)
                                     try {
@@ -647,7 +653,7 @@ fun WeeklyScheduleScreen(
             statusMessage = wbuSyncStatus,
             initialStudentId = wbuInitialStudentId,
             initialUseVpn = wbuInitialUseVpn,
-            onLoginClick = { studentId, password, useVpn ->
+            onLoginClick = { studentId, password, useVpn, authMode ->
                 isWbuSyncing = true
                 coroutineScope.launch {
                     try {
@@ -676,6 +682,7 @@ fun WeeklyScheduleScreen(
                             wbuSyncStatus = "正在登录 WebVPN，可能需要短信验证..."
                             val fullLoginOk = vpnEngine.loginVpnFull(
                                 studentId, password,
+                                authMode = authMode,
                                 smsCodeProvider = { maskedPhone ->
                                     // 切到主线程显示对话框，通过 CompletableDeferred 挂起等待用户输入
                                     val deferred = CompletableDeferred<String?>()
@@ -727,6 +734,7 @@ fun WeeklyScheduleScreen(
                         val engine = WbuSyncEngine(context = appContext, useVpn = false)
                         val loginSuccess = engine.login(
                             studentId, password,
+                            authMode = authMode,
                             captchaProvider = { captcha ->
                                 val deferred = CompletableDeferred<SliderCaptchaResult?>()
                                 withContext(Dispatchers.Main) {

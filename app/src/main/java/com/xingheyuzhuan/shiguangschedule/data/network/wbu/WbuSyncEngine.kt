@@ -52,6 +52,14 @@ enum class VpnFullLoginStatus {
 }
 
 /**
+ * 登录认证方式：统一身份认证(CAS) 或 教务系统直接表单。
+ */
+enum class WbuAuthMode {
+    UNIFIED_CAS,
+    JYXT_LEGACY
+}
+
+/**
  * 统一身份认证滑块验证码数据。
  * 图片为服务端返回的 base64 编码。
  */
@@ -161,13 +169,14 @@ class WbuSyncEngine(
     suspend fun login(
         studentId: String,
         password: String,
-        captchaProvider: SliderCaptchaProvider? = null
+        captchaProvider: SliderCaptchaProvider? = null,
+        authMode: WbuAuthMode = WbuAuthMode.UNIFIED_CAS
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val success = if (useVpn) {
-                loginViaVpnCas(studentId, password, captchaProvider)
+                loginViaVpnCas(studentId, password, captchaProvider, authMode)
             } else {
-                loginDirect(studentId, password, captchaProvider)
+                loginDirect(studentId, password, captchaProvider, authMode)
             }
             if (success) {
                 prefs.edit()
@@ -376,7 +385,8 @@ class WbuSyncEngine(
         password: String,
         smsCodeProvider: suspend (maskedPhone: String) -> String?,
         captchaProvider: SliderCaptchaProvider? = null,
-        statusCallback: ((VpnFullLoginStatus) -> Unit)? = null
+        statusCallback: ((VpnFullLoginStatus) -> Unit)? = null,
+        authMode: WbuAuthMode = WbuAuthMode.UNIFIED_CAS
     ): Boolean {
         val step = loginVpnPassword(studentId, password)
         when (step) {
@@ -409,9 +419,13 @@ class WbuSyncEngine(
 
         statusCallback?.invoke(VpnFullLoginStatus.VPN_READY_NEED_CAS)
 
-        // WebVPN 已认证，接下来走 CAS 登录到教务系统
+        // WebVPN 已认证，接下来按选中认证方式登录到教务系统
         val casOk = withContext(Dispatchers.IO) {
-            loginViaVpnCas(studentId, password, captchaProvider)
+            if (authMode == WbuAuthMode.JYXT_LEGACY) {
+                loginDirectLegacy(studentId, password)
+            } else {
+                loginViaVpnCas(studentId, password, captchaProvider, authMode)
+            }
         }
         statusCallback?.invoke(if (casOk) VpnFullLoginStatus.CAS_COMPLETED else VpnFullLoginStatus.CAS_FAILED)
         return casOk
@@ -671,9 +685,15 @@ class WbuSyncEngine(
     private suspend fun loginDirect(
         studentId: String,
         password: String,
-        captchaProvider: SliderCaptchaProvider? = null
+        captchaProvider: SliderCaptchaProvider? = null,
+        authMode: WbuAuthMode = WbuAuthMode.UNIFIED_CAS
     ): Boolean {
-        // Keep direct campus flow deterministic:
+        if (authMode == WbuAuthMode.JYXT_LEGACY) {
+            Log.i("WbuSyncEngine", "Direct campus login uses legacy /admin/login form")
+            return loginDirectLegacy(studentId, password)
+        }
+
+        // Direct campus flow deterministic:
         // jwxt /admin/caslogin -> ids /authserver/login?service=... -> jwxt /admin/?loginType=1
         val directCasEntryUrl = "$baseUrl/admin/caslogin"
         val serviceTarget = "https://jwxt.wbu.edu.cn/admin/caslogin"
@@ -703,8 +723,17 @@ class WbuSyncEngine(
         )
         if (directCasOk) return true
 
-        Log.w("WbuSyncEngine", "Direct fixed CAS flow failed, fallback to legacy /admin/login form")
+        Log.w("WbuSyncEngine", "Direct CAS flow failed and no legacy fallback per selected auth mode")
+        return false
+    }
 
+    /**
+     * 教务系统直接表单登录（loginType=1）。baseUrl 依 useVpn 而定，直连与 VPN 镜像均可复用。
+     */
+    private suspend fun loginDirectLegacy(
+        studentId: String,
+        password: String
+    ): Boolean {
         val loginPageReq = Request.Builder()
             .url("$baseUrl/admin/login")
             .get()
@@ -745,8 +774,8 @@ class WbuSyncEngine(
                 postRespString.contains("退出") ||
                 postRespString.contains("我的课表")
             if (!success) {
-                Log.d("WbuSyncEngine", "Direct login response URL=$finalUrl")
-                Log.d("WbuSyncEngine", "Direct login response body snippet=${postRespString.take(500)}")
+                Log.d("WbuSyncEngine", "Legacy login response URL=$finalUrl")
+                Log.d("WbuSyncEngine", "Legacy login response body snippet=${postRespString.take(500)}")
             }
             if (!success) {
                 return false
@@ -923,8 +952,14 @@ class WbuSyncEngine(
     private suspend fun loginViaVpnCas(
         studentId: String,
         password: String,
-        captchaProvider: SliderCaptchaProvider? = null
+        captchaProvider: SliderCaptchaProvider? = null,
+        authMode: WbuAuthMode = WbuAuthMode.UNIFIED_CAS
     ): Boolean {
+        if (authMode == WbuAuthMode.JYXT_LEGACY) {
+            Log.i("WbuSyncEngine", "VPN login uses legacy /admin/login form via mirror")
+            return loginDirectLegacy(studentId, password)
+        }
+
         // Follow the same order as manual login:
         // 1) Open JWXT login page behind VPN
         // 2) Click unified-auth link (CAS)

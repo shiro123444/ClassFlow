@@ -1,4 +1,5 @@
 package com.xingheyuzhuan.shiguangschedule.ui.components
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthMode
 import com.xingheyuzhuan.shiguangschedule.ui.theme.LocalIsDarkTheme
 
 import androidx.compose.animation.AnimatedVisibility
@@ -22,6 +23,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material.icons.filled.VpnKey
@@ -30,8 +33,11 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -63,7 +69,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun WbuAuthBottomSheet(
     onDismissRequest: () -> Unit,
-    onLoginClick: (String, String, Boolean) -> Unit,
+    onLoginClick: (String, String, Boolean, WbuAuthMode) -> Unit,
     isLoading: Boolean = false,
     statusMessage: String = "",
     initialStudentId: String = "",
@@ -73,6 +79,8 @@ fun WbuAuthBottomSheet(
     var studentId by remember(initialStudentId) { mutableStateOf(initialStudentId) }
     var password by remember { mutableStateOf("") }
     var useVpn by remember(initialUseVpn) { mutableStateOf(initialUseVpn) }
+    var authMode by remember { mutableStateOf(WbuAuthMode.UNIFIED_CAS) }
+    var authMenuExpanded by remember { mutableStateOf(false) }
     val loadingTips = remember {
         listOf(
             "正在和教务系统打招呼...",
@@ -120,7 +128,7 @@ fun WbuAuthBottomSheet(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "武汉商学院教务处登录",
+                text = "WBU 教务系统登录",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(bottom = 20.dp)
@@ -130,7 +138,7 @@ fun WbuAuthBottomSheet(
             OutlinedTextField(
                 value = studentId,
                 onValueChange = { studentId = it },
-                label = { Text("学号") },
+                label = { Text("账号") },
                 leadingIcon = { Icon(Icons.Default.AccountCircle, contentDescription = null) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -150,8 +158,51 @@ fun WbuAuthBottomSheet(
             OutlinedTextField(
                 value = password,
                 onValueChange = { password = it },
-                label = { Text("教务系统密码") },
-                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                label = { Text(if (authMode == WbuAuthMode.JYXT_LEGACY) "教务系统密码" else "统一认证密码") },
+                leadingIcon = {
+                    Box(
+                        modifier = Modifier.size(48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        IconButton(
+                            onClick = { if (!isLoading) authMenuExpanded = true },
+                            enabled = !isLoading
+                        ) {
+                            Icon(
+                                imageVector = if (authMode == WbuAuthMode.JYXT_LEGACY) Icons.Default.Key else Icons.Default.Lock,
+                                contentDescription = "选择登录认证方式"
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .size(16.dp)
+                        )
+                        DropdownMenu(
+                            expanded = authMenuExpanded,
+                            onDismissRequest = { authMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("统一认证密码") },
+                                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                                onClick = {
+                                    authMode = WbuAuthMode.UNIFIED_CAS
+                                    authMenuExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("教务系统密码") },
+                                leadingIcon = { Icon(Icons.Default.Key, contentDescription = null) },
+                                onClick = {
+                                    authMode = WbuAuthMode.JYXT_LEGACY
+                                    authMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -213,7 +264,7 @@ fun WbuAuthBottomSheet(
 
             // 登录按钮
             Button(
-                onClick = { onLoginClick(studentId, password, useVpn) },
+                onClick = { onLoginClick(studentId, password, useVpn, authMode) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
