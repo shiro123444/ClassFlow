@@ -20,6 +20,7 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.ClassFlow"
+        android:enableOnBackInvokedCallback="true"
         tools:targetApi="31">
 
         <activity
