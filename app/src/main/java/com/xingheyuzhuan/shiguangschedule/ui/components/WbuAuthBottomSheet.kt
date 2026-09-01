@@ -72,6 +72,7 @@ fun WbuAuthBottomSheet(
     onLoginClick: (String, String, Boolean, WbuAuthMode) -> Unit,
     isLoading: Boolean = false,
     statusMessage: String = "",
+    errorMessage: String = "",
     initialStudentId: String = "",
     initialUseVpn: Boolean = false
 ) {
@@ -324,7 +325,32 @@ fun WbuAuthBottomSheet(
                 }
             }
             
-            Spacer(modifier = Modifier.height(28.dp))
+            if (errorMessage.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = if (isDark) 0.30f else 0.90f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(
+                            width = 0.8.dp,
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.35f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                ) {
+                    Text(
+                        text = errorMessage,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(28.dp))
+            } else {
+                Spacer(modifier = Modifier.height(28.dp))
+            }
         }
     }
 }

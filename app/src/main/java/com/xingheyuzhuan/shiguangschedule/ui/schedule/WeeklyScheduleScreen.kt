@@ -157,6 +157,7 @@ fun WeeklyScheduleScreen(
     var showWbuAuthDialog by remember { mutableStateOf(false) }
     var isWbuSyncing by remember { mutableStateOf(false) }
     var wbuSyncStatus by remember { mutableStateOf("") }
+    var wbuError by remember { mutableStateOf("") }
     var wbuInitialStudentId by remember { mutableStateOf(WbuSyncEngine.getSavedStudentId(appContext)) }
     var wbuInitialUseVpn by remember { mutableStateOf(WbuSyncEngine.getSavedUseVpn(appContext) ?: false) }
     var selectedBlockForDetail by remember { mutableStateOf<MergedCourseBlock?>(null) }
@@ -327,6 +328,7 @@ fun WeeklyScheduleScreen(
                                 wbuInitialUseVpn = savedUseVpn ?: false
                                 wbuInitialStudentId = WbuSyncEngine.getSavedStudentId(appContext)
                                 wbuSyncStatus = ""
+                                wbuError = ""
                                 showWbuAuthDialog = true
                             }
                         },
@@ -348,6 +350,7 @@ fun WeeklyScheduleScreen(
                                     wbuInitialUseVpn = savedUseVpn
                                     wbuInitialStudentId = WbuSyncEngine.getSavedStudentId(appContext)
                                     wbuSyncStatus = ""
+                                    wbuError = ""
                                     showWbuAuthDialog = true
                                 }
                             })
@@ -651,10 +654,12 @@ fun WeeklyScheduleScreen(
             onDismissRequest = { if (!isWbuSyncing) showWbuAuthDialog = false },
             isLoading = isWbuSyncing,
             statusMessage = wbuSyncStatus,
+            errorMessage = wbuError,
             initialStudentId = wbuInitialStudentId,
             initialUseVpn = wbuInitialUseVpn,
             onLoginClick = { studentId, password, useVpn, authMode ->
                 isWbuSyncing = true
+                wbuError = ""
                 coroutineScope.launch {
                     try {
                         val activeTableId = viewModel.uiState.value.tableId ?: return@launch
@@ -716,7 +721,7 @@ fun WeeklyScheduleScreen(
                                     snackbarHostState.showSuccessSnackbar("课表导入成功！")
                                     return@launch
                                 }
-                                wbuSyncStatus = "登录成功但未获取到课表数据"
+                                wbuError = "登录成功但未获取到课表数据"
                             } else {
                                 // 全部失败 → 兜底到 WebView
                                 isWbuSyncing = false
@@ -745,7 +750,7 @@ fun WeeklyScheduleScreen(
                             }
                         )
                         if (!loginSuccess) {
-                            wbuSyncStatus = "校园网直连失败，请确认已连接校内网络"
+                            wbuError = "校园网直连失败，请确认已连接校内网络"
                             return@launch
                         }
 
@@ -757,11 +762,11 @@ fun WeeklyScheduleScreen(
                             showWbuAuthDialog = false
                             snackbarHostState.showSuccessSnackbar("课表导入成功！")
                         } else {
-                            wbuSyncStatus = "未获取到课表数据"
+                            wbuError = "未获取到课表数据"
                         }
                     } catch (e: Exception) {
                         Log.e("WbuSync", "同步发生错误", e)
-                        wbuSyncStatus = "同步发生错误: ${e.message}"
+                        wbuError = "同步发生错误: ${e.message}"
                     } finally {
                         isWbuSyncing = false
                     }
