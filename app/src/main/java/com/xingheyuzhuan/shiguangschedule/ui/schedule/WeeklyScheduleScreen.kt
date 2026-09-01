@@ -52,6 +52,13 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaData
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaResult
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuLoginMethod
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.QrSession
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AuthForm
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.DynamicCodeSendResult
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.QrStatus
+import com.xingheyuzhuan.shiguangschedule.ui.components.QrUiState
+import com.xingheyuzhuan.shiguangschedule.ui.components.QrPhase
 import com.xingheyuzhuan.shiguangschedule.data.model.schedule_style.ScheduleModeProto
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTable
 import java.util.Locale
@@ -86,6 +93,7 @@ import com.xingheyuzhuan.shiguangschedule.ui.theme.ThemeGradients
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.web.WbuWebLoginAutofillStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -161,6 +169,11 @@ fun WeeklyScheduleScreen(
     var wbuError by remember { mutableStateOf("") }
     var wbuInitialStudentId by remember { mutableStateOf(WbuSyncEngine.getSavedStudentId(appContext)) }
     var wbuInitialUseVpn by remember { mutableStateOf(WbuSyncEngine.getSavedUseVpn(appContext) ?: false) }
+    var wbuLoginMethod by remember { mutableStateOf(WbuLoginMethod.PASSWORD) }
+    var wbuQrState by remember { mutableStateOf<QrUiState?>(null) }
+    var activeAuthEngine by remember { mutableStateOf<WbuSyncEngine?>(null) }
+    var dynamicPrep by remember { mutableStateOf<AuthForm?>(null) }
+    var qrJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var selectedBlockForDetail by remember { mutableStateOf<MergedCourseBlock?>(null) }
     var showTableSwitcher by remember { mutableStateOf(false) }
     var isGridHolding by remember { mutableStateOf(false) } // 拖拽编辑期间禁用 Pager 滑页（上游同步）
@@ -333,6 +346,10 @@ fun WeeklyScheduleScreen(
                                 wbuInitialStudentId = WbuSyncEngine.getSavedStudentId(appContext)
                                 wbuSyncStatus = ""
                                 wbuError = ""
+                                wbuLoginMethod = WbuLoginMethod.PASSWORD
+                                wbuQrState = null
+                                dynamicPrep = null
+                                qrJob?.cancel()
                                 showWbuAuthDialog = true
                             }
                         },
@@ -355,6 +372,10 @@ fun WeeklyScheduleScreen(
                                     wbuInitialStudentId = WbuSyncEngine.getSavedStudentId(appContext)
                                     wbuSyncStatus = ""
                                     wbuError = ""
+                                    wbuLoginMethod = WbuLoginMethod.PASSWORD
+                                    wbuQrState = null
+                                    dynamicPrep = null
+                                    qrJob?.cancel()
                                     showWbuAuthDialog = true
                                 }
                             })
@@ -654,14 +675,105 @@ fun WeeklyScheduleScreen(
     }
 
     if (showWbuAuthDialog) {
+        // 校园网直连（非 VPN）时先探测并询问是否继续；VPN 直接返回 true
+        val confirmCampusIfDirect: suspend (Boolean) -> Boolean = { useVpn ->
+            if (useVpn) {
+                true
+            } else {
+                val onCampus = WbuNetworkProbe.refresh()
+                if (onCampus) {
+                    true
+                } else {
+                    val proceed = CompletableDeferred<Boolean>()
+                    withContext(Dispatchers.Main) { campusConfirmDeferred = proceed }
+                    proceed.await()
+                }
+            }
+        }
+
+        val startQrFlow: () -> Unit = {
+            wbuError = ""
+            qrJob?.cancel()
+            val engine = WbuSyncEngine(context = appContext, useVpn = wbuInitialUseVpn)
+            activeAuthEngine = engine
+            wbuQrState = QrUiState(qrContent = null, phase = QrPhase.GENERATING, statusText = "正在获取二维码...")
+            coroutineScope.launch {
+                val session = engine.startQrLogin("QR")
+                if (session == null) {
+                    wbuQrState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = "获取二维码失败，点二维码重试")
+                    return@launch
+                }
+                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = "请扫码登录")
+                qrJob = coroutineScope.launch {
+                    while (true) {
+                        delay(2000)
+                        when (val st = engine.pollQrStatus(session)) {
+                            QrStatus.WAIT -> wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = "请扫码登录")
+                            QrStatus.CONFIRM -> wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.SCANNED, statusText = "已扫码，请在手机上确认")
+                            QrStatus.SUCCESS -> {
+                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.CONFIRMING, statusText = "确认成功，正在登录...")
+                                isWbuSyncing = true
+                                try {
+                                    val activeTableId = viewModel.uiState.value.tableId
+                                    wbuSyncStatus = "登录成功，正在获取课表..."
+                                    if (engine.completeQrLogin(session, "QR") && activeTableId != null) {
+                                        val courses = engine.fetchCourseData(activeTableId)
+                                        if (courses != null && courses.isNotEmpty()) {
+                                            viewModel.importCourses(courses)
+                                            wbuSyncStatus = ""
+                                            showWbuAuthDialog = false
+                                            snackbarHostState.showSuccessSnackbar("课表导入成功！")
+                                        } else {
+                                            wbuError = "登录成功但未获取到课表数据"
+                                        }
+                                    } else {
+                                        wbuError = "扫码登录失败，请重试"
+                                        wbuQrState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = "登录失败，点二维码重试")
+                                    }
+                                } finally {
+                                    isWbuSyncing = false
+                                }
+                                return@launch
+                            }
+                            QrStatus.EXPIRED -> {
+                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.EXPIRED, statusText = "二维码已过期，点二维码刷新")
+                                return@launch
+                            }
+                            QrStatus.ERROR -> {
+                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.ERROR, statusText = "查询状态失败，点二维码重试")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         WbuAuthBottomSheet(
-            onDismissRequest = { if (!isWbuSyncing) showWbuAuthDialog = false },
+            onDismissRequest = {
+                if (!isWbuSyncing) {
+                    qrJob?.cancel()
+                    wbuQrState = null
+                    showWbuAuthDialog = false
+                }
+            },
             isLoading = isWbuSyncing,
             statusMessage = wbuSyncStatus,
             errorMessage = wbuError,
             initialStudentId = wbuInitialStudentId,
             initialUseVpn = wbuInitialUseVpn,
-            onLoginClick = { studentId, password, useVpn, authMode ->
+            method = wbuLoginMethod,
+            onMethodChange = { m ->
+                wbuLoginMethod = m
+                if (m != WbuLoginMethod.QR) {
+                    qrJob?.cancel()
+                    wbuQrState = null
+                } else if (wbuQrState == null) {
+                    // 选中二维码即自动尝试生成
+                    startQrFlow()
+                }
+            },
+            qrState = wbuQrState,
+            onPasswordLogin = { studentId, password, useVpn, authMode ->
                 isWbuSyncing = true
                 wbuError = ""
                 coroutineScope.launch {
@@ -693,7 +805,6 @@ fun WeeklyScheduleScreen(
                                 studentId, password,
                                 authMode = authMode,
                                 smsCodeProvider = { maskedPhone ->
-                                    // 切到主线程显示对话框，通过 CompletableDeferred 挂起等待用户输入
                                     val deferred = CompletableDeferred<String?>()
                                     withContext(Dispatchers.Main) {
                                         smsError = null
@@ -704,7 +815,6 @@ fun WeeklyScheduleScreen(
                                     deferred.await()
                                 },
                                 captchaProvider = { captcha ->
-                                    // 切到主线程显示滑块验证码对话框，挂起等待用户拖拽结果
                                     val deferred = CompletableDeferred<SliderCaptchaResult?>()
                                     withContext(Dispatchers.Main) {
                                         captchaDeferred = deferred
@@ -727,7 +837,6 @@ fun WeeklyScheduleScreen(
                                 }
                                 wbuError = "登录成功但未获取到课表数据"
                             } else {
-                                // 全部失败 → 兜底到 WebView
                                 isWbuSyncing = false
                                 wbuSyncStatus = ""
                                 showWbuAuthDialog = false
@@ -738,16 +847,8 @@ fun WeeklyScheduleScreen(
                             return@launch
                         }
 
-                        // 非 VPN（校园网直连）——实时探测校园网环境（会同步更新登录框提示），不可达时询问是否继续
-                        val onCampus = WbuNetworkProbe.refresh()
-                        if (!onCampus) {
-                            val proceed = CompletableDeferred<Boolean>()
-                            withContext(Dispatchers.Main) {
-                                campusConfirmDeferred = proceed
-                            }
-                            val continueLogin = proceed.await()
-                            if (!continueLogin) return@launch
-                        }
+                        // 校园网直连
+                        if (!confirmCampusIfDirect(false)) return@launch
                         wbuSyncStatus = "正在连接校园网..."
                         val engine = WbuSyncEngine(context = appContext, useVpn = false)
                         val loginSuccess = engine.login(
@@ -784,7 +885,64 @@ fun WeeklyScheduleScreen(
                         isWbuSyncing = false
                     }
                 }
-            }
+            },
+            onSendDynamicCode = { sid ->
+                val engine = WbuSyncEngine(context = appContext, useVpn = wbuInitialUseVpn)
+                activeAuthEngine = engine
+                val result = engine.sendDynamicCode(
+                    sid.trim(), "DYNAMIC",
+                    captchaProvider = { captcha ->
+                        val deferred = CompletableDeferred<SliderCaptchaResult?>()
+                        withContext(Dispatchers.Main) {
+                            captchaDeferred = deferred
+                            captchaDialogData = captcha
+                        }
+                        deferred.await() ?: SliderCaptchaResult.Cancel
+                    }
+                )
+                dynamicPrep = (result as? DynamicCodeSendResult.Success)?.prep
+                result
+            },
+            onDynamicCodeLogin = { sid, code, useVpn ->
+                isWbuSyncing = true
+                wbuError = ""
+                coroutineScope.launch {
+                    try {
+                        val activeTableId = viewModel.uiState.value.tableId ?: return@launch
+                        if (!confirmCampusIfDirect(useVpn)) return@launch
+                        val engine = activeAuthEngine ?: WbuSyncEngine(context = appContext, useVpn = useVpn)
+                        // 没有现成 prep 时（用户直接填已有验证码）临时取表单参数
+                        val prep = dynamicPrep ?: engine.obtainDynamicCodeForm("DYNAMIC")
+                        if (prep == null) {
+                            wbuError = "无法获取登录参数，请重试"
+                            return@launch
+                        }
+                        wbuSyncStatus = "正在登录..."
+                        val result = engine.dynamicCodeLogin(sid.trim(), code, prep, "DYNAMIC")
+                        if (result.success) {
+                            wbuSyncStatus = "登录成功，正在获取课表..."
+                            val courses = engine.fetchCourseData(activeTableId)
+                            if (courses != null && courses.isNotEmpty()) {
+                                viewModel.importCourses(courses)
+                                wbuSyncStatus = ""
+                                showWbuAuthDialog = false
+                                snackbarHostState.showSuccessSnackbar("课表导入成功！")
+                            } else {
+                                wbuError = "登录成功但未获取到课表数据"
+                            }
+                        } else {
+                            wbuError = result.message.ifBlank { "动态码登录失败，请检查验证码" }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("WbuSync", "动态码同步错误", e)
+                        wbuError = "同步发生错误: ${e.message}"
+                    } finally {
+                        isWbuSyncing = false
+                    }
+                }
+            },
+            onStartQr = startQrFlow,
+            onRefreshQr = startQrFlow
         )
     }
 

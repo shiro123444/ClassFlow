@@ -137,6 +137,7 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.okhttp)
     debugImplementation(libs.okhttp.logging.interceptor)
+    implementation(libs.zxing.core)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     implementation(libs.jgit)

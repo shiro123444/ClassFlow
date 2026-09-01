@@ -3,6 +3,7 @@ package com.xingheyuzhuan.shiguangschedule.data.network.wbu
 import android.content.Context
 import android.util.Base64
 import android.util.Log
+import androidx.appcompat.app.AppCompatDelegate
 import com.xingheyuzhuan.shiguangschedule.data.db.main.Course
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWithWeeks
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWeek
@@ -26,6 +27,7 @@ import java.security.KeyFactory
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.security.spec.RSAPublicKeySpec
+import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
@@ -58,6 +60,61 @@ enum class WbuAuthMode {
     UNIFIED_CAS,
     JYXT_LEGACY
 }
+
+/**
+ * 登录方式：密码 / 二维码 / 手机动态码。
+ */
+enum class WbuLoginMethod {
+    PASSWORD,
+    DYNAMIC_CODE,
+    QR
+}
+
+/**
+ * 二维码登录轮询状态。
+ */
+enum class QrStatus {
+    WAIT,
+    CONFIRM,
+    SUCCESS,
+    EXPIRED,
+    ERROR
+}
+
+/**
+ * 二维码登录会话：uuid 用于轮询与提交，content 用于本地生成二维码，execution/lt 用于最终提交。
+ */
+data class QrSession(
+    val uuid: String,
+    val content: String,
+    val execution: String,
+    val lt: String,
+    val authBaseUrl: String
+)
+
+/**
+ * 登录页表单参数（execution/lt），动态码登录最终提交需要。
+ */
+data class AuthForm(
+    val execution: String,
+    val lt: String
+)
+
+/**
+ * 发送动态码的结果。[Failure.waitSeconds] > 0 表示发送过于频繁的剩余冷却秒数。
+ */
+sealed class DynamicCodeSendResult {
+    data class Success(val prep: AuthForm) : DynamicCodeSendResult()
+    data class Failure(val message: String, val waitSeconds: Int = 0) : DynamicCodeSendResult()
+}
+
+/**
+ * 动态码登录结果。失败时 [message] 尽可能给出服务端真实文案。
+ */
+data class DynamicCodeLoginResult(
+    val success: Boolean,
+    val message: String = ""
+)
 
 /**
  * 统一身份认证滑块验证码数据。
@@ -135,6 +192,7 @@ class WbuSyncEngine(
             .addInterceptor { chain ->
                 val req = chain.request().newBuilder()
                     .header("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+                    .header("Accept-Language", authAcceptLanguage)
                     .build()
                 chain.proceed(req)
             }
@@ -160,6 +218,41 @@ class WbuSyncEngine(
     // Base URL is different if using VPN but for WBU specific JWXT.
     private val baseUrl = if (useVpn) "http://jwxt-wbu-edu-cn-s.webvpn.wbu.edu.cn:8118" else "https://jwxt.wbu.edu.cn"
     private val vpnBaseUrl = "https://webvpn.wbu.edu.cn"
+    private val idsPublicBaseUrl = "http://ids.wbu.edu.cn"
+    private val idsVpnBaseUrl = "http://ids-wbu-edu-cn.webvpn.wbu.edu.cn:8118"
+    private val casServiceTarget = "https://jwxt.wbu.edu.cn/admin/caslogin"
+
+    /** ids 认证基址：密码/动态码，受「ids 走 WebVPN」开关控制（默认公网）。 */
+    private fun idsBaseUrl(): String =
+        if (getIdsViaWebVpn(context)) idsVpnBaseUrl else idsPublicBaseUrl
+
+    /** 二维码认证基址：受「二维码走 WebVPN」开关控制（默认公网）。 */
+    private fun qrBaseUrl(): String =
+        if (getQrViaWebVpn(context)) idsVpnBaseUrl else idsPublicBaseUrl
+
+    /** 认证请求统一使用中文语言偏好（短信语言由 locale cookie 决定）。 */
+    private val authAcceptLanguage = "zh-CN,zh;q=0.9,en;q=0.5"
+
+    /** Spring CookieLocaleResolver 会话 locale cookie 名，决定短信文案/通道语言。 */
+    private val authLocaleCookieName = "org.springframework.web.servlet.i18n.CookieLocaleResolver.LOCALE"
+
+    /**
+     * 在发送验证码请求前，向当前认证域注入 locale cookie：
+     * 仅当「发送英语验证码」开启且非简体中文时用 en，否则 zh_CN。
+     */
+    private fun injectAuthLocaleCookie(authBase: String) {
+        val host = authBase.toHttpUrlOrNull()?.host ?: return
+        val value = if (!isSimplifiedChinese(context) && getSendEnglishSms(context)) "en" else "zh_CN"
+        cookieStore.removeAll { it.name == authLocaleCookieName }
+        cookieStore.add(
+            Cookie.Builder()
+                .name(authLocaleCookieName)
+                .value(value)
+                .domain(host)
+                .path("/")
+                .build()
+        )
+    }
 
     /**
      * 第一步：模拟登录获取 Session 和内部校验信息
@@ -794,6 +887,7 @@ class WbuSyncEngine(
     private suspend fun fetchCasLoginPage(idsLoginUrl: String, flowTag: String): CasLoginPage? {
         return withContext(Dispatchers.IO) {
             runCatching {
+                clearAuthCookies(idsLoginUrl.toHttpUrlOrNull()?.host ?: return@runCatching null)
                 client.newCall(
                     Request.Builder().url(idsLoginUrl).get().build()
                 ).execute().use { pageResp ->
@@ -922,10 +1016,22 @@ class WbuSyncEngine(
         }
         if (casPostStaysOnLogin) return false
 
-        client.newCall(Request.Builder().url("$baseUrl/admin/login").get().build()).execute().close()
-        val loginTypeHtml = client.newCall(
-            Request.Builder().url("$baseUrl/admin/?loginType=1").get().build()
-        ).execute().use { it.body?.string().orEmpty() }
+        return bootstrapJwxtSession()
+    }
+
+    /**
+     * 登录成功后的 JWXT 会话引导：打开落地页、解析 indexMain，最后校验课表接口。
+     * 密码/动态码/二维码登录成功后共用此方法。
+     */
+    private suspend fun bootstrapJwxtSession(): Boolean {
+        runCatching {
+            client.newCall(Request.Builder().url("$baseUrl/admin/login").get().build()).execute().close()
+        }
+        val loginTypeHtml = runCatching {
+            client.newCall(
+                Request.Builder().url("$baseUrl/admin/?loginType=1").get().build()
+            ).execute().use { it.body?.string().orEmpty() }
+        }.getOrDefault("")
 
         val indexMainUrl = runCatching {
             val doc = Jsoup.parse(loginTypeHtml, "$baseUrl/admin/?loginType=1")
@@ -942,7 +1048,7 @@ class WbuSyncEngine(
             runCatching {
                 client.newCall(Request.Builder().url(indexMainUrl).get().build()).execute().close()
             }.onFailure {
-                Log.w("WbuSyncEngine", "$flowTag open indexMain failed: ${it.message}")
+                Log.w("WbuSyncEngine", "bootstrapJwxtSession open indexMain failed: ${it.message}")
             }
         }
 
@@ -995,6 +1101,349 @@ class WbuSyncEngine(
             Log.w("WbuSyncEngine", "VPN CAS flow completed but JWXT term API is still unavailable. baseUrl=$baseUrl")
         }
         return ready
+    }
+
+    // ------------------- 登录页表单解析（execution/lt） -------------------
+
+    /**
+     * 取登录表单前，先清除该认证域的历史 cookie（尤其 CASTGC）。
+     * 否则 CAS 会因有效 CASTGC 自动登录并跳转到 service，返回的是教务落地页而非登录表单。
+     */
+    private fun clearAuthCookies(host: String) {
+        val removed = cookieStore.removeAll { it.domain == host }
+        if (removed) {
+            Log.d("WbuSyncEngine", "Cleared persisted auth cookies for host=$host")
+            persistCookieStore()
+        }
+    }
+
+    /**
+     * 解析指定 form id 的登录页，提取 execution / lt。
+     * 用于动态码（phoneFromId）与二维码（qrLoginForm）。
+     */
+    private suspend fun fetchLoginForm(idsLoginUrl: String, formId: String): AuthForm? {
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                clearAuthCookies(idsLoginUrl.toHttpUrlOrNull()?.host ?: return@runCatching null)
+                client.newCall(Request.Builder().url(idsLoginUrl).get().build()).execute().use { pageResp ->
+                    val html = pageResp.body?.string().orEmpty()
+                    if (html.isBlank()) {
+                        Log.w("WbuSyncEngine", "CAS login page blank for form=$formId")
+                        return@use null
+                    }
+                    val doc = Jsoup.parse(html)
+
+                    // 优先从指定表单取 hidden 字段；表单未命中则整页 Jsoup 兜底
+                    val scope: org.jsoup.nodes.Element = doc.selectFirst("form#$formId")
+                        ?: doc.let { Log.w("WbuSyncEngine", "CAS form $formId not found; fallback to whole-page inputs"); it }
+                    val hidden = mutableMapOf<String, String>()
+                    scope.select("input[name]").forEach { input ->
+                        val key = input.attr("name")
+                        if (key.isNotBlank() && !hidden.containsKey(key)) {
+                            hidden[key] = input.attr("value")
+                        }
+                    }
+
+                    val execution = hidden["execution"]
+                        ?: extractInputValue(html, "execution")
+                        ?: extractScriptVar(html, "execution")
+                    if (execution.isNullOrBlank()) {
+                        Log.w("WbuSyncEngine", "CAS form $formId no execution. url=$idsLoginUrl")
+                        return@use null
+                    }
+                    val ltValue = hidden["lt"]
+                        ?: extractInputValue(html, "lt")
+                        ?: extractScriptVar(html, "lt")
+                        ?: ""
+                    AuthForm(execution, ltValue)
+                }
+            }.getOrNull()
+        }
+    }
+
+    private fun extractInputValue(html: String, name: String): String? {
+        val m = Regex("""(?:name|id)\s*=\s*["']${Regex.escape(name)}["'][^>]*value\s*=\s*["']([^"']*)["']""", RegexOption.IGNORE_CASE)
+            .find(html)
+        return m?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    /** 从页面脚本变量中提取（如 var execution="..." / execution:'...'），部分 JS 渲染表单适用。 */
+    private fun extractScriptVar(html: String, name: String): String? {
+        val m = Regex("""${Regex.escape(name)}\s*[:=]\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+            .find(html)
+        return m?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    // ------------------- 手机动态码登录 -------------------
+
+    /**
+     * 发送动态码：解析登录页 → 滑块验证 → 发送短信。返回 prep 供最终登录使用。
+     * 失败时返回 null，同时通过 [outMessage] 回传错误信息（如需 UI 展示可自行处理）。
+     */
+    suspend fun sendDynamicCode(
+        studentId: String,
+        flowTag: String,
+        captchaProvider: SliderCaptchaProvider?
+    ): DynamicCodeSendResult = withContext(Dispatchers.IO) {
+        val authBase = idsBaseUrl()
+        val service = URLEncoder.encode(casServiceTarget, "UTF-8")
+        val loginUrl = "$authBase/authserver/login?service=$service"
+        val form = fetchLoginForm(loginUrl, "phoneFromId") ?: run {
+            Log.w("WbuSyncEngine", "$flowTag dynamicCode: cannot parse login form")
+            return@withContext DynamicCodeSendResult.Failure("无法获取登录参数，请重试")
+        }
+
+        val origin = authBase
+        if (captchaProvider != null) {
+            val ok = solveSliderCaptcha(origin, "$flowTag-DYNAMIC-SLIDER", captchaProvider)
+            if (!ok) {
+                Log.w("WbuSyncEngine", "$flowTag dynamicCode: slider captcha not solved")
+                return@withContext DynamicCodeSendResult.Failure("滑块验证未通过")
+            }
+        }
+
+        val url = "$authBase/authserver/dynamicCode/getDynamicCode.htl"
+        injectAuthLocaleCookie(authBase)
+        val req = Request.Builder()
+            .url(url)
+            .addHeader("X-Requested-With", "XMLHttpRequest")
+            .addHeader("Referer", loginUrl)
+            .addHeader("Accept", "application/json, text/javascript, */*; q=0.01")
+            .post(FormBody.Builder()
+                .add("mobile", studentId)
+                .add("captcha", "")
+                .build())
+            .build()
+
+        try {
+            client.newCall(req).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                val json = runCatching { JSONObject(body) }.getOrNull()
+                val code = json?.optString("code").orEmpty()
+                when (code) {
+                    "success" -> {
+                        Log.i("WbuSyncEngine", "$flowTag dynamicCode sent")
+                        DynamicCodeSendResult.Success(form)
+                    }
+                    "captchaError" -> {
+                        val msg = json?.optString("message").orEmpty()
+                        Log.w("WbuSyncEngine", "$flowTag dynamicCode captcha error: $msg")
+                        DynamicCodeSendResult.Failure(if (msg.isBlank()) "验证码错误" else msg)
+                    }
+                    "timeExpire" -> {
+                        val wait = parseWaitSeconds(json?.opt("time"))
+                        Log.w("WbuSyncEngine", "$flowTag dynamicCode too frequent, wait=$wait")
+                        DynamicCodeSendResult.Failure("发送过于频繁", waitSeconds = wait)
+                    }
+                    else -> {
+                        val msg = json?.optString("message").orEmpty()
+                        Log.w("WbuSyncEngine", "$flowTag dynamicCode send failed: code=$code msg=$msg")
+                        DynamicCodeSendResult.Failure(if (msg.isBlank()) "发送验证码失败，请重试" else msg)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("WbuSyncEngine", "$flowTag dynamicCode send exception", e)
+            DynamicCodeSendResult.Failure("发送验证码失败，请重试")
+        }
+    }
+
+    private fun parseWaitSeconds(raw: Any?): Int {
+        return when (raw) {
+            is Number -> raw.toInt().coerceAtLeast(1)
+            is String -> raw.toIntOrNull()?.coerceAtLeast(1) ?: 120
+            else -> 120
+        }
+    }
+
+    /**
+     * 仅获取动态码登录表单参数（execution/lt），不发短信。
+     * 用于用户已有可用的验证码、直接填写登录的场景。
+     */
+    suspend fun obtainDynamicCodeForm(flowTag: String): AuthForm? = withContext(Dispatchers.IO) {
+        val authBase = idsBaseUrl()
+        val service = URLEncoder.encode(casServiceTarget, "UTF-8")
+        fetchLoginForm("$authBase/authserver/login?service=$service", "phoneFromId")
+    }
+
+    /**
+     * 用动态码完成登录：提交 dynamicCode → 302 票据 → JWXT 会话引导。
+     */
+    suspend fun dynamicCodeLogin(
+        studentId: String,
+        code: String,
+        prep: AuthForm,
+        flowTag: String
+    ): DynamicCodeLoginResult = withContext(Dispatchers.IO) {
+        val authBase = idsBaseUrl()
+        val service = URLEncoder.encode(casServiceTarget, "UTF-8")
+        val postUrl = "$authBase/authserver/login?service=$service"
+        val formBuilder = FormBody.Builder()
+            .add("username", studentId)
+            .add("dynamicCode", code)
+            .add("captcha", "")
+            .add("_eventId", "submit")
+            .add("cllt", "dynamicLogin")
+            .add("dllt", "generalLogin")
+            .add("lt", prep.lt)
+            .add("execution", prep.execution)
+
+        val loginReq = Request.Builder()
+            .url(postUrl)
+            .post(formBuilder.build())
+            .addHeader("Content-Type", "application/x-www-form-urlencoded")
+            .addHeader("Referer", postUrl)
+            .addHeader("Origin", authBase)
+            .build()
+
+        val outcome = runCatching {
+            // 客户端 followRedirects=true：POST 302 会自动跳转并消费票据，最终落到教务页。
+            // 因此不看 resp.code，改为判断最终地址是否还停在登录页。
+            client.newCall(loginReq).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                val finalUrl = resp.request.url.toString()
+                if (finalUrl.contains("/authserver/login")) {
+                    val err = extractCasError(body)
+                    Log.w("WbuSyncEngine", "$flowTag dynamicCode stayed on login. url=$finalUrl err=$err")
+                    DynamicCodeLoginResult(false, err.ifBlank { "动态码登录失败，请检查验证码是否有效或已过期" })
+                } else {
+                    Log.i("WbuSyncEngine", "$flowTag dynamicCode login ok, finalUrl=$finalUrl")
+                    DynamicCodeLoginResult(success = true)
+                }
+            }
+        }.getOrElse { e ->
+            Log.e("WbuSyncEngine", "$flowTag dynamicCode login exception", e)
+            DynamicCodeLoginResult(false, "网络异常: ${e.message}")
+        }
+
+        if (outcome.success) {
+            prefs.edit()
+                .putString(KEY_LAST_STUDENT_ID, studentId)
+                .putBoolean(KEY_LAST_USE_VPN, useVpn)
+                .putBoolean(KEY_LAST_USE_VPN_SET, true)
+                .apply()
+            persistCookieStore()
+            val boot = bootstrapJwxtSession()
+            return@withContext DynamicCodeLoginResult(boot, if (boot) "" else "登录成功但教务系统会话未就绪")
+        }
+        outcome
+    }
+
+    private fun extractCasError(html: String): String {
+        Regex("""(用户名或密码错误|验证码错误|账号已被锁定|该帐号不存在|该帐号已经被冻结|登录凭证不可用|动态码不正确|动态码已失效|登录失败)""")
+            .find(html)?.let { return it.value }
+        Regex("""id="showErrorTip"[^>]*>([^<]+)""").find(html)?.let { return it.groupValues[1].trim() }
+        return ""
+    }
+
+    // ------------------- 二维码登录 -------------------
+
+    /**
+     * 开始二维码登录：解析 qr 登录页 → 获取 uuid → 生成二维码内容。
+     */
+    suspend fun startQrLogin(flowTag: String): QrSession? = withContext(Dispatchers.IO) {
+        runCatching {
+            val authBase = qrBaseUrl()
+            val service = URLEncoder.encode(casServiceTarget, "UTF-8")
+            val qrPageUrl = "$authBase/authserver/login?type=qrcode&service=$service"
+            val form = fetchLoginForm(qrPageUrl, "qrLoginForm") ?: run {
+                Log.w("WbuSyncEngine", "$flowTag qr: cannot parse login form")
+                return@runCatching null
+            }
+
+            val tokenUrl = "$authBase/authserver/qrCode/getToken?ts=${System.currentTimeMillis()}"
+            val tokenReq = Request.Builder()
+                .url(tokenUrl)
+                .addHeader("X-Requested-With", "XMLHttpRequest")
+                .addHeader("Referer", qrPageUrl)
+                .get()
+                .build()
+            val uuid = client.newCall(tokenReq).execute().use { it.body?.string().orEmpty().trim() }
+            if (uuid.isBlank()) {
+                Log.w("WbuSyncEngine", "$flowTag qr uuid blank")
+                return@runCatching null
+            }
+
+            val content = "$authBase/authserver/qrCode/qrCodeLogin.do?uuid=$uuid"
+            Log.i("WbuSyncEngine", "$flowTag qr started uuid=$uuid")
+            QrSession(uuid, content, form.execution, form.lt, authBase)
+        }.getOrNull()
+    }
+
+    /**
+     * 轮询二维码状态。
+     */
+    suspend fun pollQrStatus(session: QrSession): QrStatus = withContext(Dispatchers.IO) {
+        try {
+            val statusUrl = "${session.authBaseUrl}/authserver/qrCode/getStatus.htl?ts=${System.currentTimeMillis()}&uuid=${session.uuid}"
+            val req = Request.Builder()
+                .url(statusUrl)
+                .addHeader("X-Requested-With", "XMLHttpRequest")
+                .addHeader("Referer", "${session.authBaseUrl}/authserver/login?type=qrcode")
+                .get()
+                .build()
+            val raw = client.newCall(req).execute().use { it.body?.string().orEmpty().trim() }
+            when (raw.toIntOrNull()) {
+                0 -> QrStatus.WAIT
+                1 -> QrStatus.SUCCESS
+                2 -> QrStatus.CONFIRM
+                3 -> QrStatus.EXPIRED
+                else -> QrStatus.ERROR
+            }
+        } catch (e: Exception) {
+            Log.w("WbuSyncEngine", "pollQrStatus failed", e)
+            QrStatus.ERROR
+        }
+    }
+
+    /**
+     * 手机扫码确认后提交登录。
+     */
+    suspend fun completeQrLogin(session: QrSession, flowTag: String): Boolean = withContext(Dispatchers.IO) {
+        val service = URLEncoder.encode(casServiceTarget, "UTF-8")
+        val postUrl = "${session.authBaseUrl}/authserver/login?display=qrLogin&service=$service"
+        val form = FormBody.Builder()
+            .add("lt", session.lt)
+            .add("uuid", session.uuid)
+            .add("cllt", "qrLogin")
+            .add("dllt", "generalLogin")
+            .add("execution", session.execution)
+            .add("_eventId", "submit")
+            .add("rmShown", "1")
+            .build()
+        val loginReq = Request.Builder()
+            .url(postUrl)
+            .post(form)
+            .addHeader("Content-Type", "application/x-www-form-urlencoded")
+            .addHeader("Referer", "${session.authBaseUrl}/authserver/login?type=qrcode")
+            .addHeader("Origin", session.authBaseUrl)
+            .build()
+
+        // 客户端 followRedirects=true：POST 302 会自动跳转并消费票据，因此看最终地址是否停在登录页。
+        val ok = runCatching {
+            client.newCall(loginReq).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                val finalUrl = resp.request.url.toString()
+                if (finalUrl.contains("/authserver/login")) {
+                    Log.w("WbuSyncEngine", "$flowTag qr login stayed on login. url=$finalUrl err=${extractCasError(body)}")
+                    false
+                } else {
+                    Log.i("WbuSyncEngine", "$flowTag qr login ok, finalUrl=$finalUrl")
+                    true
+                }
+            }
+        }.getOrDefault(false)
+
+        if (ok) {
+            prefs.edit()
+                .putString(KEY_LAST_STUDENT_ID, "")
+                .putBoolean(KEY_LAST_USE_VPN, useVpn)
+                .putBoolean(KEY_LAST_USE_VPN_SET, true)
+                .apply()
+            persistCookieStore()
+            return@withContext bootstrapJwxtSession()
+        }
+        false
     }
 
     /**
@@ -1281,7 +1730,32 @@ class WbuSyncEngine(
         private const val KEY_LAST_USE_VPN_SET = "last_use_vpn_set"
         private const val KEY_LAST_STUDENT_ID = "last_student_id"
         private const val KEY_USE_WEBVIEW_VPN_MANUAL_MODE = "use_webview_vpn_manual_mode"
+        private const val KEY_IDS_VIA_WEBVPN = "ids_via_webvpn"
+        private const val KEY_QR_VIA_WEBVPN = "qr_via_webvpn"
+        private const val KEY_SEND_ENGLISH_SMS = "send_english_sms"
         private const val MAX_CAPTCHA_ATTEMPTS = 5
+
+        /** 「ids 走 WebVPN」：默认关闭（走公网 ids）。 */
+        fun getIdsViaWebVpn(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getBoolean(KEY_IDS_VIA_WEBVPN, false)
+        }
+
+        fun setIdsViaWebVpn(context: Context, enabled: Boolean) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putBoolean(KEY_IDS_VIA_WEBVPN, enabled).apply()
+        }
+
+        /** 「二维码走 WebVPN」：默认关闭（走公网 ids）。 */
+        fun getQrViaWebVpn(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getBoolean(KEY_QR_VIA_WEBVPN, false)
+        }
+
+        fun setQrViaWebVpn(context: Context, enabled: Boolean) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putBoolean(KEY_QR_VIA_WEBVPN, enabled).apply()
+        }
 
         fun hasPersistedSession(context: Context): Boolean {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -1307,6 +1781,37 @@ class WbuSyncEngine(
         fun setManualWebViewForVpn(context: Context, enabled: Boolean) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit().putBoolean(KEY_USE_WEBVIEW_VPN_MANUAL_MODE, enabled).apply()
+        }
+
+        /** 当前软件语言是否为简体中文（App 语言或跟随系统）。 */
+        fun isSimplifiedChinese(context: Context): Boolean {
+            val tags = AppCompatDelegate.getApplicationLocales().toLanguageTags()
+            return if (tags.isBlank()) {
+                val loc = Locale.getDefault()
+                loc.language.equals("zh", ignoreCase = true) &&
+                    !loc.country.equals("TW", ignoreCase = true) &&
+                    loc.script != "Hant"
+            } else {
+                val lower = tags.lowercase()
+                lower.startsWith("zh-cn") || lower.startsWith("zh-hans")
+            }
+        }
+
+        /**
+         * 是否发送英语验证码（可能更慢）。
+         * 默认：中文（false）；仅当用户显式开启时发英文。简体中文始终强制中文（结合 [isSimplifiedChinese]）。
+         */
+        fun getSendEnglishSms(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            if (!prefs.contains(KEY_SEND_ENGLISH_SMS)) {
+                return false
+            }
+            return prefs.getBoolean(KEY_SEND_ENGLISH_SMS, false)
+        }
+
+        fun setSendEnglishSms(context: Context, enabled: Boolean) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putBoolean(KEY_SEND_ENGLISH_SMS, enabled).apply()
         }
     }
 
