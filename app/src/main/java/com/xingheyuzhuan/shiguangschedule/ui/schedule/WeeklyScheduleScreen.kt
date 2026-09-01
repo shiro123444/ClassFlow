@@ -51,6 +51,7 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.VpnFullLoginStatus
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaData
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaResult
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
 import com.xingheyuzhuan.shiguangschedule.data.model.schedule_style.ScheduleModeProto
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTable
 import java.util.Locale
@@ -176,6 +177,9 @@ fun WeeklyScheduleScreen(
     // 滑块验证码对话框状态（统一认证滑块）
     var captchaDialogData by remember { mutableStateOf<SliderCaptchaData?>(null) }
     var captchaDeferred by remember { mutableStateOf<CompletableDeferred<SliderCaptchaResult?>?>(null) }
+
+    // 校园网不可达时「是否继续」确认对话框状态
+    var campusConfirmDeferred by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -734,7 +738,16 @@ fun WeeklyScheduleScreen(
                             return@launch
                         }
 
-                        // 非 VPN（校园网直连）
+                        // 非 VPN（校园网直连）——实时探测校园网环境（会同步更新登录框提示），不可达时询问是否继续
+                        val onCampus = WbuNetworkProbe.refresh()
+                        if (!onCampus) {
+                            val proceed = CompletableDeferred<Boolean>()
+                            withContext(Dispatchers.Main) {
+                                campusConfirmDeferred = proceed
+                            }
+                            val continueLogin = proceed.await()
+                            if (!continueLogin) return@launch
+                        }
                         wbuSyncStatus = "正在连接校园网..."
                         val engine = WbuSyncEngine(context = appContext, useVpn = false)
                         val loginSuccess = engine.login(
@@ -825,6 +838,34 @@ fun WeeklyScheduleScreen(
                 captchaDeferred?.complete(SliderCaptchaResult.Cancel)
                 captchaDialogData = null
                 captchaDeferred = null
+            }
+        )
+    }
+
+    // 校园网不可达「是否继续」确认对话框
+    campusConfirmDeferred?.let { deferred ->
+        AlertDialog(
+            onDismissRequest = {
+                deferred.complete(false)
+                campusConfirmDeferred = null
+            },
+            title = { Text("未检测到校园网") },
+            text = { Text("当前好像不在校园网环境，校园网直连可能无法成功。是否仍要继续尝试？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deferred.complete(true)
+                        campusConfirmDeferred = null
+                    }
+                ) { Text("继续") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        deferred.complete(false)
+                        campusConfirmDeferred = null
+                    }
+                ) { Text("取消") }
             }
         )
     }

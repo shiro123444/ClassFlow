@@ -1,5 +1,6 @@
 package com.xingheyuzhuan.shiguangschedule.ui.components
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthMode
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
 import com.xingheyuzhuan.shiguangschedule.ui.theme.LocalIsDarkTheme
 
 import androidx.compose.animation.AnimatedVisibility
@@ -49,6 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -82,6 +84,7 @@ fun WbuAuthBottomSheet(
     var useVpn by remember(initialUseVpn) { mutableStateOf(initialUseVpn) }
     var authMode by remember { mutableStateOf(WbuAuthMode.UNIFIED_CAS) }
     var authMenuExpanded by remember { mutableStateOf(false) }
+    val campus by WbuNetworkProbe.campusState.collectAsState()
     val loadingTips = remember {
         listOf(
             "正在和教务系统打招呼...",
@@ -100,6 +103,11 @@ fun WbuAuthBottomSheet(
             delay(1700)
             loadingTipIndex = (loadingTipIndex + 1) % loadingTips.size
         }
+    }
+
+    // 选择校园网直连（非 VPN）时实时探测校园网环境；结果经 campusState 更新提示
+    LaunchedEffect(useVpn) {
+        if (!useVpn) WbuNetworkProbe.refresh()
     }
 
     ModalBottomSheet(
@@ -259,6 +267,23 @@ fun WbuAuthBottomSheet(
                         enabled = !isLoading
                     )
                 }
+            }
+
+            // 校园网环境提示（仅直连模式显示）：检测中 / 未检测到；检测到校园网则不显示
+            if (!useVpn && campus != true) {
+                val (hintText, hintColor) = when (campus) {
+                    null -> "正在检测校园网..." to MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> "未检测到校园网，建议使用 WebVPN" to MaterialTheme.colorScheme.error
+                }
+                Text(
+                    text = hintText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = hintColor,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                )
             }
 
             Spacer(modifier = Modifier.height(32.dp))
