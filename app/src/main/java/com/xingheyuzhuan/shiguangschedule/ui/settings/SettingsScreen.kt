@@ -359,7 +359,7 @@ fun ProfileHeader() {
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
                 Text(
-                    text = "欢迎每一位 wbuer~",
+                    text = "欢迎每一位WBUer~",
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                 )
