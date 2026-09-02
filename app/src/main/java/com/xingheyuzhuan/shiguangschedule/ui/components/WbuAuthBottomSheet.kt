@@ -157,6 +157,7 @@ fun WbuAuthBottomSheet(
     var panelExpanded by remember { mutableStateOf(false) }
     var idsVpnEnabled by remember { mutableStateOf(WbuSyncEngine.getIdsViaWebVpn(context)) }
     var qrVpnEnabled by remember { mutableStateOf(WbuSyncEngine.getQrViaWebVpn(context)) }
+    var pcUaEnabled by remember { mutableStateOf(WbuSyncEngine.getUsePcUserAgent(context)) }
     val isZhCN = remember { WbuSyncEngine.isSimplifiedChinese(context) }
     var engSmsEnabled by remember { mutableStateOf(WbuSyncEngine.getSendEnglishSms(context)) }
     var dynamicCode by remember(method) { mutableStateOf("") }
@@ -456,6 +457,14 @@ fun WbuAuthBottomSheet(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp)
+                    )
+                    ToggleRow(
+                        label = "桌面版UA",
+                        checked = pcUaEnabled,
+                        onCheckedChange = {
+                            pcUaEnabled = it
+                            WbuSyncEngine.setUsePcUserAgent(context, it)
+                        }
                     )
                     ToggleRow(
                         label = "统一认证经过WebVPN",

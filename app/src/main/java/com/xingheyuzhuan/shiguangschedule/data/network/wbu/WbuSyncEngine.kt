@@ -224,7 +224,7 @@ class WbuSyncEngine(
             .followSslRedirects(true)
             .addInterceptor { chain ->
                 val req = chain.request().newBuilder()
-                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+                    .header("User-Agent", authUserAgent())
                     .header("Accept-Language", authAcceptLanguage)
                     .build()
                 chain.proceed(req)
@@ -265,6 +265,18 @@ class WbuSyncEngine(
 
     /** 认证请求统一使用中文语言偏好（短信语言由 locale cookie 决定）。 */
     private val authAcceptLanguage = "zh-CN,zh;q=0.9,en;q=0.5"
+
+    /**
+     * 无头登录使用的 User-Agent。
+     * 默认移动端（服务端返回移动版登录页）；开启「使用 PC User-Agent」后用桌面 UA，
+     * 使服务端返回 PC 版登录页（其错误提示在 #showErrorTip，表单为 #pwdFromId）。
+     */
+    private fun authUserAgent(): String =
+        if (getUsePcUserAgent(context)) {
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        } else {
+            "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+        }
 
     /** Spring CookieLocaleResolver 会话 locale cookie 名，决定短信文案/通道语言。 */
     private val authLocaleCookieName = "org.springframework.web.servlet.i18n.CookieLocaleResolver.LOCALE"
@@ -622,6 +634,26 @@ class WbuSyncEngine(
             .replace("\\'", "'")
             .replace("\\\\", "\\")
             .trim()
+    }
+
+    /**
+     * 从统一身份认证(CAS)登录页提取真实错误文案。
+     * 优先取 #showErrorTip 的文本；若为空再按常见错误关键词识别。
+     * 提取不到时返回 null（UI 走中性兜底），不会误标成网络故障。
+     */
+    private fun extractCasErrorMessage(html: String): String? {
+        if (html.isBlank()) return null
+        val doc = runCatching { Jsoup.parse(html) }.getOrNull() ?: return null
+        // 从服务端渲染的错误提示元素提取：
+        //  移动端：#formErrorTip2 / #formErrorTip（本例为「您提供的用户名或者密码有误」）
+        //  PC 端：#showErrorTip
+        // 不要对原始 HTML 做关键词扫描，避免命中验证码图片 alt="验证码错误" 等误报。
+        val selectors = listOf("#formErrorTip2", "#formErrorTip", "#showErrorTip")
+        for (sel in selectors) {
+            val text = doc.selectFirst(sel)?.text()?.trim()?.takeIf { it.isNotBlank() }
+            if (text != null) return text
+        }
+        return null
     }
 
     private fun parseSangforExponent(raw: String): BigInteger {
@@ -1055,10 +1087,12 @@ class WbuSyncEngine(
         captchaProvider: SliderCaptchaProvider? = null
     ): Boolean {
         clearJwxtSessionCookies()
+        lastLocalLoginFailure = null
+        lastLocalLoginError = null
         val origin = idsLoginUrl.toHttpUrlOrNull()?.let { "${it.scheme}://${it.host}:${it.port}" }
 
         // 首次获取登录页面（解析表单隐藏域、盐值，并检测是否需要验证码）
-        var page = fetchCasLoginPage(idsLoginUrl, flowTag) ?: return false
+        val page = fetchCasLoginPage(idsLoginUrl, flowTag) ?: return false
 
         // HTML 检测可能失效，再通过服务端接口二次确认是否需要验证码
         var captchaNeeded = page.needCaptcha
@@ -1076,9 +1110,10 @@ class WbuSyncEngine(
                 Log.w("WbuSyncEngine", "$flowTag CAS captcha not solved")
                 return false
             }
-            Log.i("WbuSyncEngine", "$flowTag CAS captcha verified, refresh login page for fresh form fields")
-            // 验证码通过后重新拉取登录页，刷新 execution / 盐值
-            page = fetchCasLoginPage(idsLoginUrl, flowTag) ?: return false
+            // 注意：不重新获取登录页。滑块 verifySliderCaptcha.htl 设置的是服务端会话标记，
+            // 复用最初拉取的 execution 提交，才与该"已验证"标记绑定一致（与站点行为一致）。
+            // 若此处再 fetchCasLoginPage 拿全新 execution，新 execution 无已验证标记会被判"验证码错误"。
+            Log.i("WbuSyncEngine", "$flowTag CAS captcha verified, submit with original execution")
         }
 
         val hiddenFields = page.hiddenFields
@@ -1112,6 +1147,10 @@ class WbuSyncEngine(
             if (casPostStaysOnLogin) {
                 Log.w("WbuSyncEngine", "$flowTag CAS stayed on login page. URL=$finalUrl")
                 Log.d("WbuSyncEngine", "$flowTag CAS stay snippet=${body.take(500)}")
+                // CAS 密码错误：提取真实报错上屏。注意 CAS 不涉及超星验证码，
+                // 故标为 CREDENTIALS（不是 CAPTCHA），避免误触 jwxt 验证码弹窗。
+                lastLocalLoginFailure = LocalLoginFailure.CREDENTIALS
+                lastLocalLoginError = extractCasErrorMessage(body)
             }
         }
         if (casPostStaysOnLogin) return false
@@ -1430,9 +1469,16 @@ class WbuSyncEngine(
     }
 
     private fun extractCasError(html: String): String {
-        Regex("""(用户名或密码错误|验证码错误|账号已被锁定|该帐号不存在|该帐号已经被冻结|登录凭证不可用|动态码不正确|动态码已失效|登录失败)""")
-            .find(html)?.let { return it.value }
-        Regex("""id="showErrorTip"[^>]*>([^<]+)""").find(html)?.let { return it.groupValues[1].trim() }
+        // 与 extractCasErrorMessage 同源（动态码/二维码共用）：
+        // 只从服务端渲染的错误提示元素取文本，避免命中验证码图片 alt="验证码错误" 等误报。
+        // 移动端：#formErrorTip2 / #formErrorTip；PC 端：#showErrorTip。
+        if (html.isBlank()) return ""
+        val doc = runCatching { Jsoup.parse(html) }.getOrNull() ?: return ""
+        val selectors = listOf("#formErrorTip2", "#formErrorTip", "#showErrorTip")
+        for (sel in selectors) {
+            val text = doc.selectFirst(sel)?.text()?.trim()?.takeIf { it.isNotBlank() }
+            if (text != null) return text
+        }
         return ""
     }
 
@@ -1833,6 +1879,7 @@ class WbuSyncEngine(
         private const val KEY_IDS_VIA_WEBVPN = "ids_via_webvpn"
         private const val KEY_QR_VIA_WEBVPN = "qr_via_webvpn"
         private const val KEY_SEND_ENGLISH_SMS = "send_english_sms"
+        private const val KEY_USE_PC_USER_AGENT = "use_pc_user_agent"
         private const val MAX_CAPTCHA_ATTEMPTS = 5
 
         // 教务系统直连登录（/admin/login）JSEncrypt 硬编码公钥（1024 位 PKCS#1）
@@ -1859,6 +1906,17 @@ class WbuSyncEngine(
         fun setQrViaWebVpn(context: Context, enabled: Boolean) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit().putBoolean(KEY_QR_VIA_WEBVPN, enabled).apply()
+        }
+
+        /** 「使用 PC User-Agent」：默认关闭（移动端 UA，服务端返回移动版登录页）。 */
+        fun getUsePcUserAgent(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getBoolean(KEY_USE_PC_USER_AGENT, false)
+        }
+
+        fun setUsePcUserAgent(context: Context, enabled: Boolean) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putBoolean(KEY_USE_PC_USER_AGENT, enabled).apply()
         }
 
         fun hasPersistedSession(context: Context): Boolean {
