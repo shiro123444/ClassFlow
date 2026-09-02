@@ -5,10 +5,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,7 +27,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Sync
@@ -36,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.blur
@@ -88,7 +90,9 @@ import com.xingheyuzhuan.shiguangschedule.ui.schedule.components.ScheduleGridVie
 import com.xingheyuzhuan.shiguangschedule.ui.schedule.components.ScheduleGridStyleComposed
 import com.xingheyuzhuan.shiguangschedule.ui.schedule.components.WbuSyncActionButton
 import com.xingheyuzhuan.shiguangschedule.ui.schedule.components.WeekSelectorBottomSheet
+import com.xingheyuzhuan.shiguangschedule.ui.schedule.components.liquidGlassSurfaceModifier
 import com.xingheyuzhuan.shiguangschedule.ui.schedule.components.rememberScheduleGridState
+import dev.chrisbanes.haze.HazeState
 import com.xingheyuzhuan.shiguangschedule.ui.theme.ClassFlowTheme
 import com.xingheyuzhuan.shiguangschedule.ui.theme.ThemeGradients
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.web.WbuWebLoginAutofillStore
@@ -126,6 +130,7 @@ fun WeeklyScheduleScreen(
     viewModel: WeeklyScheduleViewModel = hiltViewModel(),
     weekTitleModifier: Modifier = Modifier,
     syncButtonModifier: Modifier = Modifier,
+    hazeState: HazeState? = null,
     onWeekTitleClickIntercept: (() -> Boolean)? = null,
     onSyncButtonClickIntercept: (() -> Boolean)? = null,
     onFloatingModeChange: (Boolean) -> Unit = {} // 悬浮课程模式状态通知（上游：挂起时隐藏底部导航栏）
@@ -274,45 +279,94 @@ fun WeeklyScheduleScreen(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
             containerColor = Color.Transparent,
             topBar = {
-                CenterAlignedTopAppBar(
+                // 左对齐：「第n周」放在左侧；右侧切换课表/同步按钮采用导航栏 Liquid Glass 毛玻璃样式
+                TopAppBar(
                     title = {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = weekTitleModifier.clickable {
-                                if (onWeekTitleClickIntercept?.invoke() == true) {
-                                    return@clickable
-                                }
-                                // Keep course tab behavior stable: title click only opens week selector,
-                                // never redirects to Settings implicitly.
-                                showWeekSelector = true
-                            }
+                        // ──【备份·角标原设计 无玻璃（WeekSelector 点击区）】如需回退，把下面这段还原为 title 内容即可 ──
+                        // Box(
+                        //     modifier = weekTitleModifier.clickable(
+                        //         interactionSource = remember { MutableInteractionSource() },
+                        //         indication = ripple(bounded = false),
+                        //         onClick = {
+                        //             if (onWeekTitleClickIntercept?.invoke() == true) {
+                        //                 return@clickable
+                        //             }
+                        //             showWeekSelector = true
+                        //         }
+                        //     )
+                        // ) {
+                        //     Text(
+                        //         text = uiState.weekTitle,
+                        //         fontSize = 18.sp,
+                        //         fontWeight = FontWeight.ExtraBold,
+                        //         color = composedStyle.pageTextColor ?: MaterialTheme.colorScheme.onSurface
+                        //     )
+                        //     val titleTint = (composedStyle.pageTextColor
+                        //         ?: MaterialTheme.colorScheme.onSurface).copy(alpha = 0.7f)
+                        //     Canvas(
+                        //         modifier = Modifier
+                        //             .size(8.dp)
+                        //             .align(Alignment.BottomEnd)
+                        //             .offset(x = 4.dp, y = (-2).dp)
+                        //     ) {
+                        //         val tri = Path().apply {
+                        //             moveTo(0f, size.height)
+                        //             lineTo(size.width, size.height)
+                        //             lineTo(size.width, 0f)
+                        //             close()
+                        //         }
+                        //         drawPath(tri, color = titleTint)
+                        //     }
+                        // }
+                        Box(
+                            modifier = weekTitleModifier
+                                .then(liquidGlassSurfaceModifier(hazeState, RoundedCornerShape(16.dp)))
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = ripple(bounded = false),
+                                    onClick = {
+                                        if (onWeekTitleClickIntercept?.invoke() == true) {
+                                            return@clickable
+                                        }
+                                        // Keep course tab behavior stable: title click only opens week selector,
+                                        // never redirects to Settings implicitly.
+                                        showWeekSelector = true
+                                    }
+                                )
+                                .padding(horizontal = 18.dp, vertical = 12.dp)
                         ) {
                             Text(
                                 text = uiState.weekTitle,
                                 fontSize = 18.sp,
-                                fontWeight = FontWeight.ExtraBold,
+                                fontWeight = FontWeight.Normal,
                                 color = composedStyle.pageTextColor ?: MaterialTheme.colorScheme.onSurface
                             )
-                            Icon(
-                                imageVector = Icons.Default.ArrowDropDown,
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp).offset(y = (-4).dp),
-                                tint = (composedStyle.pageTextColor ?: MaterialTheme.colorScheme.onSurface).copy(alpha = 0.7f)
-                            )
+                            // 角标 ◢ 已隐藏（备份在标题区上方的注释里）
                         }
                     },
                     actions = {
-                        // 课表切换（上游同步）
-                        IconButton(onClick = { showTableSwitcher = true }) {
-                            Icon(
-                                imageVector = Icons.Default.SwapHoriz,
-                                contentDescription = stringResource(R.string.action_select_table),
-                                tint = composedStyle.pageTextColor ?: MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                        WbuSyncActionButton(
-                            modifier = syncButtonModifier,
-                            onClick = {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // 课表/学期切换（上游同步，Liquid Glass 毛玻璃样式）
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .then(liquidGlassSurfaceModifier(hazeState, RoundedCornerShape(16.dp)))
+                                    .clickable { showTableSwitcher = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.SwapHoriz,
+                                    contentDescription = stringResource(R.string.action_select_table),
+                                    tint = composedStyle.pageTextColor ?: MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            WbuSyncActionButton(
+                                modifier = syncButtonModifier,
+                                hazeState = hazeState,
+                                onClick = {
                             if (onSyncButtonClickIntercept?.invoke() == true) return@WbuSyncActionButton
                             if (isWbuSyncing) return@WbuSyncActionButton
                             coroutineScope.launch {
@@ -384,6 +438,7 @@ fun WeeklyScheduleScreen(
                                     showWbuAuthDialog = true
                                 }
                             })
+                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         // Keep top bar color consistent with schedule background in all states.

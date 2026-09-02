@@ -22,6 +22,51 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.xingheyuzhuan.shiguangschedule.ui.theme.ClassFlowTheme
 import com.xingheyuzhuan.shiguangschedule.ui.theme.LocalIsDarkTheme
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.hazeEffect
+
+/**
+ * Liquid Glass 毛玻璃表面容器修饰器。
+ * 与底部导航栏 [BottomNavigationBar] 同源样式：圆角裁剪 + 半透明表面 + 顶部打光渐变描边，
+ * 传入 [hazeState] 时启用真实背景模糊，否则回退为纯半透明表面。
+ *
+ * @param hazeState Haze 模糊源（底部导航栏传入的 dockHazeState）；为 null 时不启用模糊。
+ * @param shape 容器形状（圆角矩形）。
+ */
+@Composable
+internal fun liquidGlassSurfaceModifier(
+    hazeState: HazeState?,
+    shape: RoundedCornerShape
+): Modifier {
+    val isDark = LocalIsDarkTheme.current
+    val glassTint = if (isDark) Color(0xFF1A2332) else Color(0xFFFFFBF8)
+    val surfaceTint = glassTint.copy(alpha = if (isDark) 0.22f else 0.75f)
+    val hazeTint = glassTint.copy(alpha = if (isDark) 0.28f else 0.42f)
+    val borderTop = if (isDark) Color.White.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.90f)
+    val borderBottom = if (isDark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.25f)
+    return Modifier
+        .clip(shape)
+        .then(
+            if (hazeState != null) {
+                Modifier.hazeEffect(
+                    state = hazeState,
+                    style = HazeStyle(
+                        backgroundColor = hazeTint,
+                        tint = null,
+                        blurRadius = 20.dp
+                    )
+                )
+            } else {
+                Modifier.background(surfaceTint, shape)
+            }
+        )
+        .border(
+            width = 0.75.dp,
+            brush = Brush.verticalGradient(listOf(borderTop, borderBottom)),
+            shape = shape
+        )
+}
 
 /**
  * WBU 教务一键同步按钮。
@@ -29,34 +74,23 @@ import com.xingheyuzhuan.shiguangschedule.ui.theme.LocalIsDarkTheme
  *
  * @param onClick 单击：优先尝试使用已保存的登录态无感同步
  * @param onLongClick 长按：忽略已保存登录态，强制走重新登录流程
+ * @param hazeState 背景模糊源；传入时按钮采用与导航栏一致的 Liquid Glass 毛玻璃样式
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun WbuSyncActionButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    hazeState: HazeState? = null,
     onLongClick: (() -> Unit)? = null
 ) {
     val isDark = LocalIsDarkTheme.current
+    val shape = RoundedCornerShape(16.dp)
     Box(
         modifier = modifier
             .padding(end = 8.dp)
             .size(48.dp)
-            .border(
-                width = 0.8.dp,
-                brush = Brush.verticalGradient(
-                    listOf(
-                        Color.White.copy(alpha = if (isDark) 0.18f else 0.55f),
-                        Color.White.copy(alpha = if (isDark) 0.05f else 0.12f)
-                    )
-                ),
-                shape = RoundedCornerShape(14.dp)
-            )
-            .background(
-                color = MaterialTheme.colorScheme.surface.copy(alpha = if (isDark) 0.55f else 0.72f),
-                shape = RoundedCornerShape(14.dp)
-            )
-            .clip(RoundedCornerShape(14.dp))
+            .then(liquidGlassSurfaceModifier(hazeState, shape))
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick,

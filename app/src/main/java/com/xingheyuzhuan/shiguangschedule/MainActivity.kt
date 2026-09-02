@@ -493,6 +493,7 @@ fun AppNavigation(
                                 navBridge = navBridge,
                                 weekTitleModifier = weekTitleTargetModifier,
                                 syncButtonModifier = syncButtonTargetModifier,
+                                hazeState = dockHazeState,
                                 onFloatingModeChange = { isFloatingCourseMode = it },
                                 onWeekTitleClickIntercept = {
                                     if (showOnboarding && introShowcaseState.currentTargetIndex in 0..1) {
