@@ -161,6 +161,7 @@ fun WbuAuthBottomSheet(
     var pcUaEnabled by remember { mutableStateOf(WbuSyncEngine.getUsePcUserAgent(context)) }
     var skipCampusCheck by remember { mutableStateOf(WbuSyncEngine.getSkipCampusCheck(context)) }
     var keepTeacherId by remember { mutableStateOf(WbuSyncEngine.getKeepTeacherId(context)) }
+    var keepBuilding by remember { mutableStateOf(WbuSyncEngine.getKeepBuilding(context)) }
     val isZhCN = remember { WbuSyncEngine.isSimplifiedChinese(context) }
     var engSmsEnabled by remember { mutableStateOf(WbuSyncEngine.getSendEnglishSms(context)) }
     var dynamicCode by remember(method) { mutableStateOf("") }
@@ -485,6 +486,14 @@ fun WbuAuthBottomSheet(
                         onCheckedChange = {
                             keepTeacherId = it
                             WbuSyncEngine.setKeepTeacherId(context, it)
+                        }
+                    )
+                    ToggleRow(
+                        label = "保留建筑名称",
+                        checked = keepBuilding,
+                        onCheckedChange = {
+                            keepBuilding = it
+                            WbuSyncEngine.setKeepBuilding(context, it)
                         }
                     )
                     ToggleRow(

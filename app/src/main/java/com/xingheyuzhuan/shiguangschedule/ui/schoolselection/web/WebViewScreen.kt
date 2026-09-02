@@ -342,7 +342,9 @@ fun WebViewScreen(
             }
 
             val jsCode = jsFile.readText()
-            webView.evaluateJavascript(jsCode, null)
+            val keepBuilding = WbuSyncEngine.getKeepBuilding(context)
+            val preamble = "window.WBU_KEEP_BUILDING = $keepBuilding;\n"
+            webView.evaluateJavascript(preamble + jsCode, null)
             autoImportTriggered = true
             Toast.makeText(context, "WBU auto import triggered", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {

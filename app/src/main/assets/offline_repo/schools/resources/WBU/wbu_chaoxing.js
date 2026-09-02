@@ -144,7 +144,8 @@
     function buildPosition(item) {
         const building = cleanText(item?.jxlmc);
         const room = cleanText(item?.croommc);
-        if (building && room) return room.includes(building) ? room : `${building} ${room}`;
+        const keepBuilding = window.WBU_KEEP_BUILDING === true;
+        if (keepBuilding && building && room && !room.includes(building)) return `${building} ${room}`;
         return room || building || "";
     }
 

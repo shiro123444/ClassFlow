@@ -921,7 +921,8 @@ class WbuSyncEngine(
             val teacher = if (keepTeacherId) rawTeacher else stripTeacherId(rawTeacher)
             val building = cleanImportedText(item.optString("jxlmc", ""))
             val room = cleanImportedText(item.optString("croommc", ""))
-            val position = if (building.isNotEmpty() && room.isNotEmpty() && !room.contains(building)) {
+            // 默认只用教室(croommc)，对齐 school.js；开启「保留建筑名称」才拼接教学楼名
+            val position = if (keepBuilding() && building.isNotEmpty() && room.isNotEmpty() && !room.contains(building)) {
                 "$building $room"
             } else {
                 room.ifEmpty { building }
@@ -1070,6 +1071,9 @@ class WbuSyncEngine(
 
     /** 是否保留教师工号（读取设置，默认去除）。 */
     private fun keepTeacherId(): Boolean = getKeepTeacherId(context)
+
+    /** 是否保留建筑名称（读取设置，默认不保留）。 */
+    private fun keepBuilding(): Boolean = getKeepBuilding(context)
 
     private suspend fun loginDirect(
         studentId: String,
@@ -2057,6 +2061,7 @@ class WbuSyncEngine(
         private const val KEY_USE_PC_USER_AGENT = "use_pc_user_agent"
         private const val KEY_SKIP_CAMPUS_CHECK = "skip_campus_check"
         private const val KEY_KEEP_TEACHER_ID = "keep_teacher_id"
+        private const val KEY_KEEP_BUILDING = "keep_building"
         private const val MAX_CAPTCHA_ATTEMPTS = 5
 
         // 教务系统直连登录（/admin/login）JSEncrypt 硬编码公钥（1024 位 PKCS#1）
@@ -2116,6 +2121,17 @@ class WbuSyncEngine(
         fun setKeepTeacherId(context: Context, enabled: Boolean) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit().putBoolean(KEY_KEEP_TEACHER_ID, enabled).apply()
+        }
+
+        /** 「保留建筑名称」：为 true 时教室位置前拼接教学楼名（如"1号楼 101"），false 只显示教室。默认不保留。 */
+        fun getKeepBuilding(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getBoolean(KEY_KEEP_BUILDING, false)
+        }
+
+        fun setKeepBuilding(context: Context, enabled: Boolean) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putBoolean(KEY_KEEP_BUILDING, enabled).apply()
         }
 
         /** 去除教师名末尾工号（如"王老师（20240999）"->"王老师"）；无则原样返回。供安卓端各处复用。 */
