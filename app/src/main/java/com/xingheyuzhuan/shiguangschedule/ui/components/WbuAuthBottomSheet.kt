@@ -158,6 +158,8 @@ fun WbuAuthBottomSheet(
     var idsVpnEnabled by remember { mutableStateOf(WbuSyncEngine.getIdsViaWebVpn(context)) }
     var qrVpnEnabled by remember { mutableStateOf(WbuSyncEngine.getQrViaWebVpn(context)) }
     var pcUaEnabled by remember { mutableStateOf(WbuSyncEngine.getUsePcUserAgent(context)) }
+    var skipCampusCheck by remember { mutableStateOf(WbuSyncEngine.getSkipCampusCheck(context)) }
+    var keepTeacherId by remember { mutableStateOf(WbuSyncEngine.getKeepTeacherId(context)) }
     val isZhCN = remember { WbuSyncEngine.isSimplifiedChinese(context) }
     var engSmsEnabled by remember { mutableStateOf(WbuSyncEngine.getSendEnglishSms(context)) }
     var dynamicCode by remember(method) { mutableStateOf("") }
@@ -189,9 +191,10 @@ fun WbuAuthBottomSheet(
         }
     }
 
-    // 选择校园网直连（非 VPN）时实时探测校园网环境；结果经 campusState 更新提示
-    LaunchedEffect(useVpn) {
-        if (!useVpn) WbuNetworkProbe.refresh()
+    // 选择校园网直连（非 VPN）时实时探测校园网环境；结果经 campusState 更新提示。
+    // 开启「不检测校园网环境」则跳过探测。
+    LaunchedEffect(useVpn, skipCampusCheck) {
+        if (!useVpn && !skipCampusCheck) WbuNetworkProbe.refresh()
     }
 
     // 动态码发送后倒计时；每次开始冷却（cooldownRun 变化）都会重跑（按钮显示重新发送 (Ns)）
@@ -412,8 +415,9 @@ fun WbuAuthBottomSheet(
                 }
             }
 
-            // 校园网环境提示（仅直连模式显示）：检测中 / 未检测到；检测到校园网则不显示
-            if (!useVpn && campus != true) {
+            // 校园网环境提示（仅直连模式显示）：检测中 / 未检测到；检测到校园网则不显示。
+            // 开启「不检测校园网环境」时不探测、也不显示该提示。
+            if (!useVpn && !skipCampusCheck && campus != true) {
                 val (hintText, hintColor) = when (campus) {
                     null -> "正在检测校园网..." to MaterialTheme.colorScheme.onSurfaceVariant
                     else -> "未检测到校园网，建议使用 WebVPN" to MaterialTheme.colorScheme.error
@@ -464,6 +468,22 @@ fun WbuAuthBottomSheet(
                         onCheckedChange = {
                             pcUaEnabled = it
                             WbuSyncEngine.setUsePcUserAgent(context, it)
+                        }
+                    )
+                    ToggleRow(
+                        label = "不检测校园网环境",
+                        checked = skipCampusCheck,
+                        onCheckedChange = {
+                            skipCampusCheck = it
+                            WbuSyncEngine.setSkipCampusCheck(context, it)
+                        }
+                    )
+                    ToggleRow(
+                        label = "保留教师工号",
+                        checked = keepTeacherId,
+                        onCheckedChange = {
+                            keepTeacherId = it
+                            WbuSyncEngine.setKeepTeacherId(context, it)
                         }
                     )
                     ToggleRow(

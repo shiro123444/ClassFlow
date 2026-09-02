@@ -703,6 +703,18 @@ class WeeklyScheduleViewModel @Inject constructor(
             courseTableRepository.upsertCourse(courseWithWeeks.course, weeks)
         }
     }
+
+    /** 写入学期配置（开学日期/总周数）；config 为 null 时跳过。 */
+    suspend fun applySemesterConfig(config: com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSemesterConfig?) {
+        if (config == null) return
+        val tableId = _uiState.value.tableId ?: uiState.value.tableId ?: return
+        val current = appSettingsRepository.getCourseConfigOnce(tableId)
+        val updated = (current ?: com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTableConfig(courseTableId = tableId)).copy(
+            semesterStartDate = config.semesterStartDate ?: current?.semesterStartDate,
+            semesterTotalWeeks = config.semesterTotalWeeks
+        )
+        appSettingsRepository.insertOrUpdateCourseConfig(updated)
+    }
 }
 
 /** 归一化课程：原始课程 + 网格坐标（上游同步） */

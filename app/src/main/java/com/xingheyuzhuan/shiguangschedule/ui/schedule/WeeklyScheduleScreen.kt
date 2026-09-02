@@ -684,6 +684,9 @@ fun WeeklyScheduleScreen(
         val confirmCampusIfDirect: suspend (Boolean) -> Boolean = { useVpn ->
             if (useVpn) {
                 true
+            } else if (WbuSyncEngine.getSkipCampusCheck(appContext)) {
+                // 「不检测校园网环境」开启：跳过探测与确认
+                true
             } else {
                 val onCampus = WbuNetworkProbe.refresh()
                 if (onCampus) {
@@ -796,6 +799,7 @@ fun WeeklyScheduleScreen(
                                 val courses = vpnEngine.fetchCourseData(activeTableId)
                                 if (courses != null && courses.isNotEmpty()) {
                                     viewModel.importCourses(courses)
+                                    viewModel.applySemesterConfig(vpnEngine.fetchSemesterConfig())
                                     wbuSyncStatus = ""
                                     showWbuAuthDialog = false
                                     snackbarHostState.showSuccessSnackbar("课表导入成功！")
@@ -835,6 +839,7 @@ fun WeeklyScheduleScreen(
                                 val courses = vpnEngine.fetchCourseData(activeTableId)
                                 if (courses != null && courses.isNotEmpty()) {
                                     viewModel.importCourses(courses)
+                                    viewModel.applySemesterConfig(vpnEngine.fetchSemesterConfig())
                                     wbuSyncStatus = ""
                                     showWbuAuthDialog = false
                                     snackbarHostState.showSuccessSnackbar("课表导入成功！")
@@ -910,6 +915,7 @@ fun WeeklyScheduleScreen(
                         val courses = engine.fetchCourseData(activeTableId)
                         if (courses != null && courses.isNotEmpty()) {
                             viewModel.importCourses(courses)
+                            viewModel.applySemesterConfig(engine.fetchSemesterConfig())
                             wbuSyncStatus = ""
                             showWbuAuthDialog = false
                             snackbarHostState.showSuccessSnackbar("课表导入成功！")

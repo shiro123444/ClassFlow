@@ -94,6 +94,15 @@ enum class QrStatus {
 }
 
 /**
+ * 学期配置：从 /admin/api/getZclistByXnxq 派生。
+ * semesterStartDate 为第 1 周开始日期（"yyyy-MM-dd"），semesterTotalWeeks 为总周数。
+ */
+data class WbuSemesterConfig(
+    val semesterStartDate: String?,
+    val semesterTotalWeeks: Int
+)
+
+/**
  * 二维码登录会话：uuid 用于轮询与提交，content 用于本地生成二维码，execution/lt 用于最终提交。
  */
 data class QrSession(
@@ -788,85 +797,245 @@ class WbuSyncEngine(
                 return@withContext null
             }
 
-            val courses = mutableListOf<CourseWithWeeks>()
+            // 复用 js（school.js）的解析：按 天+起始节次 单元格分组，同课程周次求并集，
+            // 再合并连续节次、同节次不同周次、并去重。
+            val draftCourses = buildDraftCourses(jsonArray, keepTeacherId())
+            if (draftCourses.isEmpty()) {
+                Log.w("WbuSyncEngine", "No parseable courses from sdpkkbList")
+                return@withContext emptyList()
+            }
+            val mergedDrafts = mergeAndDistinctCourses(draftCourses)
 
-            for (i in 0 until jsonArray.length()) {
-                val item = jsonArray.optJSONObject(i) ?: continue
-
-                // 使用和 js 相同的逻辑进行字段提取
-                val fromKcmc = cleanImportedText(item.optString("kcmc", ""))
-                val fromJxbmc = cleanImportedText(item.optString("jxbmc", ""))
-                val name = when {
-                    fromKcmc.isNotBlank() -> fromKcmc
-                    fromJxbmc.isNotBlank() -> fromJxbmc
-                    else -> "未命名课程"
-                }
-
-                val teacher = cleanImportedText(item.optString("tmc", ""))
-                val building = cleanImportedText(item.optString("jxlmc", ""))
-                val room = cleanImportedText(item.optString("croommc", ""))
-                val position = if (building.isNotEmpty() && room.isNotEmpty() && !room.contains(building)) {
-                    "$building $room"
-                } else {
-                    room.ifEmpty { building }
-                }
-
-                val day = item.optInt("xingqi", 1).coerceIn(1..7)
-                
-                // 节次解析
-                var startSection = 1
-                val rqxl = item.optString("rqxl", "")
-                if (rqxl.matches(Regex("^\\d{3,4}$"))) {
-                    startSection = (rqxl.toIntOrNull() ?: 100) % 100
-                } else {
-                    startSection = item.optInt("djc", 1)
-                }
-                startSection = startSection.coerceIn(1..30)
-
-                val duration = item.optInt("djs", 1).coerceIn(1..8)
-                val endSection = startSection + duration - 1
-
-                // 周次解析
-                val weekNumbers = parseWeeks(
-                    cleanImportedText(item.optString("zc", "")),
-                    cleanImportedText(item.optString("zcstr", ""))
-                )
-
+            val courses = mergedDrafts.map { draft ->
                 val courseId = java.util.UUID.randomUUID().toString()
-                
                 val course = Course(
                     id = courseId,
                     courseTableId = tableId,
-                    name = name,
-                    day = day,
-                    startSection = startSection,
-                    endSection = endSection,
-                    teacher = teacher,
-                    position = position,
+                    name = draft.name,
+                    day = draft.day,
+                    startSection = draft.startSection,
+                    endSection = draft.endSection,
+                    teacher = draft.teacher,
+                    position = draft.position,
                     isCustomTime = false,
                     customStartTime = null,
                     customEndTime = null,
-                    colorInt = pickColorIndexForCourse(name)
+                    colorInt = pickColorIndexForCourse(draft.name)
                 )
-
-                val courseWeeks = weekNumbers.map {
-                    CourseWeek(courseId = courseId, weekNumber = it)
-                }
-
-                if (courseWeeks.isNotEmpty()) {
-                    courses.add(CourseWithWeeks(course, courseWeeks))
-                }
+                val weeks = draft.weeks.map { CourseWeek(courseId = courseId, weekNumber = it) }
+                CourseWithWeeks(course, weeks)
             }
 
-            // 合并连续节次（同一天、同一名字老师地点和周次）
-            val merged = mergeContinuousSections(courses)
-            Log.i("WbuSyncEngine", "Fetch course data done. parsed=${courses.size} merged=${merged.size}")
-            return@withContext merged
+            Log.i("WbuSyncEngine", "Fetch course data done. parsed=${draftCourses.size} merged=${courses.size}")
+            return@withContext courses
 
         } catch (e: Exception) {
             Log.e("WbuSyncEngine", "Fetch failed", e)
             null
         }
+    }
+
+    /** 中间课程草稿（解析期用，周次为去重排序列表）。 */
+    private data class DraftCourse(
+        val name: String,
+        val teacher: String,
+        val position: String,
+        val day: Int,
+        val startSection: Int,
+        val endSection: Int,
+        val weeks: List<Int>
+    )
+
+    /**
+     * 获取当前学期配置（开学日期、总周数），用于写入课表配置（周次⇄日期对齐）。
+     * 数据源：/admin/api/getZclistByXnxq。失败或未发布返回 null。
+     */
+    suspend fun fetchSemesterConfig(): WbuSemesterConfig? = withContext(Dispatchers.IO) {
+        runCatching {
+            val termReq = Request.Builder()
+                .url("$baseUrl/admin/xsd/xsdcjcx/getCurrentXnxq?sf_request_type=ajax")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .get()
+                .build()
+            val termRaw = client.newCall(termReq).execute().use { it.body?.string().orEmpty() }
+            if (looksLikeHtml(termRaw) || termRaw.isBlank()) return@withContext null
+            val xnxq = JSONObject(termRaw).optString("data", "")
+            if (xnxq.isEmpty()) return@withContext null
+
+            // 校区(xqdm)来自课表页默认校区，保证配置与所抓课程同一校区
+            val pageReq = Request.Builder()
+                .url("$baseUrl/admin/xsd/pkgl/xskb/queryKbForXsd?xnxq=${URLEncoder.encode(xnxq, "UTF-8")}")
+                .get()
+                .build()
+            val pageHtml = client.newCall(pageReq).execute().use { it.body?.string().orEmpty() }
+            val xqdm = runCatching { Jsoup.parse(pageHtml).select("#xqdm").first()?.attr("value") }
+                .getOrNull()?.trim().orEmpty()
+
+            val cfgReq = Request.Builder()
+                .url("$baseUrl/admin/api/getZclistByXnxq?xnxq=${URLEncoder.encode(xnxq, "UTF-8")}&role=&userId=&xqid=${URLEncoder.encode(xqdm, "UTF-8")}")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .get()
+                .build()
+            val cfgRaw = client.newCall(cfgReq).execute().use { it.body?.string().orEmpty() }
+            if (cfgRaw.isBlank()) return@withContext null
+            val data = JSONObject(cfgRaw).optJSONObject("data") ?: return@withContext null
+            val zclist = data.optJSONArray("zclist") ?: return@withContext null
+
+            val items = mutableListOf<Pair<Int, String>>()
+            for (i in 0 until zclist.length()) {
+                val z = zclist.optJSONObject(i) ?: continue
+                val zc = z.optInt("zc", 0)
+                val minrq = z.optString("minrq", "")
+                if (zc > 0 && minrq.isNotBlank()) items.add(zc to minrq)
+            }
+            if (items.isEmpty()) return@withContext null
+            val sorted = items.sortedBy { it.first }
+            WbuSemesterConfig(
+                semesterStartDate = sorted.first().second.take(10),
+                semesterTotalWeeks = sorted.maxOf { it.first }
+            )
+        }.getOrNull()
+    }
+
+    /**
+     * 参考 school.js parseCoursesFromRows：
+     * 按 (day, startSection) 单元格分组，同一课程（名称/教师/教室）的周次求并集；
+     * 再按"同一格内课程签名一致"的连续节次合并（rowspan），生成一条课程。
+     */
+    private fun buildDraftCourses(jsonArray: JSONArray, keepTeacherId: Boolean): List<DraftCourse> {
+        data class Cell(val day: Int, val section: Int)
+
+        val byCell = LinkedHashMap<Cell, LinkedHashMap<String, LinkedHashSet<Int>>>()
+        var maxSection = 0
+
+        for (i in 0 until jsonArray.length()) {
+            val item = jsonArray.optJSONObject(i) ?: continue
+            val fromKcmc = cleanImportedText(item.optString("kcmc", ""))
+            val fromJxbmc = cleanImportedText(item.optString("jxbmc", ""))
+            val name = when {
+                fromKcmc.isNotBlank() -> fromKcmc
+                fromJxbmc.isNotBlank() -> fromJxbmc
+                else -> "未命名课程"
+            }
+            val rawTeacher = cleanImportedText(item.optString("tmc", ""))
+            val teacher = if (keepTeacherId) rawTeacher else stripTeacherId(rawTeacher)
+            val building = cleanImportedText(item.optString("jxlmc", ""))
+            val room = cleanImportedText(item.optString("croommc", ""))
+            val position = if (building.isNotEmpty() && room.isNotEmpty() && !room.contains(building)) {
+                "$building $room"
+            } else {
+                room.ifEmpty { building }
+            }
+            val day = item.optInt("xingqi", 1).coerceIn(1..7)
+            val startSection = run {
+                val rqxl = item.optString("rqxl", "")
+                val fromRqxl = if (rqxl.matches(Regex("^\\d{3,4}$"))) (rqxl.toIntOrNull() ?: 100) % 100 else null
+                (fromRqxl ?: item.optInt("djc", 1)).coerceIn(1..30)
+            }
+            val weeks = parseWeeks(
+                cleanImportedText(item.optString("zc", "")),
+                cleanImportedText(item.optString("zcstr", ""))
+            )
+            if (name.isBlank() || weeks.isEmpty()) continue
+
+            maxSection = maxOf(maxSection, startSection)
+            val sig = "$name\u0001$teacher\u0001$position"
+            byCell.getOrPut(Cell(day, startSection)) { LinkedHashMap() }
+                .getOrPut(sig) { LinkedHashSet() }
+                .addAll(weeks)
+        }
+
+        val drafts = mutableListOf<DraftCourse>()
+
+        // 按天推进：仅当相邻节次的单元格"签名"完全一致且非空时视作同一 rowspan 合并。
+        for (day in 1..7) {
+            var runStart: Int? = null
+            var runSig = ""
+            fun flushRun(endSection: Int) {
+                val start = runStart ?: return
+                if (start == 0 || runSig.isEmpty()) { runStart = null; runSig = ""; return }
+                byCell[Cell(day, start)]?.forEach { (sig, weeks) ->
+                    val parts = sig.split('\u0001')
+                    if (parts.size == 3) {
+                        drafts.add(DraftCourse(parts[0], parts[1], parts[2], day, start, endSection, weeks.sorted()))
+                    }
+                }
+                runStart = null
+                runSig = ""
+            }
+            for (s in 1..maxSection + 1) {
+                val cell = byCell[Cell(day, s)]
+                val sig = cell?.entries
+                    ?.sortedBy { it.key }
+                    ?.joinToString("\u0001") { (sk, ws) -> "$sk|${ws.sorted().joinToString(",")}" }
+                    .orEmpty()
+                val ended = s == maxSection + 1
+                if (runStart != null && (ended || sig.isEmpty() || sig != runSig)) {
+                    flushRun(s - 1)
+                }
+                if (!ended && sig.isNotEmpty() && runStart == null) {
+                    runStart = s
+                    runSig = sig
+                }
+            }
+        }
+        return drafts
+    }
+
+    /**
+     * 参考 school.js mergeAndDistinctCourses：
+     * 1) 合并连续节次（名称/教师/地点/星期/周次一致且节次相邻）并延展结束节次；
+     * 2) 合并同节次不同周次（名称/教师/地点/星期/起止节次一致时周次并集）；
+     * 3) 完全重复跳过。
+     */
+    private fun mergeAndDistinctCourses(list: List<DraftCourse>): List<DraftCourse> {
+        if (list.size <= 1) return list
+
+        val norm = list.map { it.copy(weeks = it.weeks.sorted().distinct()) }
+
+        // 阶段1：合并连续节次 + 去重
+        val sorted1 = norm.sortedWith(compareBy(
+            { it.name }, { it.teacher }, { it.position }, { it.day },
+            { it.weeks.joinToString(",") }, { it.startSection }
+        ))
+        val step1 = mutableListOf<DraftCourse>()
+        var cur = sorted1[0]
+        for (i in 1 until sorted1.size) {
+            val nxt = sorted1[i]
+            val same = cur.name == nxt.name && cur.teacher == nxt.teacher &&
+                cur.position == nxt.position && cur.day == nxt.day &&
+                cur.weeks == nxt.weeks
+            val continuous = cur.endSection + 1 == nxt.startSection
+            val duplicate = cur.startSection == nxt.startSection && cur.endSection == nxt.endSection
+            when {
+                same && continuous -> cur = cur.copy(endSection = nxt.endSection)
+                same && duplicate -> { /* skip */ }
+                else -> { step1.add(cur); cur = nxt }
+            }
+        }
+        step1.add(cur)
+
+        // 阶段2：合并同节次不同周次（周次并集）
+        val sorted2 = step1.sortedWith(compareBy(
+            { it.name }, { it.teacher }, { it.position }, { it.day },
+            { it.startSection }, { it.endSection }
+        ))
+        val step2 = mutableListOf<DraftCourse>()
+        var c = sorted2[0]
+        for (i in 1 until sorted2.size) {
+            val n = sorted2[i]
+            val sameSection = c.name == n.name && c.teacher == n.teacher &&
+                c.position == n.position && c.day == n.day &&
+                c.startSection == n.startSection && c.endSection == n.endSection
+            if (sameSection) {
+                c = c.copy(weeks = (c.weeks + n.weeks).distinct().sorted())
+            } else {
+                step2.add(c)
+                c = n
+            }
+        }
+        step2.add(c)
+        return step2
     }
 
     private fun extractFieldFromHtml(html: String, field: String): String? {
@@ -895,6 +1064,12 @@ class WbuSyncEngine(
             .replace(Regex("\\s+"), " ")
             .trim()
     }
+
+    /** 去除教师名末尾的工号，如"王老师（20240999）" -> "王老师"；无工号则原样返回。 */
+    private fun stripTeacherId(teacher: String): String = cleanTeacherId(teacher)
+
+    /** 是否保留教师工号（读取设置，默认去除）。 */
+    private fun keepTeacherId(): Boolean = getKeepTeacherId(context)
 
     private suspend fun loginDirect(
         studentId: String,
@@ -1880,6 +2055,8 @@ class WbuSyncEngine(
         private const val KEY_QR_VIA_WEBVPN = "qr_via_webvpn"
         private const val KEY_SEND_ENGLISH_SMS = "send_english_sms"
         private const val KEY_USE_PC_USER_AGENT = "use_pc_user_agent"
+        private const val KEY_SKIP_CAMPUS_CHECK = "skip_campus_check"
+        private const val KEY_KEEP_TEACHER_ID = "keep_teacher_id"
         private const val MAX_CAPTCHA_ATTEMPTS = 5
 
         // 教务系统直连登录（/admin/login）JSEncrypt 硬编码公钥（1024 位 PKCS#1）
@@ -1917,6 +2094,34 @@ class WbuSyncEngine(
         fun setUsePcUserAgent(context: Context, enabled: Boolean) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit().putBoolean(KEY_USE_PC_USER_AGENT, enabled).apply()
+        }
+
+        /** 「不检测校园网环境」：为 true 时跳过校园网探测与「未检测到是否继续」确认。默认关闭。 */
+        fun getSkipCampusCheck(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getBoolean(KEY_SKIP_CAMPUS_CHECK, false)
+        }
+
+        fun setSkipCampusCheck(context: Context, enabled: Boolean) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putBoolean(KEY_SKIP_CAMPUS_CHECK, enabled).apply()
+        }
+
+        /** 「保留教师工号」：为 true 时保留教师名中的工号（如"王老师（20240999）"），false 则去除。默认去除。 */
+        fun getKeepTeacherId(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getBoolean(KEY_KEEP_TEACHER_ID, false)
+        }
+
+        fun setKeepTeacherId(context: Context, enabled: Boolean) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putBoolean(KEY_KEEP_TEACHER_ID, enabled).apply()
+        }
+
+        /** 去除教师名末尾工号（如"王老师（20240999）"->"王老师"）；无则原样返回。供安卓端各处复用。 */
+        fun cleanTeacherId(teacher: String): String {
+            val m = Regex("^(.+?)\\s*[（(](\\d{4,})[）)]$").find(teacher.trim()) ?: return teacher
+            return m.groupValues[1].trim()
         }
 
         fun hasPersistedSession(context: Context): Boolean {
@@ -2018,53 +2223,6 @@ class WbuSyncEngine(
                 else -> true
             }
         }.sorted().distinct()
-    }
-
-    private fun mergeContinuousSections(courses: List<CourseWithWeeks>): List<CourseWithWeeks> {
-        if (courses.isEmpty()) return emptyList()
-
-        val sorted = courses.sortedWith(compareBy(
-            { it.course.day },
-            { it.weeks.joinToString { w -> w.weekNumber.toString() } },
-            { it.course.name },
-            { it.course.teacher },
-            { it.course.position },
-            { it.course.startSection ?: 0 }
-        ))
-
-        val merged = mutableListOf<CourseWithWeeks>()
-        var i = 0
-
-        while (i < sorted.size) {
-            val current = sorted[i]
-            var currentEnd = current.course.endSection
-            var j = i + 1
-
-            while (j < sorted.size) {
-                val next = sorted[j]
-                val currentWeeksStr = current.weeks.map { it.weekNumber }.joinToString()
-                val nextWeeksStr = next.weeks.map { it.weekNumber }.joinToString()
-
-                if (next.course.day == current.course.day &&
-                    next.course.name == current.course.name &&
-                    next.course.teacher == current.course.teacher &&
-                    next.course.position == current.course.position &&
-                    nextWeeksStr == currentWeeksStr &&
-                    (next.course.startSection ?: 0) == (currentEnd ?: 0) + 1
-                ) {
-                    currentEnd = next.course.endSection
-                    j++
-                } else {
-                    break
-                }
-            }
-
-            val mergedCourse = current.course.copy(endSection = currentEnd)
-            val mergedWeeks = current.weeks.map { it.copy(courseId = mergedCourse.id) }
-            merged.add(CourseWithWeeks(mergedCourse, mergedWeeks))
-            i = j
-        }
-        return merged
     }
 }
 

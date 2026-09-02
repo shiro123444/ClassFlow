@@ -3,6 +3,7 @@ package com.xingheyuzhuan.shiguangschedule.ui.schoolselection.web
 
 import android.content.Context
 import android.os.Handler
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.repository.normalizeImportedTimeSlots
 import android.os.Looper
 import android.util.Log
@@ -215,7 +216,14 @@ class AndroidBridge(
                 }
 
                 val importedCoursesList = json.decodeFromString<List<CourseImportExport.ImportCourseJsonModel>>(coursesJsonString)
-                courseConversionRepository.importCoursesFromList(tableId, importedCoursesList)
+                // 依据「保留教师工号」开关：默认去除教师名中的工号
+                val keepTeacherId = WbuSyncEngine.getKeepTeacherId(context)
+                val adjustedList = if (keepTeacherId) {
+                    importedCoursesList
+                } else {
+                    importedCoursesList.map { it.copy(teacher = WbuSyncEngine.cleanTeacherId(it.teacher)) }
+                }
+                courseConversionRepository.importCoursesFromList(tableId, adjustedList)
 
                 Toast.makeText(context, "课程导入成功！课表已更新。", Toast.LENGTH_LONG).show()
                 resolveJsPromise(promiseId, "true")
