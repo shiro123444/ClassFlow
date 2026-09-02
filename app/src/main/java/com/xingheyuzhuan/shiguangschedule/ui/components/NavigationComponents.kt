@@ -14,11 +14,19 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
@@ -29,6 +37,7 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Today
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,9 +56,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.Destination
@@ -60,6 +72,17 @@ import kotlin.math.abs
 
 /** Extra bottom content-padding for top-level screens overlaid by the floating dock. */
 val DockSafeBottomPadding = 88.dp
+
+/** 平板/宽屏左侧导航栏的宽度 (dp)。宽屏下各主屏「内容层」按此值让位（背景保持全屏铺满）。 */
+val NavigationRailWidth = 112.dp
+
+/**
+ * 平板/宽屏判定：仅看屏幕宽度 ≥ 600dp。
+ * 说明：按需求「目前允许手机横屏触发」，因此用宽度而非最短边——手机横屏（宽常 ≥ 600dp）也会进入左侧导航栏模式。
+ * 各主屏用它给内容层加左内边距（背景不动）。
+ */
+val isWideScreen: Boolean
+    @Composable get() = LocalConfiguration.current.screenWidthDp >= 600
 
 /**
  * Liquid Glass bottom navigation bar.
@@ -305,6 +328,144 @@ fun BottomNavigationBar(
 
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 平板/宽屏左侧导航栏（NavigationRail，ClassFlow 定制）。
+ *
+ * 仅在宽屏（宿主判定：屏幕宽度 ≥ 600dp）时由 MainActivity 显示；
+ * 采用竖向玻璃胶囊，按钮逻辑与 [BottomNavigationBar] 一致（图标/选中高亮/点击切换）。
+ *
+ * 注意：按需求「目前允许手机横屏触发」，宿主用「宽度 ≥ 600dp」判定而非最短边——
+ * 因此手机横屏（宽 ≥ 600dp）也会进入本左侧导航栏模式。
+ *
+ * @param hazeState 玻璃模糊源（复用底部 dock 的 dockHazeState）；为 null 时回退纯半透明表面。
+ */
+@Composable
+fun LeftNavigationRail(
+    navBridge: NavBridge,
+    currentDestination: Destination?,
+    hazeState: HazeState? = null,
+    modifier: Modifier = Modifier
+) {
+    val isDark = LocalIsDarkTheme.current
+    val navItems = listOf(
+        Triple(stringResource(R.string.nav_today_schedule), Destination.TodaySchedule, 0),
+        Triple(stringResource(R.string.nav_course_schedule), Destination.CourseSchedule, 1),
+        Triple(stringResource(R.string.nav_settings), Destination.Settings, 2)
+    )
+    val effectiveDestination = currentDestination ?: Destination.CourseSchedule
+    val selectedIndex = navItems.indexOfFirst { it.second == effectiveDestination }.coerceAtLeast(0)
+
+    val glassShape = RoundedCornerShape(22.dp)
+    // 与底部导航栏一致的液态玻璃：暖白亮 / 冷灰暗
+    val glassTint = if (isDark) Color(0xFF1A2332).copy(alpha = 0.22f) else Color(0xFFFFFBF8).copy(alpha = 0.75f)
+    val hazeTint = glassTint.copy(alpha = if (isDark) 0.28f else 0.42f)
+    val borderTop = if (isDark) Color.White.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.90f)
+    val borderBottom = if (isDark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.25f)
+
+    Box(
+        modifier = modifier
+            .width(NavigationRailWidth)
+            .fillMaxHeight()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(8.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(glassShape)
+                .then(
+                    if (hazeState != null) {
+                        Modifier.hazeEffect(
+                            state = hazeState,
+                            style = HazeStyle(
+                                backgroundColor = hazeTint,
+                                tint = null,
+                                blurRadius = 20.dp
+                            )
+                        )
+                    } else {
+                        Modifier.background(glassTint, glassShape)
+                    }
+                )
+                .border(0.75.dp, Brush.verticalGradient(listOf(borderTop, borderBottom)), glassShape)
+                .padding(vertical = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            navItems.forEachIndexed { index, (label, destination, _) ->
+                val isSelected = selectedIndex == index
+
+                val scale by animateFloatAsState(
+                    targetValue = if (isSelected) 1.08f else 1f,
+                    animationSpec = spring(
+                        dampingRatio = 0.45f,
+                        stiffness = Spring.StiffnessMediumLow
+                    ),
+                    label = "railScale$index"
+                )
+                val iconAlpha by animateFloatAsState(
+                    targetValue = if (isSelected) 1f else 0.50f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMedium
+                    ),
+                    label = "railAlpha$index"
+                )
+
+                val (selIcon, unselIcon) = when (destination) {
+                    Destination.TodaySchedule -> Icons.Rounded.Today to Icons.Outlined.Today
+                    Destination.CourseSchedule -> Icons.Rounded.CalendarMonth to Icons.Outlined.CalendarMonth
+                    else -> Icons.Rounded.Person to Icons.Outlined.Person
+                }
+
+                // 仅图标，不显示文本（ClassFlow 定制）
+                // 选中的高亮水滴：窄一点、高一点的长胶囊（52w x 72h）
+                val bubbleShape = RoundedCornerShape(percent = 50)
+                Box(
+                    modifier = Modifier
+                        .size(width = 46.dp, height = 72.dp)
+                        .clip(bubbleShape)
+                        .background(
+                            color = if (isSelected) {
+                                if (isDark) Color.White.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.65f)
+                            } else {
+                                Color.Transparent
+                            },
+                            shape = bubbleShape
+                        )
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() }
+                        ) {
+                            if (currentDestination != destination) {
+                                navBridge.navigateToMain(destination)
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isSelected) selIcon else unselIcon,
+                        contentDescription = label,
+                        modifier = Modifier
+                            .size(26.dp)
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                alpha = iconAlpha
+                            },
+                        tint = if (isSelected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
             }
         }
     }

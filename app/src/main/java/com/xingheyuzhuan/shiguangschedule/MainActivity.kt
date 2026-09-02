@@ -97,6 +97,8 @@ import com.xingheyuzhuan.shiguangschedule.data.repository.AppSettingsRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.CourseConversionRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.TimeSlotRepository
 import com.xingheyuzhuan.shiguangschedule.ui.components.BottomNavigationBar
+import com.xingheyuzhuan.shiguangschedule.ui.components.LeftNavigationRail
+import com.xingheyuzhuan.shiguangschedule.ui.components.isWideScreen
 import com.xingheyuzhuan.shiguangschedule.ui.components.isOnboardingCompleted
 import com.xingheyuzhuan.shiguangschedule.ui.components.markOnboardingCompleted
 import com.xingheyuzhuan.shiguangschedule.ui.schedule.WeeklyScheduleScreen
@@ -594,7 +596,18 @@ fun AppNavigation(
                 }
             }
 
-            if (showBottomDock) {
+            // 宽屏（平板）→ 左侧导航栏（ClassFlow 定制）；手机 → 底部悬浮 dock
+            if (showBottomDock && isWideScreen) {
+                LeftNavigationRail(
+                    navBridge = navBridge,
+                    currentDestination = currentDestination,
+                    hazeState = dockHazeState,
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                )
+            }
+
+            if (showBottomDock && !isWideScreen) {
                 Box(
                     modifier = bottomNavTargetModifier
                         .align(Alignment.BottomCenter)

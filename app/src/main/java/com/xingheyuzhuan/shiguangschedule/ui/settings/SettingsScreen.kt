@@ -34,6 +34,8 @@ import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.Destination
 import com.xingheyuzhuan.shiguangschedule.ui.components.DatePickerModal
 import com.xingheyuzhuan.shiguangschedule.ui.components.DockSafeBottomPadding
+import com.xingheyuzhuan.shiguangschedule.ui.components.NavigationRailWidth
+import com.xingheyuzhuan.shiguangschedule.ui.components.isWideScreen
 import com.xingheyuzhuan.shiguangschedule.ui.components.NativeNumberPicker
 import com.xingheyuzhuan.shiguangschedule.ui.components.OnboardingTargets
 import com.xingheyuzhuan.shiguangschedule.ui.theme.ThemeGradients
@@ -99,6 +101,7 @@ fun SettingsScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .padding(start = if (isWideScreen) NavigationRailWidth else 0.dp)
                 .statusBarsPadding()
                 .padding(horizontal = 20.dp),
             state = settingsListState,

@@ -43,6 +43,8 @@ import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.model.ScheduleGridStyle
 import com.xingheyuzhuan.shiguangschedule.ui.components.DockSafeBottomPadding
+import com.xingheyuzhuan.shiguangschedule.ui.components.NavigationRailWidth
+import com.xingheyuzhuan.shiguangschedule.ui.components.isWideScreen
 import com.xingheyuzhuan.shiguangschedule.ui.theme.ThemeGradients
 import java.time.LocalDate
 import java.time.LocalTime
@@ -73,6 +75,7 @@ fun TodayScheduleScreen(
             .fillMaxSize()
             .background(backgroundBrush)
             .padding(horizontal = 16.dp)
+            .padding(start = if (isWideScreen) NavigationRailWidth else 0.dp)
             .statusBarsPadding()
     ) {
         Column(modifier = Modifier.fillMaxSize()) {

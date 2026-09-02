@@ -49,6 +49,8 @@ import android.util.Log
 import com.xingheyuzhuan.shiguangschedule.ui.components.WbuAuthBottomSheet
 import com.xingheyuzhuan.shiguangschedule.ui.components.VpnSmsCodeDialog
 import com.xingheyuzhuan.shiguangschedule.ui.components.DockSafeBottomPadding
+import com.xingheyuzhuan.shiguangschedule.ui.components.NavigationRailWidth
+import com.xingheyuzhuan.shiguangschedule.ui.components.isWideScreen
 import com.xingheyuzhuan.shiguangschedule.ui.components.CourseTablePickerDialog
 import com.xingheyuzhuan.shiguangschedule.ui.components.SliderCaptchaDialog
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.VpnFullLoginStatus
@@ -288,7 +290,9 @@ fun WeeklyScheduleScreen(
         }
 
         Scaffold(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            modifier = Modifier.fillMaxSize()
+                .padding(start = if (isWideScreen) NavigationRailWidth else 0.dp)
+                .nestedScroll(scrollBehavior.nestedScrollConnection),
             containerColor = Color.Transparent,
             topBar = {
                 // 左对齐：「第n周」放在左侧；右侧切换课表/同步按钮采用导航栏 Liquid Glass 毛玻璃样式
