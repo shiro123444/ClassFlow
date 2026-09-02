@@ -58,6 +58,12 @@ data class ScheduleGridStyle(
     val backgroundOffsetX: Float = DEFAULT_BACKGROUND_OFFSET,
     val backgroundOffsetY: Float = DEFAULT_BACKGROUND_OFFSET,
 
+    // 课程块毛玻璃模糊半径 (DP, 0 = 关闭)
+    val courseBlockBlurRadiusDp: Float = DEFAULT_COURSE_BLOCK_BLUR_RADIUS,
+
+    // 课程块无色玻璃（放弃课程颜色，使用中性玻璃色）
+    val courseBlockColorless: Boolean = DEFAULT_COURSE_BLOCK_COLORLESS,
+
     // 背景壁纸路径 (存储在私有目录下的绝对路径)
     val backgroundImagePath: String? = null
 ) {
@@ -82,6 +88,8 @@ data class ScheduleGridStyle(
         internal val DEFAULT_BACKGROUND_DIM_ALPHA = 0.2f
         internal val DEFAULT_BACKGROUND_SCALE = 1f
         internal val DEFAULT_BACKGROUND_OFFSET = 0f
+        internal val DEFAULT_COURSE_BLOCK_BLUR_RADIUS = 0f
+        internal val DEFAULT_COURSE_BLOCK_COLORLESS = false
 
         internal val DEFAULT_COLOR_MAPS = listOf(
             DualColor(light = Color(0xFFFFCC99), dark = Color(0xFF663300)),
@@ -131,6 +139,8 @@ data class ScheduleGridStyle(
             backgroundScale = DEFAULT_BACKGROUND_SCALE,
             backgroundOffsetX = DEFAULT_BACKGROUND_OFFSET,
             backgroundOffsetY = DEFAULT_BACKGROUND_OFFSET,
+            courseBlockBlurRadiusDp = DEFAULT_COURSE_BLOCK_BLUR_RADIUS,
+            courseBlockColorless = DEFAULT_COURSE_BLOCK_COLORLESS,
             backgroundImagePath = null
         )
     }
@@ -196,11 +206,15 @@ fun ScheduleGridStyleProto.toCompose(): ScheduleGridStyle {
 
         // 8. ClassFlow 自有字段：玻璃效果/背景/字体
         courseFontFamilyPreset = (this.course_font_family_preset ?: d.courseFontFamilyPreset).coerceIn(0, 3),
-        glassPreset = (this.glass_preset ?: d.glassPreset).coerceIn(0, 2),
+        glassPreset = (this.glass_preset ?: d.glassPreset).coerceIn(0, 3),
         backgroundDimAlpha = (this.background_dim_alpha ?: d.backgroundDimAlpha).coerceIn(0f, 0.8f),
         backgroundScale = (this.background_scale ?: d.backgroundScale).coerceIn(0.8f, 5f),
         backgroundOffsetX = (this.background_offset_x ?: d.backgroundOffsetX).coerceIn(-1f, 1f),
         backgroundOffsetY = (this.background_offset_y ?: d.backgroundOffsetY).coerceIn(-1f, 1f),
+
+        // 10. 课程块毛玻璃模糊
+        courseBlockBlurRadiusDp = (this.course_block_blur_radius_dp ?: d.courseBlockBlurRadiusDp).coerceIn(0f, 30f),
+        courseBlockColorless = this.course_block_colorless ?: d.courseBlockColorless,
 
         // 9. 背景图路径映射 (空字符串转 null)
         backgroundImagePath = if (!this.background_image_path.isNullOrEmpty()) this.background_image_path else null
@@ -243,6 +257,8 @@ fun ScheduleGridStyle.toProto(): ScheduleGridStyleProto {
         background_dim_alpha = this.backgroundDimAlpha,
         background_scale = this.backgroundScale,
         background_offset_x = this.backgroundOffsetX,
-        background_offset_y = this.backgroundOffsetY
+        background_offset_y = this.backgroundOffsetY,
+        course_block_blur_radius_dp = this.courseBlockBlurRadiusDp,
+        course_block_colorless = this.courseBlockColorless
     )
 }

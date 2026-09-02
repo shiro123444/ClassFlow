@@ -59,6 +59,9 @@ import com.xingheyuzhuan.shiguangschedule.ui.schedule.components.ScheduleGridAct
 import com.xingheyuzhuan.shiguangschedule.ui.schedule.components.ScheduleGridViewState
 import com.xingheyuzhuan.shiguangschedule.ui.schedule.components.ScheduleGridStyleComposed
 import com.xingheyuzhuan.shiguangschedule.ui.schedule.components.rememberScheduleGridState
+import com.xingheyuzhuan.shiguangschedule.ui.theme.ThemeGradients
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -245,12 +248,13 @@ private fun SettingsListContent(
                 listOf(
                     0 to stringResource(R.string.glass_style_clear),
                     1 to stringResource(R.string.glass_style_liquid),
-                    2 to stringResource(R.string.glass_style_frost)
+                    2 to stringResource(R.string.glass_style_frost),
+                    3 to stringResource(R.string.glass_style_angular)
                 ).forEachIndexed { index, (preset, label) ->
                     SegmentedButton(
                         selected = currentStyle.glassPreset == preset,
                         onClick = { viewModel.applyGlassPreset(preset) },
-                        shape = SegmentedButtonDefaults.itemShape(index, 3)
+                        shape = SegmentedButtonDefaults.itemShape(index, 4)
                     ) { Text(label) }
                 }
             }
@@ -278,6 +282,8 @@ private fun SettingsListContent(
             StyleSliderItem(stringResource(R.string.label_inner_padding), currentStyle.courseBlockInnerPadding.value, 0f..12f) { viewModel.updateInnerPadding(it) }
             StyleSliderItem(stringResource(R.string.label_outer_padding), currentStyle.courseBlockOuterPadding.value, 0f..8f) { viewModel.updateOuterPadding(it) }
             StyleSliderItem(stringResource(R.string.label_opacity), currentStyle.courseBlockAlpha, 0.1f..1f, 0.1f) { viewModel.updateAlpha(it) }
+            StyleSliderItem(stringResource(R.string.label_course_block_blur), currentStyle.courseBlockBlurRadius.value, 0f..20f, 1f) { viewModel.updateCourseBlockBlurRadius(it) }
+            StyleSwitchItem(stringResource(R.string.label_course_block_colorless), currentStyle.courseBlockColorless) { viewModel.updateCourseBlockColorless(it) }
         }
 
         // ── Color scheme ──
@@ -321,7 +327,8 @@ private fun BorderTypeSelector(
     val types = listOf(
         BorderTypeProto.BORDER_TYPE_NONE to stringResource(R.string.label_none),
         BorderTypeProto.BORDER_TYPE_SOLID to stringResource(R.string.border_type_solid),
-        BorderTypeProto.BORDER_TYPE_DASHED to stringResource(R.string.border_type_dashed)
+        BorderTypeProto.BORDER_TYPE_DASHED to stringResource(R.string.border_type_dashed),
+        BorderTypeProto.BORDER_TYPE_GLASS to stringResource(R.string.border_type_glass)
     )
     Text(stringResource(R.string.label_border_type), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(bottom = 4.dp))
     SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
@@ -422,36 +429,46 @@ internal fun ScheduleGridContent(
     }
 
     var bgContainerSize by remember { mutableStateOf(IntSize.Zero) }
+    val previewHaze = remember { HazeState() }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .onSizeChanged { bgContainerSize = it }
     ) {
-        if (drawBackground && style.backgroundImagePath.isNotEmpty()) {
-            AsyncImage(
-                model = style.backgroundImagePath,
-                contentDescription = null,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val widthPx = bgContainerSize.width.toFloat().coerceAtLeast(1f)
-                        val heightPx = bgContainerSize.height.toFloat().coerceAtLeast(1f)
-                        scaleX = style.backgroundScale
-                        scaleY = style.backgroundScale
-                        translationX = widthPx * style.backgroundOffsetX
-                        translationY = heightPx * style.backgroundOffsetY
-                    }
-                    .blur(style.backgroundBlurRadius),
-                contentScale = ContentScale.Crop,
-                alignment = Alignment.TopCenter
-            )
+        // 背景层（Haze 源）：demo 渐变 + 壁纸，保证课程块着色/模糊在预览中可见
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(ThemeGradients.weeklyScheduleGradient())
+                .hazeSource(previewHaze)
+        ) {
+            if (drawBackground && style.backgroundImagePath.isNotEmpty()) {
+                AsyncImage(
+                    model = style.backgroundImagePath,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val widthPx = bgContainerSize.width.toFloat().coerceAtLeast(1f)
+                            val heightPx = bgContainerSize.height.toFloat().coerceAtLeast(1f)
+                            scaleX = style.backgroundScale
+                            scaleY = style.backgroundScale
+                            translationX = widthPx * style.backgroundOffsetX
+                            translationY = heightPx * style.backgroundOffsetY
+                        }
+                        .blur(style.backgroundBlurRadius),
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.TopCenter
+                )
+            }
         }
         ScheduleGrid(
             state = gridState,
             viewState = gridViewState,
             actions = gridActions,
-            style = style
+            style = style,
+            hazeState = previewHaze
         )
     }
 }

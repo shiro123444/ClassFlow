@@ -93,6 +93,7 @@ import com.xingheyuzhuan.shiguangschedule.ui.schedule.components.WeekSelectorBot
 import com.xingheyuzhuan.shiguangschedule.ui.schedule.components.liquidGlassSurfaceModifier
 import com.xingheyuzhuan.shiguangschedule.ui.schedule.components.rememberScheduleGridState
 import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 import com.xingheyuzhuan.shiguangschedule.ui.theme.ClassFlowTheme
 import com.xingheyuzhuan.shiguangschedule.ui.theme.ThemeGradients
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.web.WbuWebLoginAutofillStore
@@ -249,30 +250,39 @@ fun WeeklyScheduleScreen(
 
     val weeklyBgBrush = ThemeGradients.weeklyScheduleGradient()
     var bgContainerSize by remember { mutableStateOf(IntSize.Zero) }
+    // 课程块毛玻璃的 Haze 源：仅采集壁纸层（课程块是源外部的兄弟节点，Haze 不允许 effect 节点在 source 内部）
+    val gridHazeState = remember { HazeState() }
 
     Box(modifier = Modifier
         .fillMaxSize()
-        .background(weeklyBgBrush)
         .onSizeChanged { bgContainerSize = it }
     ) {
-        // Full-screen wallpaper (unchanged)
-        if (composedStyle.backgroundImagePath.isNotEmpty()) {
-            AsyncImage(
-                model = composedStyle.backgroundImagePath,
-                contentDescription = null,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val widthPx = bgContainerSize.width.toFloat().coerceAtLeast(1f)
-                        val heightPx = bgContainerSize.height.toFloat().coerceAtLeast(1f)
-                        scaleX = composedStyle.backgroundScale
-                        scaleY = composedStyle.backgroundScale
-                        translationX = widthPx * composedStyle.backgroundOffsetX
-                        translationY = heightPx * composedStyle.backgroundOffsetY
-                    }
-                    .blur(composedStyle.backgroundBlurRadius),
-                contentScale = ContentScale.Crop
-            )
+        // 背景层（Haze 源）：主题渐变 + 壁纸。课程块是它的兄弟层（绘制在网格之上），Haze 不允许 effect 节点在 source 内部。
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(weeklyBgBrush)
+                .hazeSource(gridHazeState)
+        ) {
+            // Full-screen wallpaper (unchanged)
+            if (composedStyle.backgroundImagePath.isNotEmpty()) {
+                AsyncImage(
+                    model = composedStyle.backgroundImagePath,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val widthPx = bgContainerSize.width.toFloat().coerceAtLeast(1f)
+                            val heightPx = bgContainerSize.height.toFloat().coerceAtLeast(1f)
+                            scaleX = composedStyle.backgroundScale
+                            scaleY = composedStyle.backgroundScale
+                            translationX = widthPx * composedStyle.backgroundOffsetX
+                            translationY = heightPx * composedStyle.backgroundOffsetY
+                        }
+                        .blur(composedStyle.backgroundBlurRadius),
+                    contentScale = ContentScale.Crop
+                )
+            }
         }
 
         Scaffold(
@@ -677,7 +687,7 @@ fun WeeklyScheduleScreen(
                         viewState = gridViewState,
                         actions = gridActions,
                         style = composedStyle,
-                        showGlassBorder = uiState.useSakuraTimeTheme
+                        hazeState = gridHazeState
                     )
             }
         }

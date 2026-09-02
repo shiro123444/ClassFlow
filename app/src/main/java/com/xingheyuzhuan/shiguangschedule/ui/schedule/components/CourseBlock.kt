@@ -34,6 +34,9 @@ import com.xingheyuzhuan.shiguangschedule.data.db.main.TimeSlot
 import com.xingheyuzhuan.shiguangschedule.data.model.schedule_style.BorderTypeProto
 import com.xingheyuzhuan.shiguangschedule.data.model.schedule_style.ScheduleModeProto
 import com.xingheyuzhuan.shiguangschedule.ui.theme.LocalIsDarkTheme
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.hazeEffect
 
 @Composable
 fun CourseBlock(
@@ -42,7 +45,8 @@ fun CourseBlock(
     style: ScheduleGridStyleComposed,
     timeSlots: List<TimeSlot>,
     modifier: Modifier = Modifier,
-    isFloating: Boolean = false // 标记当前块是否处于长按选中/悬浮状态
+    isFloating: Boolean = false, // 标记当前块是否处于长按选中/悬浮状态
+    hazeState: HazeState? = null // 课程块毛玻璃模糊源（仅在开启模糊度并传入时生效）
 ) {
     val course = courseWrapper.course
     val isDarkTheme = LocalIsDarkTheme.current
@@ -56,7 +60,12 @@ fun CourseBlock(
     val fallbackColorAdapted: Color = if (isDarkTheme) style.courseColorMaps.first().dark else style.courseColorMaps.first().light
 
     val currentAlpha = if (isFloating) 0.95f else style.courseBlockAlpha
-    val blockColor = (courseColorAdapted ?: fallbackColorAdapted).copy(alpha = currentAlpha)
+    // 无色玻璃：不叠加任何课程/中性颜色，纯磨砂透出背景（文字仍清晰）
+    val blockColor = if (style.courseBlockColorless) {
+        Color.Transparent
+    } else {
+        (courseColorAdapted ?: fallbackColorAdapted).copy(alpha = currentAlpha)
+    }
     val textColor = style.courseTextColor ?: MaterialTheme.colorScheme.onSurface
 
     // 字体大小
@@ -110,6 +119,19 @@ fun CourseBlock(
                 )
             }
         }
+        BorderTypeProto.BORDER_TYPE_GLASS -> {
+            // 玻璃边框：top-lit 渐变细描边，隐藏毛玻璃边缘伪影并给磨砂块定义
+            Modifier.border(
+                width = 0.75.dp,
+                brush = Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = if (isDarkTheme) 0.35f else 0.90f),
+                        Color.White.copy(alpha = if (isDarkTheme) 0.10f else 0.25f)
+                    )
+                ),
+                shape = shape
+            )
+        }
         else -> {
             if (isFloating) Modifier.border(borderWidth, borderColor, shape) else Modifier
         }
@@ -126,12 +148,31 @@ fun CourseBlock(
         Modifier
     }
 
+    // 课程块毛玻璃：模糊度 > 0 且提供 Haze 源时，模糊背后的网格/壁纸（文字保持清晰）
+    // 颜色始终由背景 blockColor 承担，Haze 只做模糊，避免在 pager 里采样失败时块无色。
+    val blurOn = style.courseBlockBlurRadius > 0.dp
+    val activeHaze: HazeState? = if (blurOn) hazeState else null
+
     Box(
         modifier = modifier
             .then(floatingShadowModifier)
             .fillMaxSize()
             .then(borderModifier)
             .clip(shape)
+            .then(
+                if (activeHaze != null) {
+                    Modifier.hazeEffect(
+                        state = activeHaze,
+                        style = HazeStyle(
+                            backgroundColor = Color.Transparent,
+                            tint = null,
+                            blurRadius = style.courseBlockBlurRadius
+                        )
+                    )
+                } else {
+                    Modifier
+                }
+            )
             .background(color = blockColor)
     ) {
         // 课程文字内容容器

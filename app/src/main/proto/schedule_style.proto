@@ -18,6 +18,7 @@ enum BorderTypeProto {
   BORDER_TYPE_NONE = 0;   // 无边框
   BORDER_TYPE_SOLID = 1;  // 实线
   BORDER_TYPE_DASHED = 2; // 虚线
+  BORDER_TYPE_GLASS = 3;  // 玻璃（top-lit 渐变描边，用于隐藏毛玻璃边缘伪影）
 }
 
 // 定义课表展示模式的枚举
@@ -80,4 +81,6 @@ message ScheduleGridStyleProto {
   optional float background_scale = 1005;                 // 背景缩放 (默认 1.0)
   optional float background_offset_x = 1006;              // 背景水平偏移比例 (-0.5 ~ 0.5)
   optional float background_offset_y = 1007;              // 背景垂直偏移比例 (-0.5 ~ 0.5)
+  optional float course_block_blur_radius_dp = 1008;      // 课程块毛玻璃模糊半径 (DP, 默认 0 = 关闭)
+  optional bool course_block_colorless = 1009;            // 课程块无色玻璃（放弃课程颜色，使用中性玻璃色）
 }

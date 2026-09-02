@@ -49,6 +49,8 @@ data class ScheduleGridStyleComposed(
     val backgroundScale: Float,
     val backgroundOffsetX: Float,
     val backgroundOffsetY: Float,
+    val courseBlockBlurRadius: Dp,
+    val courseBlockColorless: Boolean,
 
     // ── 上游同步字段 ──
     val pageTextColor: Color?,
@@ -96,6 +98,8 @@ data class ScheduleGridStyleComposed(
                 backgroundOffsetX = this.backgroundOffsetX,
                 backgroundOffsetY = this.backgroundOffsetY,
                 backgroundImagePath = this.backgroundImagePath ?: "",
+                courseBlockBlurRadius = this.courseBlockBlurRadiusDp.dp,
+                courseBlockColorless = this.courseBlockColorless,
                 pageTextColor = this.pageTextColorLong?.let { Color(it.toInt()) },
                 courseTextColor = this.courseTextColorLong?.let { Color(it.toInt()) },
                 textAlignCenterHorizontal = this.textAlignCenterHorizontal,
