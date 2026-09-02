@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -464,19 +466,28 @@ fun WeeklyScheduleScreen(
                     modifier = Modifier.padding(bottom = DockSafeBottomPadding)
                 ) { snackbarData ->
                     val visuals = snackbarData.visuals as? AppSnackbarVisuals
-                    Snackbar {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .wrapContentWidth(Alignment.CenterHorizontally)
+                    ) {
+                        Snackbar(
+                            modifier = Modifier.widthIn(max = 280.dp),
+                            shape = RoundedCornerShape(12.dp)
                         ) {
-                            if (visuals?.leadingIcon == AppSnackbarLeadingIcon.Success) {
-                                Icon(
-                                    imageVector = Icons.Filled.CheckCircle,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (visuals?.leadingIcon == AppSnackbarLeadingIcon.Success) {
+                                    Icon(
+                                        imageVector = Icons.Filled.CheckCircle,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Text(snackbarData.visuals.message)
                             }
-                            Text(snackbarData.visuals.message)
                         }
                     }
                 }
