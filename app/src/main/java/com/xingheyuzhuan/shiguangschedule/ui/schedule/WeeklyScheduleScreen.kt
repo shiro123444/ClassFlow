@@ -50,6 +50,7 @@ import com.xingheyuzhuan.shiguangschedule.ui.components.SliderCaptchaDialog
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.VpnFullLoginStatus
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaData
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaResult
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.LocalLoginFailure
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuLoginMethod
@@ -190,6 +191,10 @@ fun WeeklyScheduleScreen(
     // 滑块验证码对话框状态（统一认证滑块）
     var captchaDialogData by remember { mutableStateOf<SliderCaptchaData?>(null) }
     var captchaDeferred by remember { mutableStateOf<CompletableDeferred<SliderCaptchaResult?>?>(null) }
+
+    // 教务系统疑似触发超星验证码 → 询问是否跳转 WebView 手动登录
+    var showManualLoginPrompt by remember { mutableStateOf(false) }
+    var manualLoginUseVpn by remember { mutableStateOf(false) }
 
     // 校园网不可达时「是否继续」确认对话框状态
     var campusConfirmDeferred by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
@@ -839,10 +844,24 @@ fun WeeklyScheduleScreen(
                             } else {
                                 isWbuSyncing = false
                                 wbuSyncStatus = ""
-                                showWbuAuthDialog = false
-                                snackbarHostState.showSnackbar("自动登录失败，请通过 WebView 手动登录")
-                                WbuWebLoginAutofillStore.put(studentId = studentId, password = password)
-                                navBridge.navigate(Destination.WebView(initialUrl = "https://webvpn.wbu.edu.cn/portal/#!/login", assetJsPath = "WBU/wbu_chaoxing.js"))
+                                val realErr = vpnEngine.lastLocalLoginError?.takeIf { it.isNotBlank() }
+                                when {
+                                    vpnEngine.lastLocalLoginFailure == LocalLoginFailure.CAPTCHA -> {
+                                        showWbuAuthDialog = false
+                                        WbuWebLoginAutofillStore.put(studentId = studentId, password = password)
+                                        manualLoginUseVpn = true
+                                        showManualLoginPrompt = true
+                                    }
+                                    vpnEngine.lastLocalLoginNetworkError -> {
+                                        wbuError = "WebVPN 连接失败，请检查网络后重试"
+                                    }
+                                    realErr != null -> {
+                                        wbuError = realErr
+                                    }
+                                    else -> {
+                                        wbuError = "自动登录失败，请检查账号或密码"
+                                    }
+                                }
                             }
                             return@launch
                         }
@@ -864,7 +883,26 @@ fun WeeklyScheduleScreen(
                             }
                         )
                         if (!loginSuccess) {
-                            wbuError = "校园网直连失败，请确认已连接校内网络"
+                            isWbuSyncing = false
+                            wbuSyncStatus = ""
+                            val realErr = engine.lastLocalLoginError?.takeIf { it.isNotBlank() }
+                            when {
+                                engine.lastLocalLoginFailure == LocalLoginFailure.CAPTCHA -> {
+                                    showWbuAuthDialog = false
+                                    WbuWebLoginAutofillStore.put(studentId = studentId, password = password)
+                                    manualLoginUseVpn = false
+                                    showManualLoginPrompt = true
+                                }
+                                engine.lastLocalLoginNetworkError -> {
+                                    wbuError = "校园网直连失败，请确认已连接校园网"
+                                }
+                                realErr != null -> {
+                                    wbuError = realErr
+                                }
+                                else -> {
+                                    wbuError = "登录失败，请检查学号或密码后重试"
+                                }
+                            }
                             return@launch
                         }
 
@@ -1024,6 +1062,31 @@ fun WeeklyScheduleScreen(
                         campusConfirmDeferred = null
                     }
                 ) { Text("取消") }
+            }
+        )
+    }
+
+    // 教务系统疑似触发超星验证码 → 询问是否跳转 WebView 手动登录
+    if (showManualLoginPrompt) {
+        AlertDialog(
+            onDismissRequest = { showManualLoginPrompt = false },
+            title = { Text("自动登录失败") },
+            text = { Text("教务系统可能要求人工验证，是否跳转浏览器页面手动登录？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showManualLoginPrompt = false
+                        val target = if (manualLoginUseVpn) {
+                            Destination.WebView(initialUrl = "https://webvpn.wbu.edu.cn/portal/#!/login", assetJsPath = "WBU/wbu_chaoxing.js")
+                        } else {
+                            Destination.WebView(initialUrl = "https://jwxt.wbu.edu.cn/admin/login", assetJsPath = "WBU/wbu_chaoxing.js")
+                        }
+                        navBridge.navigate(target)
+                    }
+                ) { Text("去登录") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showManualLoginPrompt = false }) { Text("取消") }
             }
         )
     }

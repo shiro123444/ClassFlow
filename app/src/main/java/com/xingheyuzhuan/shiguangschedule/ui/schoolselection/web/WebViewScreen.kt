@@ -240,15 +240,20 @@ fun WebViewScreen(
                     // 检测到达 JWXT 后台后，自动提取 VPN cookies 供 OkHttp 复用
                     if (!vpnCookiesSaved && url != null) {
                         val host = Uri.parse(url).host?.lowercase()
-                        if ((host == WBU_HOST || host == WBU_VPN_HOST) &&
-                            (url.contains("/admin/index") || url.contains("/admin/?loginType") || url.contains("/admin?loginType"))) {
+                        val isJwxtHost = host == WBU_HOST || host == WBU_VPN_HOST
+                        val isAdminHub = url.contains("/admin/index") ||
+                            url.contains("/admin/?loginType") ||
+                            url.contains("/admin?loginType") ||
+                            (url.contains("/admin/") && !url.contains("/admin/login")) ||
+                            runCatching { isWbuTimetableUrl(Uri.parse(url)) }.getOrDefault(false)
+                        if (isJwxtHost && isAdminHub) {
                             val engine = WbuSyncEngine(context = context, useVpn = host == WBU_VPN_HOST)
                             engine.importCookiesFromWebView(CookieManager.getInstance())
                             vpnCookiesSaved = true
                             view?.post {
-                                Toast.makeText(context, "VPN 会话已保存，后续同步无需重新登录", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, "会话已保存，后续同步无需重新登录", Toast.LENGTH_LONG).show()
                             }
-                            Log.d("WebViewScreen", "VPN cookies extracted and persisted for: $url")
+                            Log.d("WebViewScreen", "cookies extracted and persisted for: $url")
                         }
                     }
                 }

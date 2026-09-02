@@ -62,6 +62,18 @@ enum class WbuAuthMode {
 }
 
 /**
+ * 教务系统直连(含 VPN 镜像)表单登录的失败原因。
+ * 用于 UI 判断是否因超星验证码被服务端风控拦截，从而引导用户跳转 WebView 手动登录。
+ */
+enum class LocalLoginFailure {
+    /** 服务端回跳 /admin/login?jcaptchaError=1，疑似需要超星验证码 */
+    CAPTCHA,
+
+    /** 停止在 /admin/login 但无验证码标识，通常是账号或密码错误 */
+    CREDENTIALS
+}
+
+/**
  * 登录方式：密码 / 二维码 / 手机动态码。
  */
 enum class WbuLoginMethod {
@@ -156,6 +168,27 @@ class WbuSyncEngine(
     private val prefs by lazy { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
 
     private val cookieStore = CopyOnWriteArrayList<Cookie>()
+
+    /**
+     * 最近一次教务系统直连/镜像表单登录的失败原因（供 UI 判断是否因超星验证码被拦截）。
+     * 只在 [loginDirectLegacy] 流程完成后更新；成功或网络异常时保持为 null。
+     */
+    @Volatile
+    var lastLocalLoginFailure: LocalLoginFailure? = null
+
+    /**
+     * 教务系统直连/镜像表单登录失败时，从服务端返回页提取的真实错误文案
+     * （如"用户或密码错误, 请重试。当前错误次数为：N次…"）。成功时为 null。
+     */
+    @Volatile
+    var lastLocalLoginError: String? = null
+
+    /**
+     * 教务系统直连/镜像登录是否因**网络异常**（断网/超时/无法解析）而失败。
+     * 与 [lastLocalLoginFailure]/[lastLocalLoginError] 区分：网络问题请勿误标成"密码错误"。
+     */
+    @Volatile
+    var lastLocalLoginNetworkError: Boolean = false
 
     private val cookieJar = object : CookieJar {
         override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
@@ -265,6 +298,7 @@ class WbuSyncEngine(
         captchaProvider: SliderCaptchaProvider? = null,
         authMode: WbuAuthMode = WbuAuthMode.UNIFIED_CAS
     ): Boolean = withContext(Dispatchers.IO) {
+        lastLocalLoginNetworkError = false
         try {
             val success = if (useVpn) {
                 loginViaVpnCas(studentId, password, captchaProvider, authMode)
@@ -282,6 +316,7 @@ class WbuSyncEngine(
             return@withContext success
         } catch (e: Exception) {
             Log.e("WbuSyncEngine", "Login failed", e)
+            lastLocalLoginNetworkError = true
             false
         }
     }
@@ -301,12 +336,26 @@ class WbuSyncEngine(
     }
 
     /**
+     * 清除与当前 jwxt baseUrl（直连或 VPN 镜像）匹配的旧会话 Cookie。
+     * 登录前调用，避免残留的 JSESSIONID 使错误密码被"已认证"短接、或被旧账号会话假成功。
+     * 只清 jwxt host，不影响 ids / webvpn 的凭证 Cookie。
+     */
+    private fun clearJwxtSessionCookies() {
+        runCatching {
+            val loginUrl = "$baseUrl/admin/login".toHttpUrlOrNull() ?: return
+            cookieStore.removeAll { it.matches(loginUrl) }
+            persistCookieStore()
+        }.onFailure { Log.w("WbuSyncEngine", "clearJwxtSessionCookies failed", it) }
+    }
+
+    /**
      * 从 Android WebView CookieManager 导入 cookies 到 OkHttp cookie jar。
      * 用于 WebView 手动登录 WebVPN 后桥接 session。
      */
     fun importCookiesFromWebView(cookieManager: android.webkit.CookieManager) {
         val urls = listOf(
             "https://webvpn.wbu.edu.cn",
+            "https://jwxt.wbu.edu.cn",
             "http://jwxt-wbu-edu-cn-s.webvpn.wbu.edu.cn:8118",
             "http://ids-wbu-edu-cn.webvpn.wbu.edu.cn:8118",
         )
@@ -533,6 +582,46 @@ class WbuSyncEngine(
         cipher.init(Cipher.ENCRYPT_MODE, publicKey)
         val encrypted = cipher.doFinal(password.toByteArray(Charsets.UTF_8))
         return encrypted.joinToString("") { String.format("%02x", it.toInt() and 0xFF) }
+    }
+
+    /**
+     * 正方/超星教务系统直连登录的密码加密。
+     * 线上 /admin/login 使用 JSEncrypt（RSA/ECB/PKCS1）把密码加密后放入 password 字段，输出为 Base64。
+     * 公钥为硬编码的 1024 位 PKCS#1（模数 + 指数 65537）。
+     */
+    private fun rsaEncryptJwxtPassword(password: String): String {
+        return runCatching {
+            val modulus = BigInteger(JWXT_RSA_MODULUS, 16)
+            val exponent = BigInteger(JWXT_RSA_EXPONENT, 16)
+            val spec = RSAPublicKeySpec(modulus, exponent)
+            val publicKey = KeyFactory.getInstance("RSA").generatePublic(spec)
+            val cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
+            cipher.init(Cipher.ENCRYPT_MODE, publicKey)
+            val encrypted = cipher.doFinal(password.toByteArray(Charsets.UTF_8))
+            Base64.encodeToString(encrypted, Base64.NO_WRAP)
+        }.getOrElse {
+            Log.w("WbuSyncEngine", "JWXT RSA password encryption failed, fallback to plaintext", it)
+            password
+        }
+    }
+
+    /**
+     * 从教务系统登录页 JS 提取真实错误文案，形如：
+     * var error = "用户或密码错误, 请重试。当前错误次数为：1次，超过10次后，账号将被冻结15分钟。";
+     */
+    private fun extractLoginErrorMessage(html: String): String? {
+        val m = Regex("""var\s+error\s*=\s*"([^"]*)"\s*;?""", RegexOption.IGNORE_CASE).find(html)
+            ?: return null
+        val raw = m.groupValues.getOrNull(1)?.trim().orEmpty()
+        if (raw.isBlank()) return null
+        return raw
+            .replace("\\n", "\n")
+            .replace("\\r", "\r")
+            .replace("\\t", "\t")
+            .replace("\\\"", "\"")
+            .replace("\\'", "'")
+            .replace("\\\\", "\\")
+            .trim()
     }
 
     private fun parseSangforExponent(raw: String): BigInteger {
@@ -827,54 +916,64 @@ class WbuSyncEngine(
         studentId: String,
         password: String
     ): Boolean {
-        val loginPageReq = Request.Builder()
-            .url("$baseUrl/admin/login")
-            .get()
-            .build()
+        clearJwxtSessionCookies()
+        lastLocalLoginFailure = null
+        lastLocalLoginError = null
+        lastLocalLoginNetworkError = false
+        try {
+            val loginPageReq = Request.Builder()
+                .url("$baseUrl/admin/login")
+                .get()
+                .build()
 
-        val hiddenFields = mutableMapOf<String, String>()
-        client.newCall(loginPageReq).execute().use { loginPageResp ->
-            val html = loginPageResp.body?.string().orEmpty()
-            if (html.isBlank()) return false
-            val document = Jsoup.parse(html, "$baseUrl/admin/login")
-            document.select("input[type=hidden][name]").forEach { input ->
-                val name = input.attr("name")
-                if (name.isNotBlank()) {
-                    hiddenFields[name] = input.attr("value")
+            val hiddenFields = mutableMapOf<String, String>()
+            client.newCall(loginPageReq).execute().use { loginPageResp ->
+                val html = loginPageResp.body?.string().orEmpty()
+                if (html.isBlank()) return false
+                val document = Jsoup.parse(html, "$baseUrl/admin/login")
+                document.select("input[type=hidden][name]").forEach { input ->
+                    val name = input.attr("name")
+                    if (name.isNotBlank()) {
+                        hiddenFields[name] = input.attr("value")
+                    }
                 }
             }
-        }
 
-        val formBuilder = FormBody.Builder()
-        hiddenFields.forEach { (k, v) -> formBuilder.add(k, v) }
-        formBuilder.add("login_name", studentId)
-        formBuilder.add("password", password)
-        if (!hiddenFields.containsKey("loginType")) {
-            formBuilder.add("loginType", "1")
-        }
+            val formBuilder = FormBody.Builder()
+            hiddenFields.forEach { (k, v) -> formBuilder.add(k, v) }
+            formBuilder.add("username", studentId)
+            formBuilder.add("password", rsaEncryptJwxtPassword(password))
 
-        val loginPostReq = Request.Builder()
-            .url("$baseUrl/admin/login")
-            .post(formBuilder.build())
-            .addHeader("Content-Type", "application/x-www-form-urlencoded")
-            .build()
+            val loginPostReq = Request.Builder()
+                .url("$baseUrl/admin/login")
+                .post(formBuilder.build())
+                .addHeader("Content-Type", "application/x-www-form-urlencoded")
+                .build()
 
-        client.newCall(loginPostReq).execute().use { postResp ->
-            val postRespString = postResp.body?.string().orEmpty()
-            val finalUrl = postResp.request.url.toString()
-            val success = finalUrl.contains("/admin/index") ||
-                finalUrl.contains("/admin/?loginType=1") ||
-                postRespString.contains("退出") ||
-                postRespString.contains("我的课表")
-            if (!success) {
-                Log.d("WbuSyncEngine", "Legacy login response URL=$finalUrl")
-                Log.d("WbuSyncEngine", "Legacy login response body snippet=${postRespString.take(500)}")
+            client.newCall(loginPostReq).execute().use { postResp ->
+                val postRespString = postResp.body?.string().orEmpty()
+                val finalUrl = postResp.request.url.toString()
+                // 成功判定：最终 URL 已跳离登录页即视为登录被接受
+                // （无论落到 /admin、/admin/index 还是选课页 /xsd/... 均可）。
+                val success = !finalUrl.contains("/admin/login")
+                if (!success) {
+                    Log.d("WbuSyncEngine", "Legacy login response URL=$finalUrl")
+                    Log.d("WbuSyncEngine", "Legacy login response body snippet=${postRespString.take(500)}")
+                    lastLocalLoginFailure = if (finalUrl.contains("jcaptchaError")) {
+                        LocalLoginFailure.CAPTCHA
+                    } else {
+                        lastLocalLoginError = extractLoginErrorMessage(postRespString)
+                        LocalLoginFailure.CREDENTIALS
+                    }
+                    return false
+                }
+
+                return canAccessTermApi()
             }
-            if (!success) {
-                return false
-            }
-
-            return canAccessTermApi()
+        } catch (e: Exception) {
+            Log.w("WbuSyncEngine", "Legacy login network error", e)
+            lastLocalLoginNetworkError = true
+            return false
         }
     }
 
@@ -955,6 +1054,7 @@ class WbuSyncEngine(
         flowTag: String,
         captchaProvider: SliderCaptchaProvider? = null
     ): Boolean {
+        clearJwxtSessionCookies()
         val origin = idsLoginUrl.toHttpUrlOrNull()?.let { "${it.scheme}://${it.host}:${it.port}" }
 
         // 首次获取登录页面（解析表单隐藏域、盐值，并检测是否需要验证码）
@@ -1734,6 +1834,10 @@ class WbuSyncEngine(
         private const val KEY_QR_VIA_WEBVPN = "qr_via_webvpn"
         private const val KEY_SEND_ENGLISH_SMS = "send_english_sms"
         private const val MAX_CAPTCHA_ATTEMPTS = 5
+
+        // 教务系统直连登录（/admin/login）JSEncrypt 硬编码公钥（1024 位 PKCS#1）
+        private const val JWXT_RSA_MODULUS = "B3B58F37A7A94BF018359A825981DE8C39E1B41A55602A5D134EBC7C612CB8C9897E0F907FC1E12B40AF2A39E472860E0FBB8F336FBACD0104E84FDFF1E223ACB70C0EC4DD1B2935D884FE0AAC74B5FDB69B757FCDA04A89DF4AD5C2997517C89563B64C303DCE97A1DA3D4A989927A753ECBFC49D2D6EB889CBC1B71F9AF501"
+        private const val JWXT_RSA_EXPONENT = "010001"
 
         /** 「ids 走 WebVPN」：默认关闭（走公网 ids）。 */
         fun getIdsViaWebVpn(context: Context): Boolean {
