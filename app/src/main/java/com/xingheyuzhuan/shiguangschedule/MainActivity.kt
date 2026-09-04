@@ -43,6 +43,14 @@ import androidx.compose.material.icons.rounded.Celebration
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Swipe
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.rounded.OpenWith
+import androidx.compose.material.icons.rounded.UnfoldMore
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -311,7 +319,7 @@ fun AppNavigation(
                 }
             }
         ) {
-            // ── Step 0: Welcome  +  Step 1: Swipe ── both target weekTitle
+            // ── Step 0: Welcome  +  Step 1: Swipe  +  Step 2: Course Drag & Resize ── target weekTitle
             val weekTitleTargetModifier =
                 if (showOnboarding && currentDestination is Destination.CourseSchedule) {
                     Modifier
@@ -343,15 +351,29 @@ fun AppNavigation(
                                 )
                             }
                         )
+                        .introShowCaseTarget(
+                            index = 2,
+                            style = showcaseStyle,
+                            content = {
+                                OnboardingCard(
+                                    title = stringResource(R.string.onboarding_title_course_drag),
+                                    body = stringResource(R.string.onboarding_body_course_drag),
+                                    isLastStep = false,
+                                    icon = { CourseDragGestureAnimation() },
+                                    showcaseState = introShowcaseState,
+                                    onComplete = completeOnboarding
+                                )
+                            }
+                        )
                 } else {
                     Modifier
                 }
 
-            // ── Step 2: Sync button ── (开场引导最后一步)
+            // ── Step 3: Sync button ── (开场引导最后一步)
             val syncButtonTargetModifier =
                 if (showOnboarding && currentDestination is Destination.CourseSchedule) {
                     Modifier.introShowCaseTarget(
-                        index = 2,
+                        index = 3,
                         style = showcaseStyle,
                         content = {
                             OnboardingCard(
@@ -428,7 +450,7 @@ fun AppNavigation(
                                 hazeState = dockHazeState,
                                 onFloatingModeChange = { isFloatingCourseMode = it },
                                 onWeekTitleClickIntercept = {
-                                    if (showOnboarding && introShowcaseState.currentTargetIndex in 0..1) {
+                                    if (showOnboarding && introShowcaseState.currentTargetIndex in 0..2) {
                                         introShowcaseState.goToNext(
                                             onComplete = completeOnboarding,
                                             allowCompleteOnMissingTarget = false
@@ -442,7 +464,7 @@ fun AppNavigation(
                                     if (!showOnboarding) {
                                         false
                                     } else {
-                                        if (introShowcaseState.currentTargetIndex == 2) {
+                                        if (introShowcaseState.currentTargetIndex == 3) {
                                             completeOnboarding()
                                             false
                                         } else {
@@ -653,9 +675,143 @@ private fun IntroShowcaseScope.OnboardingCard(
     }
 }
 
-private const val LAST_ONBOARDING_TARGET_INDEX = 2
+private const val LAST_ONBOARDING_TARGET_INDEX = 3
 
 // ── Gesture hint animations ──
+
+@Composable
+private fun CourseDragGestureAnimation() {
+    val infiniteTransition = rememberInfiniteTransition(label = "course_drag_anim")
+
+    // phase: 0f..4000f (循环演示完整手势)
+    val progress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 4000f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "phase"
+    )
+
+    // 计算各阶段状态:
+    // 0..800ms: 长按激活 -> 触点波纹渐显，端点出现
+    // 800..2000ms: 拖动底部端点向下延长节数
+    // 2000..3200ms: 拖动卡片整体向右移至屏幕边缘
+    // 3200..4000ms: 边缘释放悬停，淡出还原
+    val (blockHeightDp, blockOffsetXDp, handlesAlpha, touchIndicatorOffset) = when {
+        progress < 800f -> {
+            val p = progress / 800f
+            Quadruple(68f, 0f, p, Offset(0f, 0f))
+        }
+        progress < 2000f -> {
+            val p = ((progress - 800f) / 1200f).coerceIn(0f, 1f)
+            val stretch = kotlin.math.sin(p * Math.PI.toFloat()) * 30f
+            Quadruple(68f + stretch, 0f, 1f, Offset(24f, 34f + stretch))
+        }
+        progress < 3400f -> {
+            val p = ((progress - 2000f) / 1400f).coerceIn(0f, 1f)
+            val moveX = p * 42f
+            Quadruple(68f, moveX, 1f, Offset(moveX, 0f))
+        }
+        else -> {
+            val p = ((progress - 3400f) / 600f).coerceIn(0f, 1f)
+            Quadruple(68f, 42f * (1f - p), 1f - p, Offset.Zero)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .size(width = 160.dp, height = 112.dp)
+            .padding(vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        // 模拟课程卡片
+        Box(
+            modifier = Modifier
+                .offset(x = blockOffsetXDp.dp)
+                .width(96.dp)
+                .height(blockHeightDp.dp)
+                .background(
+                    color = Color(0xFF3B82F6).copy(alpha = 0.88f),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                .border(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(12.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "示例课程",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.OpenWith,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Text(
+                        text = "长按拖动",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 9.sp
+                    )
+                }
+            }
+
+            // 上端点
+            if (handlesAlpha > 0.01f) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = (-5).dp, y = (-5).dp)
+                        .size(11.dp)
+                        .background(Color.White.copy(alpha = handlesAlpha), CircleShape)
+                        .border(1.5.dp, Color(0xFF1D4ED8).copy(alpha = handlesAlpha), CircleShape)
+                )
+                // 下端点
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .offset(x = 5.dp, y = 5.dp)
+                        .size(11.dp)
+                        .background(Color.White.copy(alpha = handlesAlpha), CircleShape)
+                        .border(1.5.dp, Color(0xFF1D4ED8).copy(alpha = handlesAlpha), CircleShape)
+                )
+            }
+        }
+
+        // 手指触控指示光标
+        if (handlesAlpha > 0.05f) {
+            Box(
+                modifier = Modifier
+                    .offset(x = touchIndicatorOffset.x.dp, y = touchIndicatorOffset.y.dp)
+                    .size(24.dp)
+                    .background(Color.White.copy(alpha = 0.28f * handlesAlpha), CircleShape)
+                    .border(1.5.dp, Color.White.copy(alpha = 0.9f * handlesAlpha), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(Color.White.copy(alpha = 0.95f * handlesAlpha), CircleShape)
+                )
+            }
+        }
+    }
+}
+
+private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
 
 @Composable
 private fun SwipeGestureAnimation() {

@@ -13,6 +13,8 @@
     <string name="label_font_style">Font Style</string>
     <string name="onboarding_body_1">Lightweight schedule\n∠・ω&lt; )⌒☆ Ciallo～</string>
     <string name="onboarding_body_2">Swipe left or right to browse different weeks</string>
+    <string name="onboarding_title_course_drag">Drag &amp; Resize Courses</string>
+    <string name="onboarding_body_course_drag">Long-press any course block to tweak:\n• Drag handles to resize duration\n• Drag card to adjust schedule\n• Drag to screen edge for cross-week move</string>
     <string name="onboarding_body_3">Tap the top-right button to import your schedule</string>
     <string name="onboarding_body_4">"Today" for today · "Schedule" for the week · "Me" for settings</string>
     <string name="onboarding_body_5">Set the start date so weeks display correctly</string>

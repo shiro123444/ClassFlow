@@ -11,6 +11,8 @@
     <string name="label_font_style">字体风格</string>
     <string name="onboarding_body_1">轻量课程表，专为武汉商学院\n∠・ω&lt; )⌒☆ Ciallo～</string>
     <string name="onboarding_body_2">手指左右滑动课表，即可查看不同周的课程</string>
+    <string name="onboarding_title_course_drag">长按课程自由微调</string>
+    <string name="onboarding_body_course_drag">长按课程块进入微调模式：\n• 拖动上下端点快速缩放节数\n• 拖拽卡片调整上课时间\n• 拖至屏幕边缘即可跨周移动</string>
     <string name="onboarding_body_3">点击右上角按钮，一键导入教务系统课表</string>
     <string name="onboarding_body_4">「今日课表」看今天 · 「课表」看整周 · 「我的」管理设置</string>
     <string name="onboarding_body_5">设定日期后，课表才能准确显示当前是第几周</string>
