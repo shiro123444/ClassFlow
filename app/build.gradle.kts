@@ -1,4 +1,6 @@
 import org.gradle.api.tasks.compile.JavaCompile
+import java.util.Properties
+import java.io.FileInputStream
 
 plugins {
     alias(libs.plugins.android.application)
@@ -18,12 +20,26 @@ android {
     namespace = "com.xingheyuzhuan.shiguangschedule"
     compileSdk = 37
 
+    val localProperties = Properties().apply {
+        val file = rootProject.file("local.properties")
+        if (file.exists()) {
+            FileInputStream(file).use { load(it) }
+        }
+    }
+
+    val updateApiUrl: String = (project.findProperty("CLASSFLOW_UPDATE_API_URL") as? String)
+        ?: localProperties.getProperty("CLASSFLOW_UPDATE_API_URL")
+        ?: System.getenv("CLASSFLOW_UPDATE_API_URL")
+        ?: ""
+
     defaultConfig {
         applicationId = "com.shiro.classflow"
         minSdk = 26
         targetSdk = 37
         versionCode = 15
         versionName = "1.0.0.0"
+
+        buildConfigField("String", "UPDATE_API_URL", "\"$updateApiUrl\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

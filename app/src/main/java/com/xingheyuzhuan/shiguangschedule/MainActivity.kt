@@ -98,6 +98,20 @@ import com.canopas.lib.showcase.component.ShowcaseStyle
 import com.canopas.lib.showcase.component.rememberIntroShowcaseState
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.DisposableEffect
+import com.xingheyuzhuan.shiguangschedule.tool.ReleaseUpdateInfo
+import com.xingheyuzhuan.shiguangschedule.tool.UpdateChecker
+import com.xingheyuzhuan.shiguangschedule.tool.UpdateStatus
+import com.xingheyuzhuan.shiguangschedule.ui.components.AppDownloadProgressDialog
+import com.xingheyuzhuan.shiguangschedule.ui.components.AppUpdateFoundDialog
+import com.xingheyuzhuan.shiguangschedule.ui.components.InstallPermissionPromptDialog
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.io.File
 import com.xingheyuzhuan.shiguangschedule.data.model.AppSettingsModel
 import com.xingheyuzhuan.shiguangschedule.data.model.AppThemeMode
 import com.xingheyuzhuan.shiguangschedule.data.model.StartScreen
@@ -224,6 +238,58 @@ fun AppNavigation(
     // 悬浮课程模式时隐藏底部导航栏（上游同步）
     var isFloatingCourseMode by remember { mutableStateOf(false) }
     val showBottomDock = currentDestination?.isMainScreen == true && !isFloatingCourseMode
+
+    val coroutineScope = rememberCoroutineScope()
+    val updateChecker = remember(context) { UpdateChecker(context.applicationContext) }
+    var autoUpdateFoundInfo by remember { mutableStateOf<ReleaseUpdateInfo?>(null) }
+    var autoUpdateStatus by remember { mutableStateOf<UpdateStatus>(UpdateStatus.Idle) }
+    var showAutoInstallPermissionDialog by remember { mutableStateOf(false) }
+    var autoPendingApkFile by remember { mutableStateOf<File?>(null) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val apk = autoPendingApkFile
+                if (apk != null && apk.exists() && updateChecker.canRequestPackageInstalls()) {
+                    updateChecker.installApk(apk)
+                    autoPendingApkFile = null
+                    showAutoInstallPermissionDialog = false
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        delay(1500)
+        val settings = appSettingsRepository.getAppSettingsOnce()
+        if (!settings.autoCheckUpdate) return@LaunchedEffect
+        val effectiveApiUrl = settings.customUpdateApiUrl.ifBlank { BuildConfig.UPDATE_API_URL }.trim()
+        if (effectiveApiUrl.isBlank()) return@LaunchedEffect
+
+        val now = System.currentTimeMillis()
+        val checkIntervalMs = 24 * 60 * 60 * 1000L
+        if (now - settings.lastCheckUpdateTime < checkIntervalMs) return@LaunchedEffect
+
+        val status = updateChecker.checkUpdate(
+            customApiUrl = effectiveApiUrl,
+            channel = settings.updateChannel
+        )
+
+        if (status is UpdateStatus.Found) {
+            // 发现新版本：若未被用户明确标记跳过，则弹出更新提示
+            if (status.info.latestVersionName != settings.ignoredUpdateVersion) {
+                autoUpdateFoundInfo = status.info
+            }
+        } else if (status is UpdateStatus.Latest) {
+            // 只有在已是最新版本时，才记录24小时冷却，避免频繁请求
+            appSettingsRepository.updateLastCheckUpdateTime(now)
+        }
+    }
 
     // NavBridge 实现（navigation3 后向兼容层，供各 Screen 使用）
     val navBridge: NavBridge = remember(backStack, context) {
@@ -566,6 +632,67 @@ fun AppNavigation(
                     )
                 }
             }
+        }
+
+        if (autoUpdateFoundInfo != null && autoUpdateStatus !is UpdateStatus.Downloading) {
+            val info = autoUpdateFoundInfo!!
+            AppUpdateFoundDialog(
+                info = info,
+                currentVersionName = BuildConfig.VERSION_NAME,
+                onDismiss = {
+                    autoUpdateFoundInfo = null
+                },
+                onSkipVersion = {
+                    coroutineScope.launch {
+                        appSettingsRepository.updateIgnoredUpdateVersion(info.latestVersionName)
+                    }
+                    autoUpdateFoundInfo = null
+                },
+                onUpdateConfirm = {
+                        coroutineScope.launch {
+                            autoUpdateStatus = UpdateStatus.Downloading()
+                            val result = updateChecker.downloadAndInstallUpdate(
+                                downloadUrl = info.downloadUrl,
+                                versionName = info.latestVersionName,
+                                expectedSize = info.expectedSize,
+                                expectedMd5 = info.expectedMd5,
+                                onProgress = { progress, currentBytes, totalBytes ->
+                                    autoUpdateStatus = UpdateStatus.Downloading(progress, currentBytes, totalBytes)
+                                }
+                            )
+                        if (result.isSuccess) {
+                            val apk = result.getOrNull()
+                            autoPendingApkFile = apk
+                            autoUpdateStatus = UpdateStatus.Idle
+                            autoUpdateFoundInfo = null
+                            appSettingsRepository.updateIgnoredUpdateVersion("")
+                            if (!updateChecker.canRequestPackageInstalls()) {
+                                showAutoInstallPermissionDialog = true
+                            }
+                        } else {
+                            autoUpdateStatus = UpdateStatus.Idle
+                        }
+                    }
+                }
+            )
+        }
+
+        if (autoUpdateStatus is UpdateStatus.Downloading) {
+            AppDownloadProgressDialog(
+                downloading = autoUpdateStatus as UpdateStatus.Downloading
+            )
+        }
+
+        if (showAutoInstallPermissionDialog) {
+            InstallPermissionPromptDialog(
+                onConfirm = {
+                    showAutoInstallPermissionDialog = false
+                    updateChecker.openInstallPermissionSettings()
+                },
+                onDismiss = {
+                    showAutoInstallPermissionDialog = false
+                }
+            )
         }
     }
 }

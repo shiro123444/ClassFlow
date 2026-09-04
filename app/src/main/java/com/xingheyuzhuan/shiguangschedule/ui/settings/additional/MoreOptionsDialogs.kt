@@ -26,6 +26,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.model.StartScreen
+import com.xingheyuzhuan.shiguangschedule.data.model.UpdateChannelType
 import com.xingheyuzhuan.shiguangschedule.tool.UpdateChecker.Companion.UPDATE_CHANNELS
 import com.xingheyuzhuan.shiguangschedule.tool.UpdateStatus
 
@@ -69,7 +70,51 @@ fun StartScreenSelectionDialog(
 }
 
 /**
- * 更新渠道选择弹窗
+ * 更新渠道选择弹窗 (ClassFlow 自建 API 渠道切换)
+ */
+@Composable
+fun UpdateChannelDialog(
+    showDialog: Boolean,
+    currentChannelId: String,
+    onDismiss: () -> Unit,
+    onSelectChannel: (String) -> Unit
+) {
+    if (!showDialog) return
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.dialog_select_update_channel)) },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                UpdateChannelType.entries.forEach { type ->
+                    val isSelected = type.channelId == currentChannelId
+                    ListItem(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onSelectChannel(type.channelId)
+                                onDismiss()
+                            },
+                        headlineContent = { Text(text = type.title) },
+                        supportingContent = { Text(text = type.description) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        leadingContent = {
+                            RadioButton(selected = isSelected, onClick = null)
+                        }
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        }
+    )
+}
+
+/**
+ * 更新渠道选择弹窗 (上游兼容)
  */
 @Composable
 fun ChannelSelectionDialog(

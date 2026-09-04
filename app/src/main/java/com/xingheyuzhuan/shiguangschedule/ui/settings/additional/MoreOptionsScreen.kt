@@ -33,9 +33,11 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PeopleAlt
 import androidx.compose.material.icons.filled.RocketLaunch
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stars
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -45,6 +47,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -76,8 +79,19 @@ import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.Destination
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WebVpnClient
+import androidx.compose.material.icons.automirrored.filled.AltRoute
+import androidx.compose.material.icons.filled.Sync
+import com.xingheyuzhuan.shiguangschedule.data.model.UpdateChannelType
 import com.xingheyuzhuan.shiguangschedule.tool.UpdateChecker
 import com.xingheyuzhuan.shiguangschedule.tool.UpdateStatus
+import com.xingheyuzhuan.shiguangschedule.ui.components.AppDownloadProgressDialog
+import com.xingheyuzhuan.shiguangschedule.ui.components.AppUpdateFoundDialog
+import com.xingheyuzhuan.shiguangschedule.ui.components.InstallPermissionPromptDialog
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.runtime.DisposableEffect
+import java.io.File
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,19 +107,53 @@ fun MoreOptionsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val updateChecker = remember(context) { UpdateChecker(context.applicationContext) }
 
+    val autoCheckUpdate by viewModel.autoCheckUpdate.collectAsState()
+    val customUpdateApiUrl by viewModel.customUpdateApiUrl.collectAsState()
+    val ignoredUpdateVersion by viewModel.ignoredUpdateVersion.collectAsState()
+    val updateChannel by viewModel.updateChannel.collectAsState()
+    val effectiveApiUrl = customUpdateApiUrl.ifBlank { BuildConfig.UPDATE_API_URL }.trim()
+
     var updateStatus by remember { mutableStateOf<UpdateStatus>(UpdateStatus.Idle) }
     var showResultDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
     var showStartScreenDialog by remember { mutableStateOf(false) }
+    var showInstallPermissionDialog by remember { mutableStateOf(false) }
+    var showServerUrlDialog by remember { mutableStateOf(false) }
+    var showChannelDialog by remember { mutableStateOf(false) }
+    var inputServerUrl by remember { mutableStateOf("") }
+    var pendingApkFile by remember { mutableStateOf<File?>(null) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val apk = pendingApkFile
+                if (apk != null && apk.exists() && updateChecker.canRequestPackageInstalls()) {
+                    updateChecker.installApk(apk)
+                    pendingApkFile = null
+                    showInstallPermissionDialog = false
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val useManualWebViewVpn = remember {
         mutableStateOf(WebVpnClient.shouldUseManualWebViewForVpn(navBridge.context))
     }
 
     fun startCheck() {
+        if (effectiveApiUrl.isBlank()) {
+            inputServerUrl = customUpdateApiUrl
+            showServerUrlDialog = true
+            return
+        }
         updateStatus = UpdateStatus.Checking
         coroutineScope.launch {
-            updateStatus = updateChecker.checkUpdate()
+            updateStatus = updateChecker.checkUpdate(effectiveApiUrl, updateChannel)
         }
     }
 
@@ -401,13 +449,60 @@ fun MoreOptionsScreen(
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
 
                 ListItem(
+                    headlineContent = { Text("自动检查更新") },
+                    supportingContent = { Text("启动应用时静默检查是否有新版本") },
+                    leadingContent = {
+                        Icon(
+                            imageVector = Icons.Default.Sync,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = autoCheckUpdate,
+                            onCheckedChange = { viewModel.onAutoCheckUpdateChanged(it) }
+                        )
+                    }
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
+
+                ListItem(
+                    modifier = Modifier.clickable { showChannelDialog = true },
+                    headlineContent = { Text("更新渠道") },
+                    supportingContent = { Text(UpdateChannelType.fromId(updateChannel).title) },
+                    leadingContent = {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.AltRoute,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    trailingContent = {
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
+                    }
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
+
+                ListItem(
                     modifier = Modifier.clickable {
                         if (updateStatus !is UpdateStatus.Checking && updateStatus !is UpdateStatus.Downloading) {
                             startCheck()
                         }
                     },
                     headlineContent = { Text(stringResource(R.string.item_check_software_update)) },
-                    supportingContent = { Text("获取最新版本支持") },
+                    supportingContent = {
+                        Text(
+                            text = when {
+                                ignoredUpdateVersion.isNotBlank() -> "已跳过版本 $ignoredUpdateVersion（点击可检查）"
+                                customUpdateApiUrl.isNotBlank() -> "已设置自定义更新源"
+                                else -> "获取最新版本支持"
+                            },
+                            maxLines = 1
+                        )
+                    },
                     leadingContent = {
                         Icon(
                             imageVector = Icons.Default.SystemUpdate,
@@ -416,7 +511,17 @@ fun MoreOptionsScreen(
                         )
                     },
                     trailingContent = {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
+                        IconButton(
+                            onClick = {
+                                inputServerUrl = customUpdateApiUrl
+                                showServerUrlDialog = true
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "配置更新服务器地址"
+                            )
+                        }
                     }
                 )
             }
@@ -442,97 +547,58 @@ fun MoreOptionsScreen(
     }
 
     if (updateStatus is UpdateStatus.Downloading) {
-        AlertDialog(
-            onDismissRequest = {},
-            title = { Text("正在下载更新") },
-            text = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.5.dp)
-                    Text(text = "下载完成后将自动唤起安装", style = MaterialTheme.typography.bodyMedium)
-                }
-            },
-            confirmButton = {}
+        AppDownloadProgressDialog(
+            downloading = updateStatus as UpdateStatus.Downloading
         )
     }
 
     if (showResultDialog && updateStatus !is UpdateStatus.Checking && updateStatus !is UpdateStatus.Downloading) {
         when (val status = updateStatus) {
             is UpdateStatus.Found -> {
-                val notesScrollState = rememberScrollState()
-                AlertDialog(
-                    onDismissRequest = {
+                AppUpdateFoundDialog(
+                    info = status.info,
+                    currentVersionName = versionName,
+                    onDismiss = {
                         showResultDialog = false
                         updateStatus = UpdateStatus.Idle
                     },
-                    title = { Text(text = "发现新版本 ${status.info.latestVersionName}") },
-                    text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                text = "当前版本：$versionName\n最新版本：${status.info.latestVersionName}",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            Text(
-                                text = "更新摘要",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(max = 260.dp)
-                                    .verticalScroll(notesScrollState)
-                                    .background(
-                                        MaterialTheme.colorScheme.surfaceContainerLow,
-                                        RoundedCornerShape(12.dp)
-                                    )
-                                    .padding(12.dp)
-                            ) {
-                                MarkdownReleaseNotes(status.info.summary.ifBlank { "本次版本未提供摘要。" })
-                                Spacer(modifier = Modifier.height(10.dp))
-                                TextButton(
-                                    onClick = {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(status.info.releaseUrl))
-                                        context.startActivity(intent)
-                                    }
-                                ) {
-                                    Text("查看发行说明")
-                                }
-                            }
+                    onSkipVersion = {
+                        viewModel.ignoreUpdateVersion(status.info.latestVersionName)
+                        showResultDialog = false
+                        updateStatus = UpdateStatus.Idle
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("已跳过版本 ${status.info.latestVersionName}")
                         }
                     },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            showResultDialog = false
-                            coroutineScope.launch {
-                                updateStatus = UpdateStatus.Downloading
-                                val result = updateChecker.downloadAndInstallUpdate(
-                                    downloadUrl = status.info.downloadUrl,
-                                    versionName = status.info.latestVersionName
-                                )
-                                if (result.isSuccess) {
-                                    updateStatus = UpdateStatus.Idle
-                                    snackbarHostState.showSnackbar("已开始安装更新包")
+                    onUpdateConfirm = {
+                        showResultDialog = false
+                        coroutineScope.launch {
+                            updateStatus = UpdateStatus.Downloading()
+                            val result = updateChecker.downloadAndInstallUpdate(
+                                downloadUrl = status.info.downloadUrl,
+                                versionName = status.info.latestVersionName,
+                                expectedSize = status.info.expectedSize,
+                                expectedMd5 = status.info.expectedMd5,
+                                onProgress = { progress, currentBytes, totalBytes ->
+                                    updateStatus = UpdateStatus.Downloading(progress, currentBytes, totalBytes)
+                                }
+                            )
+                            if (result.isSuccess) {
+                                val apk = result.getOrNull()
+                                pendingApkFile = apk
+                                updateStatus = UpdateStatus.Idle
+                                viewModel.clearIgnoredUpdateVersion()
+                                if (!updateChecker.canRequestPackageInstalls()) {
+                                    showInstallPermissionDialog = true
                                 } else {
-                                    updateStatus = UpdateStatus.Error(
-                                        "下载或安装失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
-                                    )
-                                    showResultDialog = true
+                                    snackbarHostState.showSnackbar("已调起安装程序")
                                 }
+                            } else {
+                                updateStatus = UpdateStatus.Error(
+                                    "下载或安装失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
+                                )
+                                showResultDialog = true
                             }
-                        }) {
-                            Text(stringResource(R.string.btn_update_now))
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = {
-                            showResultDialog = false
-                            updateStatus = UpdateStatus.Idle
-                        }) {
-                            Text("暂不安装")
                         }
                     }
                 )
@@ -559,6 +625,16 @@ fun MoreOptionsScreen(
                         }) {
                             Text(stringResource(R.string.action_confirm))
                         }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = {
+                            showResultDialog = false
+                            updateStatus = UpdateStatus.Idle
+                            inputServerUrl = customUpdateApiUrl
+                            showServerUrlDialog = true
+                        }) {
+                            Text("配置地址")
+                        }
                     }
                 )
             }
@@ -566,6 +642,94 @@ fun MoreOptionsScreen(
             else -> Unit
         }
     }
+
+    if (showServerUrlDialog) {
+        AlertDialog(
+            onDismissRequest = { showServerUrlDialog = false },
+            title = { Text("自定义更新服务器") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "如需使用自建更新服务，可输入自定义 API 接口地址。留空则默认使用官方接口。",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    OutlinedTextField(
+                        value = inputServerUrl,
+                        onValueChange = { inputServerUrl = it },
+                        placeholder = { Text("输入自定义 API 地址（留空使用默认）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (ignoredUpdateVersion.isNotBlank()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "已忽略版本：$ignoredUpdateVersion",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            TextButton(
+                                onClick = {
+                                    viewModel.clearIgnoredUpdateVersion()
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar("已恢复该版本的自动提醒")
+                                    }
+                                }
+                            ) {
+                                Text("恢复提醒")
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.onCustomUpdateApiUrlChanged(inputServerUrl.trim())
+                    showServerUrlDialog = false
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar(
+                            if (inputServerUrl.isBlank()) "已恢复为默认更新接口"
+                            else "自定义更新地址已保存"
+                        )
+                    }
+                }) {
+                    Text("保存")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showServerUrlDialog = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
+    if (showInstallPermissionDialog) {
+        InstallPermissionPromptDialog(
+            onConfirm = {
+                showInstallPermissionDialog = false
+                updateChecker.openInstallPermissionSettings()
+            },
+            onDismiss = {
+                showInstallPermissionDialog = false
+            }
+        )
+    }
+
+    UpdateChannelDialog(
+        showDialog = showChannelDialog,
+        currentChannelId = updateChannel,
+        onDismiss = { showChannelDialog = false },
+        onSelectChannel = { newChannel ->
+            viewModel.onUpdateChannelChanged(newChannel)
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar("已切换为${UpdateChannelType.fromId(newChannel).title}")
+            }
+        }
+    )
 
     LanguageSelectionDialog(
         showDialog = showLanguageDialog,
@@ -582,53 +746,6 @@ fun MoreOptionsScreen(
             showStartScreenDialog = false
         }
     )
-}
-
-@Composable
-private fun MarkdownReleaseNotes(markdown: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        markdown.lines().forEach { rawLine ->
-            val line = rawLine.trimEnd()
-            when {
-                line.isBlank() -> Spacer(modifier = Modifier.height(2.dp))
-                line.startsWith("### ") -> Text(
-                    text = line.removePrefix("### ").trim(),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-
-                line.startsWith("## ") -> Text(
-                    text = line.removePrefix("## ").trim(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-
-                line.startsWith("# ") -> Text(
-                    text = line.removePrefix("# ").trim(),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-
-                line.startsWith("- ") || line.startsWith("* ") -> Text(
-                    text = "? ${line.drop(2).trim()}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Regex("^\\d+\\.\\s+.+").matches(line) -> Text(
-                    text = line,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                else -> Text(
-                    text = line,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
 }
 
 @Composable
