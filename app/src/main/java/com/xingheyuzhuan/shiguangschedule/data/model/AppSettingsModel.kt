@@ -118,10 +118,10 @@ data class AppSettingsModel(
     val customDarkPrimary: Long = Purple80.toArgb().toLong(),
 
     /** * 是否使用 Sakura 时间色板（早/中/晚自动切换樱花色调）
-     * true: ClassFlow 特色时间主题
+     * true: ClassFlow 特色时间主题（首启默认开启）
      * false: 上游固定主题样式（动态取色或自定义种子色）
      */
-    val useSakuraTimeTheme: Boolean = false,
+    val useSakuraTimeTheme: Boolean = true,
 ) {
     /**
      * 将 DataStore 的 Key 定义在伴生对象中。

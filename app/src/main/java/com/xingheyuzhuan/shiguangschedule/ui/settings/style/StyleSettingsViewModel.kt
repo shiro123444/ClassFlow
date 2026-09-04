@@ -210,6 +210,7 @@ class StyleSettingsViewModel @Inject constructor(
                 styleRepository.setCourseBlockAlpha(0.5f)
                 styleRepository.setCourseBlockCornerRadius(8f)
                 styleRepository.setCourseBlockInnerPadding(4f)
+                styleRepository.setCourseBlockOuterPadding(3f)
                 styleRepository.setCourseBlockBlurRadius(0f)
                 styleRepository.setBorderType(BorderTypeProto.BORDER_TYPE_NONE)
             }
@@ -217,6 +218,7 @@ class StyleSettingsViewModel @Inject constructor(
                 styleRepository.setCourseBlockAlpha(0.5f)
                 styleRepository.setCourseBlockCornerRadius(10f)
                 styleRepository.setCourseBlockInnerPadding(7f)
+                styleRepository.setCourseBlockOuterPadding(3f)
                 styleRepository.setCourseBlockBlurRadius(8f)
                 styleRepository.setBorderType(BorderTypeProto.BORDER_TYPE_GLASS)
             }
@@ -224,15 +226,17 @@ class StyleSettingsViewModel @Inject constructor(
                 styleRepository.setCourseBlockAlpha(0.62f)
                 styleRepository.setCourseBlockCornerRadius(12f)
                 styleRepository.setCourseBlockInnerPadding(7f)
+                styleRepository.setCourseBlockOuterPadding(3f)
                 styleRepository.setCourseBlockBlurRadius(16f)
                 styleRepository.setBorderType(BorderTypeProto.BORDER_TYPE_GLASS)
             }
             else -> {
-                // 棱角：圆角 0、无边框、模糊 10、不透明度 50%、内部填充 4
+                // 棱角：圆角 0、无边框、模糊 10、不透明度 50%、内部填充 4、外部间距 1
                 styleRepository.setCourseBlockAlpha(0.5f)
                 styleRepository.setCourseBlockCornerRadius(0f)
                 styleRepository.setCourseBlockBlurRadius(10f)
                 styleRepository.setCourseBlockInnerPadding(4f)
+                styleRepository.setCourseBlockOuterPadding(1f)
                 styleRepository.setBorderType(BorderTypeProto.BORDER_TYPE_NONE)
             }
         }

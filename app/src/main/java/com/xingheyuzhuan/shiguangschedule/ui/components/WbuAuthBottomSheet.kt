@@ -443,28 +443,166 @@ fun WbuAuthBottomSheet(
                 )
             }
 
-            // “V 展开”：登录方式 + 两个开关
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 登录按钮
+            val (label, enabled, action) = when (method) {
+                WbuLoginMethod.PASSWORD -> Triple("一键全自动同步", studentId.isNotBlank() && password.isNotBlank(), { onPasswordLogin(studentId, password, useVpn, authMode) })
+                WbuLoginMethod.DYNAMIC_CODE -> Triple("登录", studentId.isNotBlank() && dynamicCode.length == 6, { onDynamicCodeLogin(studentId, dynamicCode, useVpn) })
+                WbuLoginMethod.QR -> {
+                    val phase = qrState?.phase ?: QrPhase.PLACEHOLDER
+                    val busy = phase == QrPhase.GENERATING || phase == QrPhase.SCANNED || phase == QrPhase.CONFIRMING
+                    val label = when (phase) {
+                        QrPhase.EXPIRED, QrPhase.ERROR -> "重新生成"
+                        QrPhase.WAIT -> "刷新二维码"
+                        QrPhase.PLACEHOLDER -> "生成二维码"
+                        else -> "处理中..."
+                    }
+                    Triple(label, !busy, { onStartQr() })
+                }
+            }
+            Button(
+                onClick = { action() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.82f)
+                ),
+                enabled = enabled && !isLoading
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = LocalContentColor.current,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.padding(horizontal = 8.dp))
+                    Text("正在获取课表...", style = MaterialTheme.typography.titleMedium)
+                } else {
+                    Text(label, style = MaterialTheme.typography.titleMedium)
+                }
+            }
+
+            AnimatedVisibility(visible = isLoading) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                ) {
+                    if (statusMessage.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(
+                                    width = 0.8.dp,
+                                    color = Color.White.copy(alpha = if (isDark) 0.14f else 0.45f),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                        ) {
+                            Text(
+                                text = statusMessage,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    Text(
+                        text = loadingTips[loadingTipIndex],
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+
+            if (errorMessage.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = if (isDark) 0.30f else 0.90f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(
+                            width = 0.8.dp,
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.35f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                ) {
+                    Text(
+                        text = errorMessage,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            } else {
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            // 同步按钮底部的“更多”（展开：登录方式 + 网络设置 + 导入偏好）
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp),
-                horizontalArrangement = Arrangement.End
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.Center
             ) {
                 TextButton(onClick = { panelExpanded = !panelExpanded }) {
-                    Icon(Icons.Default.ExpandMore, contentDescription = null, modifier = Modifier.size(20.dp))
-                    Text("展开")
+                    Icon(
+                        imageVector = Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .rotate(if (panelExpanded) 180f else 0f)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(if (panelExpanded) "收起更多" else "更多")
                 }
             }
 
             if (panelExpanded) {
                 Column(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp, bottom = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Text("登录方式", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     MethodRow("密码登录", WbuLoginMethod.PASSWORD, method, onMethodChange)
                     MethodRow("二维码登录", WbuLoginMethod.QR, method, onMethodChange)
                     MethodRow("手机动态码", WbuLoginMethod.DYNAMIC_CODE, method, onMethodChange)
+
+                    Text(
+                        text = "导入偏好",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                    ToggleRow(
+                        label = "保留教师工号",
+                        checked = keepTeacherId,
+                        onCheckedChange = {
+                            keepTeacherId = it
+                            WbuSyncEngine.setKeepTeacherId(context, it)
+                        }
+                    )
+                    ToggleRow(
+                        label = "保留建筑名称",
+                        checked = keepBuilding,
+                        onCheckedChange = {
+                            keepBuilding = it
+                            WbuSyncEngine.setKeepBuilding(context, it)
+                        }
+                    )
 
                     Text(
                         text = "网络设置",
@@ -566,137 +704,9 @@ fun WbuAuthBottomSheet(
                             WbuSyncEngine.setUseFixedServiceForTicket(context, it)
                         }
                     )
-
-                    Text(
-                        text = "导入偏好",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    ToggleRow(
-                        label = "保留教师工号",
-                        checked = keepTeacherId,
-                        onCheckedChange = {
-                            keepTeacherId = it
-                            WbuSyncEngine.setKeepTeacherId(context, it)
-                        }
-                    )
-                    ToggleRow(
-                        label = "保留建筑名称",
-                        checked = keepBuilding,
-                        onCheckedChange = {
-                            keepBuilding = it
-                            WbuSyncEngine.setKeepBuilding(context, it)
-                        }
-                    )
                 }
             }
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // 登录按钮
-            val (label, enabled, action) = when (method) {
-                WbuLoginMethod.PASSWORD -> Triple("一键全自动同步", studentId.isNotBlank() && password.isNotBlank(), { onPasswordLogin(studentId, password, useVpn, authMode) })
-                WbuLoginMethod.DYNAMIC_CODE -> Triple("登录", studentId.isNotBlank() && dynamicCode.length == 6, { onDynamicCodeLogin(studentId, dynamicCode, useVpn) })
-                WbuLoginMethod.QR -> {
-                    val phase = qrState?.phase ?: QrPhase.PLACEHOLDER
-                    val busy = phase == QrPhase.GENERATING || phase == QrPhase.SCANNED || phase == QrPhase.CONFIRMING
-                    val label = when (phase) {
-                        QrPhase.EXPIRED, QrPhase.ERROR -> "重新生成"
-                        QrPhase.WAIT -> "刷新二维码"
-                        QrPhase.PLACEHOLDER -> "生成二维码"
-                        else -> "处理中..."
-                    }
-                    Triple(label, !busy, { onStartQr() })
-                }
-            }
-            Button(
-                onClick = { action() },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.82f)
-                ),
-                enabled = enabled && !isLoading
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        color = LocalContentColor.current,
-                        strokeWidth = 2.dp
-                    )
-                    Spacer(modifier = Modifier.padding(horizontal = 8.dp))
-                    Text("正在获取课表...", style = MaterialTheme.typography.titleMedium)
-                } else {
-                    Text(label, style = MaterialTheme.typography.titleMedium)
-                }
-            }
-
-            AnimatedVisibility(visible = isLoading) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
-                ) {
-                    if (statusMessage.isNotBlank()) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .border(
-                                    width = 0.8.dp,
-                                    color = Color.White.copy(alpha = if (isDark) 0.14f else 0.45f),
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                        ) {
-                            Text(
-                                text = statusMessage,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
-                    Text(
-                        text = loadingTips[loadingTipIndex],
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-
-            if (errorMessage.isNotBlank()) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = if (isDark) 0.30f else 0.90f),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .border(
-                            width = 0.8.dp,
-                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.35f),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                ) {
-                    Text(
-                        text = errorMessage,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.height(28.dp))
-            } else {
-                Spacer(modifier = Modifier.height(28.dp))
-            }
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }

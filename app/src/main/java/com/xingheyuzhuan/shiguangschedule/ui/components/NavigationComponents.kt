@@ -367,6 +367,49 @@ fun LeftNavigationRail(
     val borderTop = if (isDark) Color.White.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.90f)
     val borderBottom = if (isDark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.25f)
 
+    val density = LocalDensity.current
+
+    // ── 竖向水滴滑动动画（对齐底部导航栏动画逻辑）──
+    val animatable = remember { Animatable(selectedIndex.toFloat()) }
+    var previousIndex by remember { mutableIntStateOf(selectedIndex) }
+    LaunchedEffect(selectedIndex) {
+        if (abs(animatable.value - selectedIndex.toFloat()) < 0.01f && previousIndex == selectedIndex) {
+            animatable.snapTo(selectedIndex.toFloat())
+        } else {
+            val hop = abs(selectedIndex - previousIndex).coerceAtLeast(1)
+            val direction = if (selectedIndex >= previousIndex) 1f else -1f
+            val overshoot = 0.08f / hop
+
+            animatable.animateTo(
+                selectedIndex.toFloat() + direction * overshoot,
+                animationSpec = tween(durationMillis = 120)
+            )
+
+            animatable.animateTo(
+                selectedIndex.toFloat(),
+                animationSpec = spring(
+                    dampingRatio = if (hop == 1) 0.58f else 0.68f,
+                    stiffness = if (hop == 1) 210f else 260f
+                )
+            )
+        }
+        previousIndex = selectedIndex
+    }
+    val animatedIndex = animatable.value
+
+    // 水滴纵向拉伸：移动时胶囊变长
+    val distanceFromTarget = abs(animatedIndex - selectedIndex.toFloat())
+    val stretchMultiplier = 1f + distanceFromTarget * 0.45f
+
+    val bubbleWidthDp = 46.dp
+    val bubbleBaseHeightDp = 72.dp
+    val itemSpacingDp = 12.dp
+    val itemStrideDp = bubbleBaseHeightDp + itemSpacingDp
+
+    val bubbleWidthPx = with(density) { bubbleWidthDp.toPx() }
+    val bubbleBaseHeightPx = with(density) { bubbleBaseHeightDp.toPx() }
+    val itemStridePx = with(density) { itemStrideDp.toPx() }
+
     Box(
         modifier = modifier
             .width(NavigationRailWidth)
@@ -397,75 +440,95 @@ fun LeftNavigationRail(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            navItems.forEachIndexed { index, (label, destination, _) ->
-                val isSelected = selectedIndex == index
+            // 3 个 tab 的容器，承载平滑滑动的水滴泡泡 drawBehind
+            Column(
+                modifier = Modifier
+                    .drawBehind {
+                        val animatedCenterY = animatedIndex * itemStridePx + bubbleBaseHeightPx / 2
+                        val currentHeight = bubbleBaseHeightPx * stretchMultiplier
+                        val topY = animatedCenterY - currentHeight / 2
+                        val leftX = (size.width - bubbleWidthPx) / 2
+                        val cornerRadius = bubbleWidthPx / 2
 
-                val scale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.08f else 1f,
-                    animationSpec = spring(
-                        dampingRatio = 0.45f,
-                        stiffness = Spring.StiffnessMediumLow
-                    ),
-                    label = "railScale$index"
-                )
-                val iconAlpha by animateFloatAsState(
-                    targetValue = if (isSelected) 1f else 0.50f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMedium
-                    ),
-                    label = "railAlpha$index"
-                )
-
-                val (selIcon, unselIcon) = when (destination) {
-                    Destination.TodaySchedule -> Icons.Rounded.Today to Icons.Outlined.Today
-                    Destination.CourseSchedule -> Icons.Rounded.CalendarMonth to Icons.Outlined.CalendarMonth
-                    else -> Icons.Rounded.Person to Icons.Outlined.Person
-                }
-
-                // 仅图标，不显示文本（ClassFlow 定制）
-                // 选中的高亮水滴：窄一点、高一点的长胶囊（52w x 72h）
-                val bubbleShape = RoundedCornerShape(percent = 50)
-                Box(
-                    modifier = Modifier
-                        .size(width = 46.dp, height = 72.dp)
-                        .clip(bubbleShape)
-                        .background(
-                            color = if (isSelected) {
-                                if (isDark) Color.White.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.65f)
-                            } else {
-                                Color.Transparent
-                            },
-                            shape = bubbleShape
+                        // 胶囊水滴：玻璃微光渐变
+                        drawRoundRect(
+                            brush = Brush.verticalGradient(
+                                listOf(
+                                    Color.White.copy(alpha = if (isDark) 0.22f else 0.88f),
+                                    Color(if (isDark) 0xFFDCEBFF else 0xFFF5F8FF)
+                                        .copy(alpha = if (isDark) 0.18f else 0.65f)
+                                ),
+                                startY = topY,
+                                endY = topY + currentHeight
+                            ),
+                            topLeft = Offset(leftX, topY),
+                            size = Size(bubbleWidthPx, currentHeight),
+                            cornerRadius = CornerRadius(cornerRadius, cornerRadius)
                         )
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() }
-                        ) {
-                            if (currentDestination != destination) {
-                                navBridge.navigateToMain(destination)
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (isSelected) selIcon else unselIcon,
-                        contentDescription = label,
-                        modifier = Modifier
-                            .size(26.dp)
-                            .graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                                alpha = iconAlpha
-                            },
-                        tint = if (isSelected) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
+                    },
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                navItems.forEachIndexed { index, (label, destination, _) ->
+                    val isSelected = selectedIndex == index
+
+                    val scale by animateFloatAsState(
+                        targetValue = if (isSelected) 1.08f else 1f,
+                        animationSpec = spring(
+                            dampingRatio = 0.45f,
+                            stiffness = Spring.StiffnessMediumLow
+                        ),
+                        label = "railScale$index"
                     )
+                    val iconAlpha by animateFloatAsState(
+                        targetValue = if (isSelected) 1f else 0.50f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMedium
+                        ),
+                        label = "railAlpha$index"
+                    )
+
+                    val (selIcon, unselIcon) = when (destination) {
+                        Destination.TodaySchedule -> Icons.Rounded.Today to Icons.Outlined.Today
+                        Destination.CourseSchedule -> Icons.Rounded.CalendarMonth to Icons.Outlined.CalendarMonth
+                        else -> Icons.Rounded.Person to Icons.Outlined.Person
+                    }
+
+                    // 仅图标，不显示文本（ClassFlow 定制）
+                    Box(
+                        modifier = Modifier
+                            .size(width = bubbleWidthDp, height = bubbleBaseHeightDp)
+                            .clickable(
+                                indication = null,
+                                interactionSource = remember { MutableInteractionSource() }
+                            ) {
+                                if (currentDestination != destination) {
+                                    navBridge.navigateToMain(destination)
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isSelected) selIcon else unselIcon,
+                            contentDescription = label,
+                            modifier = Modifier
+                                .size(26.dp)
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                    alpha = iconAlpha
+                                },
+                            tint = if (isSelected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
+                    if (index < navItems.lastIndex) {
+                        Spacer(modifier = Modifier.height(itemSpacingDp))
+                    }
                 }
-                Spacer(modifier = Modifier.height(12.dp))
             }
         }
     }

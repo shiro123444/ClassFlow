@@ -82,10 +82,12 @@ fun WbuSyncActionButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     hazeState: HazeState? = null,
+    contentColor: Color? = null,
     onLongClick: (() -> Unit)? = null
 ) {
     val isDark = LocalIsDarkTheme.current
     val shape = RoundedCornerShape(16.dp)
+    val iconTint = contentColor ?: MaterialTheme.colorScheme.onSurface.copy(alpha = if (isDark) 0.85f else 0.75f)
     Box(
         modifier = modifier
             .padding(end = 8.dp)
@@ -101,7 +103,7 @@ fun WbuSyncActionButton(
         Icon(
             imageVector = Icons.Filled.Sync,
             contentDescription = "一键同步武商院课表",
-            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (isDark) 0.85f else 0.75f)
+            tint = iconTint
         )
     }
 }

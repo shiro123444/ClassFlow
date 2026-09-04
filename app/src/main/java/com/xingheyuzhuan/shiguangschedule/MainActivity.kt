@@ -264,11 +264,9 @@ fun AppNavigation(
 
     var showOnboarding by remember { mutableStateOf(!isOnboardingCompleted(context)) }
     val introShowcaseState = rememberIntroShowcaseState()
-    var pendingSyncStepAdvance by remember { mutableStateOf(false) }
     val completeOnboarding = {
         markOnboardingCompleted(context)
         showOnboarding = false
-        pendingSyncStepAdvance = false
     }
 
     BackHandler(enabled = showOnboarding) {
@@ -276,33 +274,14 @@ fun AppNavigation(
     }
 
     // Keep onboarding on the expected route for each step.
-    LaunchedEffect(showOnboarding, introShowcaseState.currentTargetIndex, currentDestination, pendingSyncStepAdvance) {
+    LaunchedEffect(showOnboarding, introShowcaseState.currentTargetIndex, currentDestination) {
         if (!showOnboarding) return@LaunchedEffect
         val currentIndex = introShowcaseState.currentTargetIndex
-        if (pendingSyncStepAdvance && currentIndex != 2) {
-            pendingSyncStepAdvance = false
-        }
         when {
-            pendingSyncStepAdvance && currentDestination !is Destination.Settings -> {
-                navBridge.navigateToMain(Destination.Settings)
-            }
-
-            pendingSyncStepAdvance && currentDestination is Destination.Settings && currentIndex == 2 -> {
-                introShowcaseState.goToNext(
-                    onComplete = completeOnboarding,
-                    allowCompleteOnMissingTarget = false
-                )
-                pendingSyncStepAdvance = false
-            }
-
-            currentIndex < LAST_ONBOARDING_TARGET_INDEX &&
+            // Keep onboarding on CourseSchedule screen during steps 0..2.
+            currentIndex <= LAST_ONBOARDING_TARGET_INDEX &&
                 currentDestination !is Destination.CourseSchedule -> {
                 navBridge.navigateToMain(Destination.CourseSchedule)
-            }
-
-            currentIndex == LAST_ONBOARDING_TARGET_INDEX &&
-                currentDestination !is Destination.Settings -> {
-                navBridge.navigateToMain(Destination.Settings)
             }
         }
     }
@@ -368,7 +347,7 @@ fun AppNavigation(
                     Modifier
                 }
 
-            // ── Step 2: Sync button ──
+            // ── Step 2: Sync button ── (开场引导最后一步)
             val syncButtonTargetModifier =
                 if (showOnboarding && currentDestination is Destination.CourseSchedule) {
                     Modifier.introShowCaseTarget(
@@ -378,35 +357,7 @@ fun AppNavigation(
                             OnboardingCard(
                                 title = stringResource(R.string.onboarding_title_3),
                                 body = stringResource(R.string.onboarding_body_3),
-                                isLastStep = false,
-                                advanceByTapAnywhere = false,
-                                icon = { TapGestureAnimation() },
-                                showcaseState = introShowcaseState,
-                                onComplete = completeOnboarding
-                            )
-                        }
-                    )
-                } else {
-                    Modifier
-                }
-
-            // Transition anchor: keep step-2 target available while moving to Settings,
-            // so the showcase does not complete early on a missing target.
-            val syncStepTransitionModifier =
-                if (
-                    showOnboarding &&
-                    pendingSyncStepAdvance &&
-                    currentDestination is Destination.Settings &&
-                    introShowcaseState.currentTargetIndex == 2
-                ) {
-                    Modifier.introShowCaseTarget(
-                        index = 2,
-                        style = showcaseStyle,
-                        content = {
-                            OnboardingCard(
-                                title = stringResource(R.string.onboarding_title_3),
-                                body = stringResource(R.string.onboarding_body_3),
-                                isLastStep = false,
+                                isLastStep = true,
                                 advanceByTapAnywhere = false,
                                 icon = { TapGestureAnimation() },
                                 showcaseState = introShowcaseState,
@@ -421,27 +372,6 @@ fun AppNavigation(
             // ── Dock step disabled (library popup placement is unstable on extra-wide dock target) ──
             val bottomNavTargetModifier =
                 Modifier
-
-            // ── Step 3: Semester start date (Settings page) ──
-            val semesterSettingTargetModifier =
-                if (showOnboarding && currentDestination is Destination.Settings) {
-                    Modifier.introShowCaseTarget(
-                        index = 3,
-                        style = showcaseStyle.copy(backgroundColor = Color(0xFF12222E)),
-                        content = {
-                            OnboardingCard(
-                                title = stringResource(R.string.onboarding_title_5),
-                                body = stringResource(R.string.onboarding_body_5),
-                                isLastStep = true,
-                                icon = { TapGestureAnimation() },
-                                showcaseState = introShowcaseState,
-                                onComplete = completeOnboarding
-                            )
-                        }
-                    )
-                } else {
-                    Modifier
-                }
 
             NavDisplay(
                 backStack = backStack,
@@ -513,36 +443,18 @@ fun AppNavigation(
                                         false
                                     } else {
                                         if (introShowcaseState.currentTargetIndex == 2) {
-                                            pendingSyncStepAdvance = true
-                                            if (currentDestination !is Destination.Settings) {
-                                                navBridge.navigateToMain(Destination.Settings)
-                                            }
+                                            completeOnboarding()
+                                            false
+                                        } else {
+                                            true
                                         }
-                                        true
                                     }
                                 }
                             )
 
-                            Destination.Settings -> Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .then(syncStepTransitionModifier)
-                            ) {
-                                SettingsScreen(
-                                    navBridge = navBridge,
-                                    semesterStartDateItemModifier = semesterSettingTargetModifier,
-                                    forceShowSemesterStartDateCard = showOnboarding &&
-                                        introShowcaseState.currentTargetIndex == LAST_ONBOARDING_TARGET_INDEX,
-                                    onSemesterStartDateSet = {
-                                        if (
-                                            showOnboarding &&
-                                            introShowcaseState.currentTargetIndex == LAST_ONBOARDING_TARGET_INDEX
-                                        ) {
-                                            completeOnboarding()
-                                        }
-                                    }
-                                )
-                            }
+                            Destination.Settings -> SettingsScreen(
+                                navBridge = navBridge
+                            )
 
                             Destination.TodaySchedule -> TodayScheduleScreen(navBridge = navBridge)
                             Destination.TimeSlotSettings -> TimeSlotManagementScreen(onBackClick = navBridge::popBackStack)
@@ -741,7 +653,7 @@ private fun IntroShowcaseScope.OnboardingCard(
     }
 }
 
-private const val LAST_ONBOARDING_TARGET_INDEX = 3
+private const val LAST_ONBOARDING_TARGET_INDEX = 2
 
 // ── Gesture hint animations ──
 

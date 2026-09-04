@@ -396,6 +396,7 @@ fun WeeklyScheduleScreen(
                             WbuSyncActionButton(
                                 modifier = syncButtonModifier,
                                 hazeState = hazeState,
+                                contentColor = composedStyle.pageTextColor ?: MaterialTheme.colorScheme.onSurface,
                                 onClick = {
                             if (onSyncButtonClickIntercept?.invoke() == true) return@WbuSyncActionButton
                             if (isWbuSyncing) return@WbuSyncActionButton

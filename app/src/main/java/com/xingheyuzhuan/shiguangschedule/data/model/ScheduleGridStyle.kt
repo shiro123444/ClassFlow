@@ -45,7 +45,7 @@ data class ScheduleGridStyle(
     val removeLocationAt: Boolean = false,
     val textAlignCenterHorizontal: Boolean = false,
     val textAlignCenterVertical: Boolean = false,
-    val borderType: BorderTypeProto = BorderTypeProto.BORDER_TYPE_NONE,
+    val borderType: BorderTypeProto = BorderTypeProto.BORDER_TYPE_GLASS,
     val scheduleMode: ScheduleModeProto = ScheduleModeProto.SECTION_MODE,
     val pageTextColorLong: Long? = null,
     val courseTextColorLong: Long? = null,
@@ -74,21 +74,21 @@ data class ScheduleGridStyle(
     }
 
     companion object {
-        // --- 默认常量 ---
+        // --- 默认常量（首启默认对齐“液态”预设） ---
         internal val DEFAULT_TIME_COLUMN_WIDTH = 40f
         internal val DEFAULT_DAY_HEADER_HEIGHT = 45f
         internal val DEFAULT_SECTION_HEIGHT = 70f
-        internal val DEFAULT_BLOCK_CORNER_RADIUS = 4f
-        internal val DEFAULT_BLOCK_OUTER_PADDING = 1f
-        internal val DEFAULT_BLOCK_INNER_PADDING = 4f
-        internal val DEFAULT_BLOCK_ALPHA = 1f
+        internal val DEFAULT_BLOCK_CORNER_RADIUS = 10f
+        internal val DEFAULT_BLOCK_OUTER_PADDING = 3f
+        internal val DEFAULT_BLOCK_INNER_PADDING = 7f
+        internal val DEFAULT_BLOCK_ALPHA = 0.5f
         internal val DEFAULT_FONT_SCALE = 1f
         internal val DEFAULT_COURSE_FONT_FAMILY_PRESET = 0
         internal val DEFAULT_GLASS_PRESET = 1
-        internal val DEFAULT_BACKGROUND_DIM_ALPHA = 0.2f
+        internal val DEFAULT_BACKGROUND_DIM_ALPHA = 0.0f
         internal val DEFAULT_BACKGROUND_SCALE = 1f
         internal val DEFAULT_BACKGROUND_OFFSET = 0f
-        internal val DEFAULT_COURSE_BLOCK_BLUR_RADIUS = 0f
+        internal val DEFAULT_COURSE_BLOCK_BLUR_RADIUS = 8f
         internal val DEFAULT_COURSE_BLOCK_COLORLESS = false
 
         internal val DEFAULT_COLOR_MAPS = listOf(
@@ -129,7 +129,7 @@ data class ScheduleGridStyle(
             removeLocationAt = false,
             textAlignCenterHorizontal = false,
             textAlignCenterVertical = false,
-            borderType = BorderTypeProto.BORDER_TYPE_NONE,
+            borderType = BorderTypeProto.BORDER_TYPE_GLASS,
             scheduleMode = ScheduleModeProto.SECTION_MODE,
             pageTextColorLong = null,
             courseTextColorLong = null,

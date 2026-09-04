@@ -306,8 +306,39 @@ fun MoreOptionsScreen(
 
                 ListItem(
                     modifier = Modifier.clickable {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://qm.qq.com/q/bTUS3eDwhq"))
-                        context.startActivity(intent)
+                        val groupUin = "133364402"
+                        val groupKey = "bTUS3eDwhq"
+                        // 1. 优先使用 Android 手机 QQ 专用的直接打开群资料/加群页面协议
+                        val cardIntent = Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("mqqapi://card/show_pslcard?src_type=internal&version=1&uin=$groupUin&card_type=group&source=qrcode")
+                        ).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+
+                        // 2. 备选通用唤起加群协议
+                        val qrIntent = Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("mqqopensdkapi://bizAgent/qm/qr?url=http%3A%2F%2Fqm.qq.com%2Fcgi-bin%2Fqm%2Fqr%3Ffrom%3Dapp%26p%3Dandroid%26jump_from%3Dwebapi%26k%3D$groupKey")
+                        ).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+
+                        // 依次尝试唤起 QQ 客户端，若均无法处理则唤起浏览器打开加群网页
+                        try {
+                            context.startActivity(cardIntent)
+                        } catch (_: Exception) {
+                            try {
+                                context.startActivity(qrIntent)
+                            } catch (_: Exception) {
+                                try {
+                                    val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://qm.qq.com/q/$groupKey")).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    context.startActivity(webIntent)
+                                } catch (_: Exception) { }
+                            }
+                        }
                     },
                     headlineContent = { Text("智汇AI协会交流群") },
                     supportingContent = { Text("加入QQ群与同学交流") },

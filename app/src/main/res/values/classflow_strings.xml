@@ -22,7 +22,7 @@
     <string name="label_background_dim">背景模糊</string>
     <string name="label_course_block_blur">课程块模糊度</string>
     <string name="label_font_style">字体风格</string>
-    <string name="label_glass_style">毛玻璃风格</string>
+    <string name="label_glass_style">预设</string>
     <string name="label_wallpaper_gesture_adjust">壁纸手势微调（双指缩放，拖动平移）</string>
     <string name="label_wallpaper_transform_values">缩放 %1$.2f  偏移X %2$.2f  偏移Y %3$.2f</string>
     <string name="onboarding_body_1">轻量课程表，专为武汉商学院\n∠・ω&lt; )⌒☆ Ciallo～</string>
