@@ -3,6 +3,8 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthMode
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuLoginMethod
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.IdsCasClient
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WebVpnClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.DynamicCodeSendResult
 import com.xingheyuzhuan.shiguangschedule.ui.theme.LocalIsDarkTheme
 
@@ -156,14 +158,20 @@ fun WbuAuthBottomSheet(
     var authMode by remember { mutableStateOf(WbuAuthMode.UNIFIED_CAS) }
     var authMenuExpanded by remember { mutableStateOf(false) }
     var panelExpanded by remember { mutableStateOf(false) }
-    var idsVpnEnabled by remember { mutableStateOf(WbuSyncEngine.getIdsViaWebVpn(context)) }
-    var qrVpnEnabled by remember { mutableStateOf(WbuSyncEngine.getQrViaWebVpn(context)) }
+    var idsVpnEnabled by remember { mutableStateOf(IdsCasClient.getIdsViaWebVpn(context)) }
+    var qrVpnEnabled by remember { mutableStateOf(IdsCasClient.getQrViaWebVpn(context)) }
     var pcUaEnabled by remember { mutableStateOf(WbuSyncEngine.getUsePcUserAgent(context)) }
     var skipCampusCheck by remember { mutableStateOf(WbuSyncEngine.getSkipCampusCheck(context)) }
     var keepTeacherId by remember { mutableStateOf(WbuSyncEngine.getKeepTeacherId(context)) }
     var keepBuilding by remember { mutableStateOf(WbuSyncEngine.getKeepBuilding(context)) }
+    var twfidText by remember { mutableStateOf(WebVpnClient.getTwfid(context)) }
+    var useHttpsWebVpn by remember { mutableStateOf(WebVpnClient.getUseHttpsWebVpn(context)) }
     val isZhCN = remember { WbuSyncEngine.isSimplifiedChinese(context) }
-    var engSmsEnabled by remember { mutableStateOf(WbuSyncEngine.getSendEnglishSms(context)) }
+    var engSmsEnabled by remember { mutableStateOf(IdsCasClient.getSendEnglishSms(context)) }
+    var idsAddrNotFromJwxt by remember { mutableStateOf(WbuSyncEngine.getIdsAddrNotFromJwxt(context)) }
+    var noIndexMainVerify by remember { mutableStateOf(WbuSyncEngine.getNoIndexMainVerify(context)) }
+    var forceFetchStudentIdBeforeVpn by remember { mutableStateOf(WbuSyncEngine.getForceFetchStudentIdBeforeVpn(context)) }
+    var useFixedServiceForTicket by remember { mutableStateOf(WbuSyncEngine.getUseFixedServiceForTicket(context)) }
     var dynamicCode by remember(method) { mutableStateOf("") }
     var codeSent by remember(method) { mutableStateOf(false) }
     var sendingCode by remember(method) { mutableStateOf(false) }
@@ -320,9 +328,9 @@ fun WbuAuthBottomSheet(
                         onValueChange = { if (it.length <= 6) dynamicCode = it.filter { c -> c.isDigit() } },
                         label = { Text("动态验证码") },
                         leadingIcon = { Icon(Icons.Default.Sms, contentDescription = null) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -481,6 +489,91 @@ fun WbuAuthBottomSheet(
                         }
                     )
                     ToggleRow(
+                        label = "统一认证经过WebVPN",
+                        checked = idsVpnEnabled,
+                        onCheckedChange = {
+                            idsVpnEnabled = it
+                            IdsCasClient.setIdsViaWebVpn(context, it)
+                        }
+                    )
+                    ToggleRow(
+                        label = "二维码内容包含WebVPN链接",
+                        checked = qrVpnEnabled,
+                        onCheckedChange = {
+                            qrVpnEnabled = it
+                            IdsCasClient.setQrViaWebVpn(context, it)
+                        }
+                    )
+                    ToggleRow(
+                        label = "使用 https 访问 WebVPN (443)",
+                        checked = useHttpsWebVpn,
+                        onCheckedChange = {
+                            useHttpsWebVpn = it
+                            WebVpnClient.setUseHttpsWebVpn(context, it)
+                        }
+                    )
+                    OutlinedTextField(
+                        value = twfidText,
+                        onValueChange = {
+                            twfidText = it
+                            WebVpnClient.setTwfid(context, it)
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        label = { Text("WebVPN TWFID") },
+                        placeholder = { Text("填写后跳过 WebVPN 登录，直接使用该会话") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
+                    )
+                    if (!isZhCN) {
+                        ToggleRow(
+                            label = "发送英语验证码（可能更慢）",
+                            checked = engSmsEnabled,
+                            onCheckedChange = {
+                                engSmsEnabled = it
+                                IdsCasClient.setSendEnglishSms(context, it)
+                            }
+                        )
+                    }
+                    ToggleRow(
+                        label = "IDS addr not from Jwxt",
+                        checked = idsAddrNotFromJwxt,
+                        onCheckedChange = {
+                            idsAddrNotFromJwxt = it
+                            WbuSyncEngine.setIdsAddrNotFromJwxt(context, it)
+                        }
+                    )
+                    ToggleRow(
+                        label = "no indexMain verify",
+                        checked = noIndexMainVerify,
+                        onCheckedChange = {
+                            noIndexMainVerify = it
+                            WbuSyncEngine.setNoIndexMainVerify(context, it)
+                        }
+                    )
+                    ToggleRow(
+                        label = "登录WebVPN前必须获取学号",
+                        checked = forceFetchStudentIdBeforeVpn,
+                        onCheckedChange = {
+                            forceFetchStudentIdBeforeVpn = it
+                            WbuSyncEngine.setForceFetchStudentIdBeforeVpn(context, it)
+                        }
+                    )
+                    ToggleRow(
+                        label = "使用固定service获取ticket",
+                        checked = useFixedServiceForTicket,
+                        onCheckedChange = {
+                            useFixedServiceForTicket = it
+                            WbuSyncEngine.setUseFixedServiceForTicket(context, it)
+                        }
+                    )
+
+                    Text(
+                        text = "导入偏好",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                    ToggleRow(
                         label = "保留教师工号",
                         checked = keepTeacherId,
                         onCheckedChange = {
@@ -496,32 +589,6 @@ fun WbuAuthBottomSheet(
                             WbuSyncEngine.setKeepBuilding(context, it)
                         }
                     )
-                    ToggleRow(
-                        label = "统一认证经过WebVPN",
-                        checked = idsVpnEnabled,
-                        onCheckedChange = {
-                            idsVpnEnabled = it
-                            WbuSyncEngine.setIdsViaWebVpn(context, it)
-                        }
-                    )
-                    ToggleRow(
-                        label = "二维码内容包含WebVPN链接",
-                        checked = qrVpnEnabled,
-                        onCheckedChange = {
-                            qrVpnEnabled = it
-                            WbuSyncEngine.setQrViaWebVpn(context, it)
-                        }
-                    )
-                    if (!isZhCN) {
-                        ToggleRow(
-                            label = "发送英语验证码（可能更慢）",
-                            checked = engSmsEnabled,
-                            onCheckedChange = {
-                                engSmsEnabled = it
-                                WbuSyncEngine.setSendEnglishSms(context, it)
-                            }
-                        )
-                    }
                 }
             }
 
@@ -892,6 +959,9 @@ private fun ToggleRow(
 @Composable
 fun VpnSmsCodeDialog(
     maskedPhone: String,
+    isStillValid: Boolean = false,
+    sendInterval: Int = 60,
+    promptText: String? = null,
     onSubmit: (String) -> Unit,
     onResend: () -> Unit,
     onDismiss: () -> Unit,
@@ -899,10 +969,10 @@ fun VpnSmsCodeDialog(
     errorMessage: String? = null
 ) {
     var smsCode by remember { mutableStateOf("") }
-    var resendCooldown by remember { mutableIntStateOf(60) }
+    var resendCooldown by remember { mutableIntStateOf(if (isStillValid) 0 else sendInterval) }
 
-    LaunchedEffect(Unit) {
-        while (resendCooldown > 0) {
+    LaunchedEffect(resendCooldown) {
+        if (resendCooldown > 0) {
             delay(1000)
             resendCooldown--
         }
@@ -931,8 +1001,14 @@ fun VpnSmsCodeDialog(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                val displayMsg = when {
+                    isStillValid -> "您的验证码仍在有效期内"
+                    !promptText.isNullOrBlank() -> promptText
+                    maskedPhone.isNotBlank() && maskedPhone != "未知号码" -> "验证码已发送至 $maskedPhone，请查收"
+                    else -> "短信验证码已发送至绑定手机，请查收"
+                }
                 Text(
-                    text = "验证码已发送至 $maskedPhone",
+                    text = displayMsg,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -975,7 +1051,7 @@ fun VpnSmsCodeDialog(
                 ) {
                     Text(
                         if (resendCooldown > 0) "重新发送 (${resendCooldown}s)"
-                        else "重新发送验证码"
+                        else "获取 / 重新发送验证码"
                     )
                 }
             }

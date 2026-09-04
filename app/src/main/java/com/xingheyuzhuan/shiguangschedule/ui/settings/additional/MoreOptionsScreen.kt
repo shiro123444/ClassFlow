@@ -75,6 +75,7 @@ import com.xingheyuzhuan.shiguangschedule.BuildConfig
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.Destination
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WebVpnClient
 import com.xingheyuzhuan.shiguangschedule.tool.UpdateChecker
 import com.xingheyuzhuan.shiguangschedule.tool.UpdateStatus
 import kotlinx.coroutines.launch
@@ -98,7 +99,7 @@ fun MoreOptionsScreen(
     var showStartScreenDialog by remember { mutableStateOf(false) }
 
     val useManualWebViewVpn = remember {
-        mutableStateOf(WbuSyncEngine.shouldUseManualWebViewForVpn(navBridge.context))
+        mutableStateOf(WebVpnClient.shouldUseManualWebViewForVpn(navBridge.context))
     }
 
     fun startCheck() {
@@ -360,7 +361,7 @@ fun MoreOptionsScreen(
                             checked = useManualWebViewVpn.value,
                             onCheckedChange = { enabled ->
                                 useManualWebViewVpn.value = enabled
-                                WbuSyncEngine.setManualWebViewForVpn(navBridge.context, enabled)
+                                WebVpnClient.setManualWebViewForVpn(navBridge.context, enabled)
                             }
                         )
                     }

@@ -54,10 +54,18 @@ import com.xingheyuzhuan.shiguangschedule.ui.components.isWideScreen
 import com.xingheyuzhuan.shiguangschedule.ui.components.CourseTablePickerDialog
 import com.xingheyuzhuan.shiguangschedule.ui.components.SliderCaptchaDialog
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.VpnFullLoginStatus
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthMode
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaData
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaResult
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.LocalLoginFailure
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WebVpnClient
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuLoginMethod
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.QrSession
@@ -116,13 +124,6 @@ import java.time.temporal.TemporalAdjusters
  * 无限时间轴的中值锚点。
  */
 private const val INFINITE_PAGER_CENTER = Int.MAX_VALUE / 2
-
-/**
- * 无感登录（复用已保存登录态自动同步）开关。
- * 置为 false 以禁用，但保留代码。
- */
-private const val SILENT_LOGIN_ENABLED = false
-
 
 /**
  * 周课表主屏幕组件。
@@ -192,11 +193,18 @@ fun WeeklyScheduleScreen(
 
     // SMS 验证码对话框状态
     var smsDialogPhone by remember { mutableStateOf<String?>(null) }
+    var smsDialogIsStillValid by remember { mutableStateOf(false) }
+    var smsDialogSendInterval by remember { mutableIntStateOf(60) }
+    var smsDialogPromptText by remember { mutableStateOf<String?>(null) }
     var smsDeferred by remember { mutableStateOf<CompletableDeferred<String?>?>(null) }
     var smsVerifying by remember { mutableStateOf(false) }
     var smsError by remember { mutableStateOf<String?>(null) }
     // 保持 vpnEngine 引用以便 resend
     var activeVpnEngine by remember { mutableStateOf<WbuSyncEngine?>(null) }
+
+    // WebVPN 证书校验异常对话框状态
+    var sslIssueMessage by remember { mutableStateOf("") }
+    var sslIssueDeferred by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
 
     // 滑块验证码对话框状态（统一认证滑块）
     var captchaDialogData by remember { mutableStateOf<SliderCaptchaData?>(null) }
@@ -208,6 +216,10 @@ fun WeeklyScheduleScreen(
 
     // 校园网不可达时「是否继续」确认对话框状态
     var campusConfirmDeferred by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
+
+    // WebVPN 统一认证密码询问对话框状态（教务密码模式且无 TWFID 时使用）
+    var vpnPasswordDeferred by remember { mutableStateOf<CompletableDeferred<String?>?>(null) }
+    var vpnPasswordError by remember { mutableStateOf<String?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -240,14 +252,16 @@ fun WeeklyScheduleScreen(
         }
     }
 
-    val onVpnStatus: (VpnFullLoginStatus) -> Unit = { status ->
+    fun vpnStatusText(authMode: WbuAuthMode): (VpnFullLoginStatus) -> Unit = { status ->
         wbuSyncStatus = when (status) {
             VpnFullLoginStatus.SMS_REQUIRED -> "需要短信验证码，请输入后继续~"
             VpnFullLoginStatus.SMS_VERIFIED -> "验证码通过，正在完成教务认证..."
             VpnFullLoginStatus.VPN_AUTHENTICATED -> "WebVPN 已进入，无需短信验证码"
             VpnFullLoginStatus.VPN_READY_SKIP_CAS -> "VPN 会话已生效，正在获取课表..."
-            VpnFullLoginStatus.VPN_READY_NEED_CAS -> "VPN 已进入，正在完成统一认证..."
-            VpnFullLoginStatus.CAS_COMPLETED -> "统一认证完成，正在抓取课表..."
+            VpnFullLoginStatus.VPN_READY_NEED_CAS ->
+                if (authMode == WbuAuthMode.JYXT_LEGACY) "VPN 已进入，正在使用教务系统密码登录..." else "VPN 已进入，正在完成统一认证..."
+            VpnFullLoginStatus.CAS_COMPLETED ->
+                if (authMode == WbuAuthMode.JYXT_LEGACY) "教务密码验证完成，正在抓取课表..." else "统一认证完成，正在抓取课表..."
             VpnFullLoginStatus.CAS_FAILED -> "认证未完成，可能需要额外验证码"
         }
     }
@@ -393,29 +407,6 @@ fun WeeklyScheduleScreen(
                                 }
 
                                 val savedUseVpn = WbuSyncEngine.getSavedUseVpn(appContext)
-                                val hasPersistedSession = WbuSyncEngine.hasPersistedSession(appContext)
-
-                                if (SILENT_LOGIN_ENABLED && savedUseVpn != null && hasPersistedSession) {
-                                    isWbuSyncing = true
-                                    val engine = WbuSyncEngine(context = appContext, useVpn = savedUseVpn)
-                                    try {
-                                        snackbarHostState.showSnackbar("检测到已保存登录态，正在尝试无感同步...")
-                                        val sessionValid = engine.hasActiveSession()
-                                        if (sessionValid) {
-                                            val courses = engine.fetchCourseData(activeTableId)
-                                            if (!courses.isNullOrEmpty()) {
-                                                viewModel.importCourses(courses)
-                                                snackbarHostState.showSuccessSnackbar("已复用登录态，同步成功！")
-                                                return@launch
-                                            }
-                                        }
-
-                                        engine.clearPersistedSession()
-                                        snackbarHostState.showSnackbar("登录态已失效，请重新登录")
-                                    } finally {
-                                        isWbuSyncing = false
-                                    }
-                                }
 
                                 wbuInitialUseVpn = savedUseVpn ?: false
                                 wbuInitialStudentId = WbuSyncEngine.getSavedStudentId(appContext)
@@ -872,34 +863,49 @@ fun WeeklyScheduleScreen(
                         if (useVpn) {
                             val vpnEngine = WbuSyncEngine(context = appContext, useVpn = true)
                             activeVpnEngine = vpnEngine
-
-                            // 1. 优先尝试持久化 session
-                            if (vpnEngine.hasActiveSession()) {
-                                wbuSyncStatus = "使用已保存的 VPN 会话，正在获取课表..."
-                                val courses = vpnEngine.fetchCourseData(activeTableId)
-                                if (courses != null && courses.isNotEmpty()) {
-                                    viewModel.importCourses(courses)
-                                    viewModel.applySemesterConfig(vpnEngine.fetchSemesterConfig())
-                                    wbuSyncStatus = ""
-                                    showWbuAuthDialog = false
-                                    snackbarHostState.showSuccessSnackbar("课表导入成功！")
-                                    return@launch
+                            vpnEngine.sslIssueHandler = { msg ->
+                                val d = CompletableDeferred<Boolean>()
+                                withContext(Dispatchers.Main) {
+                                    sslIssueMessage = msg
+                                    sslIssueDeferred = d
                                 }
-                                wbuSyncStatus = "已保存的会话无法获取课表，尝试重新登录..."
+                                d.await()
                             }
 
-                            // 2. 完整 WebVPN 登录（密码 + 短信验证码 + 校内认证）
-                            wbuSyncStatus = "正在登录 WebVPN，可能需要短信验证..."
+                            // 直接完整登录：先建立/校验 WebVPN 鉴权（TWFID/门户登录），
+                            // 完成后再访问教务；不再在鉴权前做 hasActiveSession 探测。
+                            // 如果是教务系统密码模式且无 TWFID，先弹窗询问 WebVPN/统一认证密码
+                            var customVpnPassword: String? = null
+                            if (authMode == WbuAuthMode.JYXT_LEGACY && WebVpnClient.getTwfid(appContext).isBlank()) {
+                                val d = CompletableDeferred<String?>()
+                                withContext(Dispatchers.Main) {
+                                    vpnPasswordError = null
+                                    vpnPasswordDeferred = d
+                                }
+                                customVpnPassword = d.await()
+                                if (customVpnPassword == null) {
+                                    // 用户取消输入 WebVPN 密码
+                                    isWbuSyncing = false
+                                    wbuSyncStatus = ""
+                                    return@launch
+                                }
+                            }
+
+                            wbuSyncStatus = "正在登录 WebVPN..."
                             val fullLoginOk = vpnEngine.loginVpnFull(
                                 studentId, password,
                                 authMode = authMode,
-                                smsCodeProvider = { maskedPhone ->
+                                vpnPassword = customVpnPassword,
+                                smsCodeProvider = { maskedPhone, isStillValid, sendInterval, promptText ->
                                     val deferred = CompletableDeferred<String?>()
                                     withContext(Dispatchers.Main) {
                                         smsError = null
                                         smsVerifying = false
                                         smsDeferred = deferred
                                         smsDialogPhone = maskedPhone
+                                        smsDialogIsStillValid = isStillValid
+                                        smsDialogSendInterval = sendInterval
+                                        smsDialogPromptText = promptText
                                     }
                                     deferred.await()
                                 },
@@ -911,7 +917,7 @@ fun WeeklyScheduleScreen(
                                     }
                                     deferred.await() ?: SliderCaptchaResult.Cancel
                                 },
-                                statusCallback = onVpnStatus
+                                statusCallback = vpnStatusText(authMode)
                             )
 
                             if (fullLoginOk) {
@@ -919,7 +925,10 @@ fun WeeklyScheduleScreen(
                                 val courses = vpnEngine.fetchCourseData(activeTableId)
                                 if (courses != null && courses.isNotEmpty()) {
                                     viewModel.importCourses(courses)
-                                    viewModel.applySemesterConfig(vpnEngine.fetchSemesterConfig())
+                                    viewModel.applySemesterConfig(vpnEngine.fetchSemesterConfig(
+                                        xnxq = vpnEngine.lastResolvedXnxq,
+                                        xqdm = vpnEngine.lastResolvedXqdm,
+                                    ))
                                     wbuSyncStatus = ""
                                     showWbuAuthDialog = false
                                     snackbarHostState.showSuccessSnackbar("课表导入成功！")
@@ -995,7 +1004,10 @@ fun WeeklyScheduleScreen(
                         val courses = engine.fetchCourseData(activeTableId)
                         if (courses != null && courses.isNotEmpty()) {
                             viewModel.importCourses(courses)
-                            viewModel.applySemesterConfig(engine.fetchSemesterConfig())
+                            viewModel.applySemesterConfig(engine.fetchSemesterConfig(
+                                xnxq = engine.lastResolvedXnxq,
+                                xqdm = engine.lastResolvedXqdm,
+                            ))
                             wbuSyncStatus = ""
                             showWbuAuthDialog = false
                             snackbarHostState.showSuccessSnackbar("课表导入成功！")
@@ -1048,6 +1060,10 @@ fun WeeklyScheduleScreen(
                             val courses = engine.fetchCourseData(activeTableId)
                             if (courses != null && courses.isNotEmpty()) {
                                 viewModel.importCourses(courses)
+                                viewModel.applySemesterConfig(engine.fetchSemesterConfig(
+                                    xnxq = engine.lastResolvedXnxq,
+                                    xqdm = engine.lastResolvedXqdm,
+                                ))
                                 wbuSyncStatus = ""
                                 showWbuAuthDialog = false
                                 snackbarHostState.showSuccessSnackbar("课表导入成功！")
@@ -1074,6 +1090,9 @@ fun WeeklyScheduleScreen(
     if (smsDialogPhone != null) {
         VpnSmsCodeDialog(
             maskedPhone = smsDialogPhone!!,
+            isStillValid = smsDialogIsStillValid,
+            sendInterval = smsDialogSendInterval,
+            promptText = smsDialogPromptText,
             isVerifying = smsVerifying,
             errorMessage = smsError,
             onSubmit = { code ->
@@ -1089,8 +1108,9 @@ fun WeeklyScheduleScreen(
             },
             onResend = {
                 coroutineScope.launch {
-                    val ok = activeVpnEngine?.resendVpnSmsCode() ?: false
-                    if (ok) {
+                    val result = activeVpnEngine?.resendVpnSmsCode()
+                    if (result?.success == true) {
+                        smsDialogSendInterval = result.cooldownSeconds
                         snackbarHostState.showSnackbar("验证码已重新发送")
                     } else {
                         snackbarHostState.showSnackbar("重新发送失败，请稍后重试")
@@ -1173,6 +1193,96 @@ fun WeeklyScheduleScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showManualLoginPrompt = false }) { Text("取消") }
+            }
+        )
+    }
+
+    // WebVPN 统一认证密码询问弹窗（教务密码模式且未配置 TWFID 时触发）
+    vpnPasswordDeferred?.let { deferred ->
+        var inputPassword by remember { mutableStateOf("") }
+        var passwordVisible by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = {
+                deferred.complete(null)
+                vpnPasswordDeferred = null
+            },
+            title = { Text("连接 WebVPN") },
+            text = {
+                Column {
+                    Text(
+                        text = "校外访问教务系统需先通过 WebVPN 门禁。请输入您的【统一认证/WebVPN 密码】以连接网络：",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = inputPassword,
+                        onValueChange = { inputPassword = it },
+                        label = { Text("统一认证 (WebVPN) 密码") },
+                        singleLine = true,
+                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        trailingIcon = {
+                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                Icon(
+                                    imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    contentDescription = if (passwordVisible) "隐藏密码" else "显示密码"
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deferred.complete(inputPassword)
+                        vpnPasswordDeferred = null
+                    },
+                    enabled = inputPassword.isNotBlank()
+                ) {
+                    Text("继续连接")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        deferred.complete(null)
+                        vpnPasswordDeferred = null
+                    }
+                ) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    // WebVPN TLS 证书校验异常 → 询问是否继续信任（仅其它/未知证书时触发）
+    sslIssueDeferred?.let { deferred ->
+        AlertDialog(
+            onDismissRequest = {
+                deferred.complete(false)
+                sslIssueDeferred = null
+            },
+            title = { Text("证书校验异常") },
+            text = { Text("检测到 WebVPN 证书校验失败（$sslIssueMessage）。是否继续信任并重试？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deferred.complete(true)
+                        sslIssueDeferred = null
+                    }
+                ) { Text("继续信任") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        deferred.complete(false)
+                        sslIssueDeferred = null
+                    }
+                ) { Text("取消") }
             }
         )
     }
