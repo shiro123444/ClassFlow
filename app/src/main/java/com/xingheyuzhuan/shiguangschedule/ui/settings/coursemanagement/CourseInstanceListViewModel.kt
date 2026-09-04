@@ -1,10 +1,8 @@
 package com.xingheyuzhuan.shiguangschedule.ui.settings.coursemanagement
 
-import androidx.lifecycle.SavedStateHandle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWithWeeks
 import com.xingheyuzhuan.shiguangschedule.data.repository.AppSettingsRepository
@@ -24,36 +22,42 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-// 导航参数的 Key
-const val COURSE_NAME_ARG = "courseName"
-
 @HiltViewModel
 class CourseInstanceListViewModel @Inject constructor(
-    private val savedStateHandle: SavedStateHandle,
     private val appSettingsRepository: AppSettingsRepository,
     private val courseTableRepository: CourseTableRepository,
     private val styleSettingsRepository: StyleSettingsRepository
 ) : ViewModel() {
 
-    private val selectedCourseName: String = savedStateHandle[COURSE_NAME_ARG] ?: ""
+    private val _courseNameFlow = MutableStateFlow<String?>(null)
+
+    fun initCourseName(name: String) {
+        if (_courseNameFlow.value == name) return
+        _courseNameFlow.value = name
+    }
 
     private val currentTableIdFlow = appSettingsRepository.getAppSettings()
-        .map { it.currentCourseTableId ?: "" }
+        .map { it.currentCourseTableId }
 
     /**
      * 课程实例列表流
      */
     @OptIn(ExperimentalCoroutinesApi::class)
-    val courseInstances: StateFlow<List<CourseWithWeeks>> = currentTableIdFlow
-        .flatMapLatest { tableId ->
-            if (tableId.isEmpty() || selectedCourseName.isEmpty()) {
+    val courseInstances: StateFlow<List<CourseWithWeeks>> = combine(
+        currentTableIdFlow,
+        _courseNameFlow
+    ) { tableId, name ->
+        tableId to name
+    }
+        .flatMapLatest { (tableId, name) ->
+            if (tableId.isEmpty() || name.isNullOrEmpty()) {
                 flowOf(emptyList())
             } else {
                 courseTableRepository.getCoursesWithWeeksByTableId(tableId)
+                    .map { allCourses ->
+                        allCourses.filter { it.course.name == name }
+                    }
             }
-        }
-        .map { allCourses ->
-            allCourses.filter { it.course.name == selectedCourseName }
         }
         .stateIn(
             scope = viewModelScope,
