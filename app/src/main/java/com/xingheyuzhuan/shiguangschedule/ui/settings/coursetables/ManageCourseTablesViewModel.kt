@@ -5,12 +5,14 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import androidx.lifecycle.viewModelScope
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTable
+import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWithWeeks
 import com.xingheyuzhuan.shiguangschedule.data.repository.AppSettingsRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.CourseTableRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -56,6 +58,46 @@ class ManageCourseTablesViewModel @Inject constructor(
         viewModelScope.launch {
             courseTableRepository.updateCourseTable(updatedCourseTable)
         }
+    }
+
+    suspend fun createAndSwitchTable(
+        name: String,
+        studentId: String? = null,
+        semesterCode: String? = null
+    ): CourseTable {
+        val newTable = courseTableRepository.createNewCourseTable(
+            name = name,
+            studentId = studentId,
+            semesterCode = semesterCode
+        )
+        switchCourseTable(newTable.id)
+        return newTable
+    }
+
+    suspend fun importCourses(courses: List<CourseWithWeeks>, targetTableId: String) {
+        val existingCourses = courseTableRepository.getCoursesWithWeeksByTableId(targetTableId).firstOrNull() ?: emptyList()
+        if (existingCourses.isNotEmpty()) {
+            val idsToDelete = existingCourses.map { it.course.id }
+            courseTableRepository.deleteCoursesByIds(idsToDelete)
+        }
+        courses.forEach { courseWithWeeks ->
+            val courseToInsert = courseWithWeeks.course.copy(courseTableId = targetTableId)
+            val weeks = courseWithWeeks.weeks.map { it.weekNumber }
+            courseTableRepository.upsertCourse(courseToInsert, weeks)
+        }
+    }
+
+    suspend fun applySemesterConfig(
+        config: com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSemesterConfig?,
+        targetTableId: String
+    ) {
+        if (config == null) return
+        val current = appSettingsRepository.getCourseConfigOnce(targetTableId)
+        val updated = (current ?: com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTableConfig(courseTableId = targetTableId)).copy(
+            semesterStartDate = config.semesterStartDate ?: current?.semesterStartDate,
+            semesterTotalWeeks = config.semesterTotalWeeks
+        )
+        appSettingsRepository.insertOrUpdateCourseConfig(updated)
     }
 
     /**

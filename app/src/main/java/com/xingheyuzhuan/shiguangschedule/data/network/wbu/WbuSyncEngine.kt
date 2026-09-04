@@ -187,6 +187,12 @@ class WbuSyncEngine(
         set(v) { transport.sslIssueHandler = v }
 
     /**
+     * 教务服务端通过 getCurrentXnxq 真实返回的当前学期（不会因用户手动挑选其它学期而被覆盖）。
+     */
+    @Volatile
+    var systemCurrentXnxq: String? = null
+
+    /**
      * 最近一次 fetchCourseData 解析出的当前学期，供 fetchSemesterConfig 复用。
      */
     @Volatile
@@ -858,11 +864,69 @@ class WbuSyncEngine(
 
     // ------------------- 学期 / 课表抓取 -------------------
 
-    suspend fun fetchCourseData(tableId: String): List<CourseWithWeeks>? = withContext(Dispatchers.IO) {
+    data class WbuSemesterOption(val value: String, val text: String)
+
+    suspend fun fetchSemesterOptions(): List<WbuSemesterOption> = withContext(Dispatchers.IO) {
+        runCatching {
+            val currentXnxq = systemCurrentXnxq?.takeIf { it.isNotBlank() } ?: run {
+                val termReq = Request.Builder()
+                    .url("$baseUrl/admin/xsd/xsdcjcx/getCurrentXnxq?sf_request_type=ajax")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .get()
+                    .build()
+                val termRaw = client.newCall(termReq).execute().use { it.body?.string().orEmpty() }
+                if (!transport.looksLikeHtml(termRaw) && termRaw.isNotBlank()) {
+                    JSONObject(termRaw).optString("data", "").also {
+                        if (it.isNotBlank()) {
+                            systemCurrentXnxq = it
+                            if (lastResolvedXnxq.isNullOrBlank()) lastResolvedXnxq = it
+                        }
+                    }
+                } else null
+            } ?: lastResolvedXnxq
+
+            val queryUrl = if (!currentXnxq.isNullOrBlank()) {
+                "$baseUrl/admin/xsd/pkgl/xskb/queryKbForXsd?xnxq=${URLEncoder.encode(currentXnxq, "UTF-8")}"
+            } else {
+                "$baseUrl/admin/xsd/pkgl/xskb/queryKbForXsd"
+            }
+
+            val pageHtml = client.newCall(
+                Request.Builder().url(queryUrl).get().build()
+            ).execute().use { it.body?.string().orEmpty() }
+
+            if (pageHtml.isBlank() || transport.looksLikeHtml(pageHtml).not() && !pageHtml.contains("xnxq1")) {
+                // 如果没有返回期望页面，至少返回当前已知的学期
+                return@withContext if (!currentXnxq.isNullOrBlank()) {
+                    listOf(WbuSemesterOption(value = currentXnxq, text = currentXnxq))
+                } else emptyList()
+            }
+
+            val doc = Jsoup.parse(pageHtml)
+            val options = mutableListOf<WbuSemesterOption>()
+            doc.select("#xnxq1 option").forEach { opt ->
+                val v = opt.attr("value").trim()
+                val t = opt.text().trim()
+                if (v.isNotBlank()) {
+                    options.add(WbuSemesterOption(value = v, text = t.ifBlank { v }))
+                }
+            }
+
+            if (options.isEmpty() && !currentXnxq.isNullOrBlank()) {
+                options.add(WbuSemesterOption(value = currentXnxq, text = currentXnxq))
+            }
+            options
+        }.getOrElse { e ->
+            Log.w("WbuSyncEngine", "fetchSemesterOptions failed: ${e.message}", e)
+            emptyList()
+        }
+    }
+
+    suspend fun fetchCourseData(tableId: String, targetXnxq: String? = null): List<CourseWithWeeks>? = withContext(Dispatchers.IO) {
         try {
-            Log.i("WbuSyncEngine", "Fetch course data start. tableId=$tableId baseUrl=$baseUrl")
-            // 复用登录阶段已解析的学期，避免重复 getCurrentXnxq。
-            val xnxq = lastResolvedXnxq?.takeIf { it.isNotBlank() } ?: run {
+            Log.i("WbuSyncEngine", "Fetch course data start. tableId=$tableId baseUrl=$baseUrl targetXnxq=$targetXnxq")
+            // 优先使用传入的 targetXnxq，其次复用已解析的学期
+            val xnxq = targetXnxq?.takeIf { it.isNotBlank() } ?: systemCurrentXnxq?.takeIf { it.isNotBlank() } ?: lastResolvedXnxq?.takeIf { it.isNotBlank() } ?: run {
                 val termReq = Request.Builder()
                     .url("$baseUrl/admin/xsd/xsdcjcx/getCurrentXnxq?sf_request_type=ajax")
                     .header("X-Requested-With", "XMLHttpRequest")
@@ -875,13 +939,17 @@ class WbuSyncEngine(
                     return@withContext null
                 }
                 JSONObject(termRaw).optString("data", "").also { resolved ->
-                    if (resolved.isNotBlank()) lastResolvedXnxq = resolved
+                    if (resolved.isNotBlank()) {
+                        systemCurrentXnxq = resolved
+                        lastResolvedXnxq = resolved
+                    }
                 }
             }
             if (xnxq.isBlank()) {
                 Log.w("WbuSyncEngine", "Term API has empty xnxq.")
                 return@withContext null
             }
+            lastResolvedXnxq = xnxq
 
             val pkglHtml = client.newCall(
                 Request.Builder()
@@ -1036,6 +1104,7 @@ class WbuSyncEngine(
             return
         }
         prefs.edit().putString(WbuAuthTransport.prefKeyLastStudentId(), sid).apply()
+        lastResolvedStudentId = sid
         Log.d("WbuSyncEngine", "Resolved student id from username cookie: $sid")
     }
 
@@ -1070,7 +1139,10 @@ class WbuSyncEngine(
                 }
                 val term = JSONObject(body).optString("data", "")
                 // 顺手记录学期，供 fetchCourseData 复用，避免重复 getCurrentXnxq。
-                if (term.isNotBlank()) lastResolvedXnxq = term
+                if (term.isNotBlank()) {
+                    systemCurrentXnxq = term
+                    lastResolvedXnxq = term
+                }
                 term.isNotBlank()
             }
         }.getOrElse { e ->
@@ -1314,7 +1386,110 @@ class WbuSyncEngine(
 
     // ------------------- 静态偏好访问（转发，UI 接口不变） -------------------
 
+    /**
+     * 重复课程冲突组信息（用于 UI 弹窗）。
+     */
+    data class DuplicateGroupInfo(
+        val sampleCourseName: String,
+        val sampleTeacherSummary: String,
+        val totalConflictCourses: Int,
+        val groupCount: Int,
+        val hasIdentical: Boolean,
+        val hasMultiTeacher: Boolean
+    )
+
+    enum class DuplicateResolveStrategy {
+        KEEP_ALL,
+        MERGE_TEACHERS,
+        KEEP_ONE
+    }
+
     companion object {
+        /**
+         * 分析课程列表中是否存在同时间、同地点、同名但多教师或完全相同的重复课程。
+         */
+        fun analyzeDuplicateCourses(courses: List<CourseWithWeeks>): DuplicateGroupInfo? {
+            if (courses.size <= 1) return null
+            val groups = courses.groupBy { cw ->
+                val c = cw.course
+                val weeksStr = cw.weeks.map { it.weekNumber }.sorted().joinToString(",")
+                "${c.name}|${c.position}|${c.day}|${c.startSection}|${c.endSection}|$weeksStr"
+            }.values.filter { it.size > 1 }
+
+            if (groups.isEmpty()) return null
+
+            var hasIdentical = false
+            var hasMultiTeacher = false
+            var sampleMultiGroup: List<CourseWithWeeks>? = null
+
+            for (g in groups) {
+                val teachers = g.map { it.course.teacher.trim() }.filter { it.isNotEmpty() }.distinct()
+                if (teachers.size > 1) {
+                    hasMultiTeacher = true
+                    if (sampleMultiGroup == null) sampleMultiGroup = g
+                } else {
+                    hasIdentical = true
+                }
+            }
+
+            val targetSampleGroup = sampleMultiGroup ?: groups.first()
+            val sampleCourse = targetSampleGroup.first().course
+            val teachersCombined = targetSampleGroup.map { it.course.teacher.trim() }
+                .filter { it.isNotEmpty() }.distinct().joinToString("、")
+
+            val totalCoursesInConflicts = groups.sumOf { it.size }
+            return DuplicateGroupInfo(
+                sampleCourseName = sampleCourse.name,
+                sampleTeacherSummary = teachersCombined.ifBlank { "多位教师" },
+                totalConflictCourses = totalCoursesInConflicts,
+                groupCount = groups.size,
+                hasIdentical = hasIdentical,
+                hasMultiTeacher = hasMultiTeacher
+            )
+        }
+
+        /**
+         * 根据策略解决重复课程。
+         */
+        fun resolveDuplicateCourses(
+            courses: List<CourseWithWeeks>,
+            strategy: DuplicateResolveStrategy
+        ): List<CourseWithWeeks> {
+            if (strategy == DuplicateResolveStrategy.KEEP_ALL || courses.size <= 1) return courses
+
+            val grouped = courses.groupBy { cw ->
+                val c = cw.course
+                val weeksStr = cw.weeks.map { it.weekNumber }.sorted().joinToString(",")
+                "${c.name}|${c.position}|${c.day}|${c.startSection}|${c.endSection}|$weeksStr"
+            }
+
+            val result = mutableListOf<CourseWithWeeks>()
+            for ((_, group) in grouped) {
+                if (group.size == 1) {
+                    result.add(group.first())
+                } else {
+                    val first = group.first()
+                    when (strategy) {
+                        DuplicateResolveStrategy.MERGE_TEACHERS -> {
+                            val combinedTeachers = group.map { it.course.teacher.trim() }
+                                .filter { it.isNotEmpty() }.distinct().joinToString("、")
+                            val mergedCourse = first.course.copy(
+                                teacher = if (combinedTeachers.isNotBlank()) combinedTeachers else first.course.teacher
+                            )
+                            result.add(first.copy(course = mergedCourse))
+                        }
+                        DuplicateResolveStrategy.KEEP_ONE -> {
+                            result.add(first)
+                        }
+                        DuplicateResolveStrategy.KEEP_ALL -> {
+                            result.addAll(group)
+                        }
+                    }
+                }
+            }
+            return result
+        }
+
         private const val KEY_LAST_USE_VPN = "last_use_vpn"
         private const val KEY_LAST_USE_VPN_SET = "last_use_vpn_set"
 
@@ -1337,6 +1512,8 @@ class WbuSyncEngine(
         /** 「保留建筑名称」：默认关闭。 */
         fun getKeepBuilding(context: Context): Boolean = WbuAuthTransport.getKeepBuilding(context)
         fun setKeepBuilding(context: Context, enabled: Boolean) = WbuAuthTransport.setKeepBuilding(context, enabled)
+        fun getSelectSemesterOnImport(context: Context): Boolean = WbuAuthTransport.getSelectSemesterOnImport(context)
+        fun setSelectSemesterOnImport(context: Context, enabled: Boolean) = WbuAuthTransport.setSelectSemesterOnImport(context, enabled)
 
         /** 去除教师名末尾工号。 */
         fun cleanTeacherId(teacher: String): String {

@@ -549,6 +549,7 @@ internal class WbuAuthTransport(
         private const val KEY_SKIP_CAMPUS_CHECK = "skip_campus_check"
         private const val KEY_KEEP_TEACHER_ID = "keep_teacher_id"
         private const val KEY_KEEP_BUILDING = "keep_building"
+        private const val KEY_SELECT_SEMESTER_ON_IMPORT = "select_semester_on_import"
         private const val KEY_TWFID = "twfid"
         private const val KEY_USE_HTTPS_WEBVPN = "use_https_webvpn"
         private const val KEY_IDS_ADDR_NOT_FROM_JWXT = "ids_addr_not_from_jwxt"
@@ -606,6 +607,14 @@ internal class WbuAuthTransport(
         fun setKeepBuilding(context: Context, enabled: Boolean) {
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit().putBoolean(KEY_KEEP_BUILDING, enabled).apply()
+        }
+
+        fun getSelectSemesterOnImport(context: Context): Boolean =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_SELECT_SEMESTER_ON_IMPORT, false)
+
+        fun setSelectSemesterOnImport(context: Context, enabled: Boolean) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_SELECT_SEMESTER_ON_IMPORT, enabled).apply()
         }
 
         fun getTwfid(context: Context): String =

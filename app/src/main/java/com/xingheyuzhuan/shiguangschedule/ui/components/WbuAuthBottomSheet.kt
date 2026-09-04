@@ -149,7 +149,8 @@ fun WbuAuthBottomSheet(
     statusMessage: String = "",
     errorMessage: String = "",
     initialStudentId: String = "",
-    initialUseVpn: Boolean = false
+    initialUseVpn: Boolean = false,
+    hideSelectSemesterSwitch: Boolean = false
 ) {
     val isDark = LocalIsDarkTheme.current
     val context = LocalContext.current
@@ -161,6 +162,7 @@ fun WbuAuthBottomSheet(
     var panelExpanded by remember { mutableStateOf(false) }
     var idsVpnEnabled by remember { mutableStateOf(IdsCasClient.getIdsViaWebVpn(context)) }
     var qrVpnEnabled by remember { mutableStateOf(IdsCasClient.getQrViaWebVpn(context)) }
+    var selectSemesterOnImport by remember { mutableStateOf(WbuSyncEngine.getSelectSemesterOnImport(context)) }
     var pcUaEnabled by remember { mutableStateOf(WbuSyncEngine.getUsePcUserAgent(context)) }
     var skipCampusCheck by remember { mutableStateOf(WbuSyncEngine.getSkipCampusCheck(context)) }
     var keepTeacherId by remember { mutableStateOf(WbuSyncEngine.getKeepTeacherId(context)) }
@@ -594,6 +596,16 @@ fun WbuAuthBottomSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp)
                     )
+                    if (!hideSelectSemesterSwitch) {
+                        ToggleRow(
+                            label = "选择导入的学期",
+                            checked = selectSemesterOnImport,
+                            onCheckedChange = {
+                                selectSemesterOnImport = it
+                                WbuSyncEngine.setSelectSemesterOnImport(context, it)
+                            }
+                        )
+                    }
                     ToggleRow(
                         label = "保留教师工号",
                         checked = keepTeacherId,

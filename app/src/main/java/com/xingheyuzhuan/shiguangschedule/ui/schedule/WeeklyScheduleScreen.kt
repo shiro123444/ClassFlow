@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -221,6 +222,27 @@ fun WeeklyScheduleScreen(
     var vpnPasswordDeferred by remember { mutableStateOf<CompletableDeferred<String?>?>(null) }
     var vpnPasswordError by remember { mutableStateOf<String?>(null) }
 
+    // 学期选择弹窗状态
+    var semesterSelectOptions by remember { mutableStateOf<List<WbuSyncEngine.WbuSemesterOption>>(emptyList()) }
+    var semesterSelectDeferred by remember { mutableStateOf<CompletableDeferred<String?>?>(null) }
+
+    // 学期冲突询问对话框状态
+    var conflictDialogData by remember { mutableStateOf<Pair<String, CourseTable>?>(null) }
+    var conflictDeferred by remember { mutableStateOf<CompletableDeferred<Int>?>(null) }
+    var conflictAutoRenameChecked by remember { mutableStateOf(true) }
+
+    // 重复课程冲突处理状态 (multiTeacher / identical)
+    var duplicateCoursesDialogData by remember { mutableStateOf<WbuSyncEngine.DuplicateGroupInfo?>(null) }
+    var duplicateCoursesDeferred by remember { mutableStateOf<CompletableDeferred<WbuSyncEngine.DuplicateResolveStrategy?>?>(null) }
+
+    // 学号冲突询问对话框状态 (currentStudentId, loginSid) -> (1: Cancel, 2: Create New, 3: Overwrite)
+    var studentIdConflictData by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var studentIdConflictDeferred by remember { mutableStateOf<CompletableDeferred<Int>?>(null) }
+
+    // 同步完成后检测到教务有更新学期时的提示对话框
+    var newSemesterPromptXnxq by remember { mutableStateOf<String?>(null) }
+    var newSemesterPromptEngine by remember { mutableStateOf<WbuSyncEngine?>(null) }
+
     val snackbarHostState = remember { SnackbarHostState() }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -250,6 +272,235 @@ fun WeeklyScheduleScreen(
                 1.0f
             }
         }
+    }
+
+    fun parseXnxqScore(xnxq: String?): Long {
+        val match = Regex("""(\d{4})-\d{4}-(\d+)""").find(xnxq.orEmpty()) ?: return 0L
+        return (match.groupValues[1].toLongOrNull() ?: 0L) * 10 + (match.groupValues[2].toLongOrNull() ?: 0L)
+    }
+
+    fun computeNonConflictingTableName(
+        baseSemester: String,
+        sid: String,
+        allTables: List<CourseTable>
+    ): String {
+        val candidate = baseSemester.ifBlank { "未命名课表" }
+        // 方案 B：如果本地已有同名课表，且该课表绑定的学号不是当前登录学号，则追加学号后缀避免混淆
+        val hasConflictWithOtherSid = allTables.any {
+            it.name == candidate && it.studentId != null && it.studentId != sid
+        }
+        return if (hasConflictWithOtherSid && sid.isNotBlank()) {
+            "$candidate ($sid)"
+        } else {
+            candidate
+        }
+    }
+
+    suspend fun performCourseImportPipeline(
+        engine: WbuSyncEngine,
+        loginSid: String
+    ): Boolean {
+        val currentTableId = viewModel.uiState.value.tableId ?: return false
+        val currentTable = viewModel.getTableById(currentTableId) ?: return false
+
+        if (currentTable.isArchived) {
+            withContext(Dispatchers.Main) {
+                wbuError = "当前课表已归档锁定，无法直接同步覆盖。请新建课表或前往管理课表解除归档。"
+            }
+            return false
+        }
+
+        val effectiveSid = engine.lastResolvedStudentId ?: loginSid.ifBlank { WbuSyncEngine.getSavedStudentId(appContext) }
+
+        // 检查学号一致性（账号冲突拦截）
+        var forceCreateNewBySidConflict = false
+        if (!currentTable.studentId.isNullOrBlank() && effectiveSid.isNotBlank() && currentTable.studentId != effectiveSid) {
+            val sidConflictDef = CompletableDeferred<Int>()
+            withContext(Dispatchers.Main) {
+                studentIdConflictData = Pair(currentTable.studentId, effectiveSid)
+                studentIdConflictDeferred = sidConflictDef
+            }
+            val sidAction = sidConflictDef.await()
+            when (sidAction) {
+                1 -> { // 取消
+                    withContext(Dispatchers.Main) {
+                        wbuSyncStatus = ""
+                        isWbuSyncing = false
+                    }
+                    return false
+                }
+                2 -> { // 新建独立课表（推荐）
+                    forceCreateNewBySidConflict = true
+                }
+                3 -> { // 执意覆盖当前课表
+                    forceCreateNewBySidConflict = false
+                }
+            }
+        }
+
+        val selectSemester = WbuSyncEngine.getSelectSemesterOnImport(appContext)
+        var targetXnxq: String? = null
+
+        if (selectSemester) {
+            withContext(Dispatchers.Main) {
+                wbuSyncStatus = "正在获取可选学期..."
+            }
+            val options = engine.fetchSemesterOptions()
+            if (options.isNotEmpty()) {
+                val deferred = CompletableDeferred<String?>()
+                withContext(Dispatchers.Main) {
+                    semesterSelectOptions = options
+                    semesterSelectDeferred = deferred
+                }
+                val chosen = deferred.await()
+                if (chosen == null) {
+                    withContext(Dispatchers.Main) {
+                        wbuSyncStatus = ""
+                        isWbuSyncing = false
+                    }
+                    return false
+                }
+                targetXnxq = chosen
+            }
+        }
+
+        // 如果未开启手动选择学期，并且当前课表已经绑定了学期，则严格使用课表绑定的学期
+        if (targetXnxq == null && !currentTable.semesterCode.isNullOrBlank()) {
+            targetXnxq = currentTable.semesterCode
+        }
+
+        withContext(Dispatchers.Main) {
+            wbuSyncStatus = "正在拉取课表数据..."
+        }
+        val coursesRaw = engine.fetchCourseData(currentTableId, targetXnxq)
+        if (coursesRaw.isNullOrEmpty()) {
+            withContext(Dispatchers.Main) {
+                wbuError = "未获取到课表数据（可能该学期未排课）"
+            }
+            return false
+        }
+
+        // 检查是否存在同时间同地点的多教师/重复课程（移植自 school.js）
+        val dupInfo = WbuSyncEngine.analyzeDuplicateCourses(coursesRaw)
+        val courses = if (dupInfo != null) {
+            val def = CompletableDeferred<WbuSyncEngine.DuplicateResolveStrategy?>()
+            withContext(Dispatchers.Main) {
+                duplicateCoursesDialogData = dupInfo
+                duplicateCoursesDeferred = def
+            }
+            val strategy = def.await()
+            if (strategy == null) {
+                withContext(Dispatchers.Main) {
+                    wbuSyncStatus = ""
+                    isWbuSyncing = false
+                }
+                return false
+            }
+            WbuSyncEngine.resolveDuplicateCourses(coursesRaw, strategy)
+        } else {
+            coursesRaw
+        }
+
+        val effectiveXnxq = engine.lastResolvedXnxq ?: targetXnxq.orEmpty()
+        val allTablesBeforeSave = viewModel.getAllCourseTables()
+
+        // 判断冲突与目标写入课表
+        var destTableId = currentTableId
+        var shouldRenameDest = false
+
+        if (forceCreateNewBySidConflict) {
+            // 因学号冲突，用户选择为新学号新建课表（应用方案 B 命名）
+            val newName = computeNonConflictingTableName(effectiveXnxq, effectiveSid, allTablesBeforeSave)
+            val newTable = viewModel.createAndSwitchTable(
+                name = newName,
+                studentId = effectiveSid,
+                semesterCode = effectiveXnxq
+            )
+            destTableId = newTable.id
+            shouldRenameDest = false
+        } else if (selectSemester && !currentTable.semesterCode.isNullOrBlank() && currentTable.semesterCode != effectiveXnxq) {
+            // 属性不一致，弹窗询问覆盖还是新建 (1: Cancel, 2: Create New, 3: Overwrite with rename, 4: Overwrite keep name)
+            val conflictDef = CompletableDeferred<Int>()
+            withContext(Dispatchers.Main) {
+                conflictDialogData = Pair(effectiveXnxq, currentTable)
+                conflictDeferred = conflictDef
+                conflictAutoRenameChecked = true
+            }
+            val action = conflictDef.await()
+            when (action) {
+                1 -> {
+                    withContext(Dispatchers.Main) {
+                        wbuSyncStatus = ""
+                        isWbuSyncing = false
+                    }
+                    return false
+                }
+                2 -> {
+                    val newName = computeNonConflictingTableName(effectiveXnxq, effectiveSid, allTablesBeforeSave)
+                    val newTable = viewModel.createAndSwitchTable(
+                        name = newName,
+                        studentId = effectiveSid,
+                        semesterCode = effectiveXnxq
+                    )
+                    destTableId = newTable.id
+                }
+                3 -> {
+                    destTableId = currentTableId
+                    shouldRenameDest = true
+                }
+                4 -> {
+                    destTableId = currentTableId
+                    shouldRenameDest = false
+                }
+            }
+        } else {
+            // 没有冲突（学期一致，或者当前课表原本没有绑定学期）
+            if (currentTable.name == "我的课表") {
+                shouldRenameDest = true
+            }
+        }
+
+        withContext(Dispatchers.Main) {
+            wbuSyncStatus = "正在写入课表..."
+        }
+
+        viewModel.importCourses(courses, targetTableId = destTableId)
+        val semConfig = engine.fetchSemesterConfig(
+            xnxq = effectiveXnxq,
+            xqdm = engine.lastResolvedXqdm
+        )
+        viewModel.applySemesterConfig(semConfig, targetTableId = destTableId)
+
+        // 更新目标课表的学期与学号元数据
+        val finalName = if (shouldRenameDest) computeNonConflictingTableName(effectiveXnxq, effectiveSid, allTablesBeforeSave) else null
+        viewModel.updateTableMeta(
+            tableId = destTableId,
+            name = finalName,
+            studentId = effectiveSid,
+            semesterCode = effectiveXnxq
+        )
+
+        withContext(Dispatchers.Main) {
+            wbuSyncStatus = ""
+            showWbuAuthDialog = false
+            snackbarHostState.showSuccessSnackbar("课表导入成功！")
+        }
+
+        // 检查教务系统是否有新于本地全部课表的新学期
+        val serverNewestXnxq = engine.systemCurrentXnxq
+            ?: semesterSelectOptions.maxByOrNull { parseXnxqScore(it.value) }?.value
+            ?: effectiveXnxq
+        val allTables = viewModel.getAllCourseTables()
+        val maxScore = allTables.maxOfOrNull { parseXnxqScore(it.semesterCode) } ?: 0L
+        val serverNewestScore = parseXnxqScore(serverNewestXnxq)
+        if (serverNewestScore > maxScore && allTables.none { it.semesterCode == serverNewestXnxq }) {
+            withContext(Dispatchers.Main) {
+                newSemesterPromptXnxq = serverNewestXnxq
+                newSemesterPromptEngine = engine
+            }
+        }
+
+        return true
     }
 
     fun vpnStatusText(authMode: WbuAuthMode): (VpnFullLoginStatus) -> Unit = { status ->
@@ -823,19 +1074,8 @@ fun WeeklyScheduleScreen(
                                         }
                                     )
                                     if (qrOk && activeTableId != null) {
-                                        val courses = engine.fetchCourseData(activeTableId)
-                                        if (courses != null && courses.isNotEmpty()) {
-                                            viewModel.importCourses(courses)
-                                            viewModel.applySemesterConfig(engine.fetchSemesterConfig(
-                                                xnxq = engine.lastResolvedXnxq,
-                                                xqdm = engine.lastResolvedXqdm,
-                                            ))
-                                            wbuSyncStatus = ""
-                                            showWbuAuthDialog = false
-                                            snackbarHostState.showSuccessSnackbar("课表导入成功！")
-                                        } else {
-                                            wbuError = "登录成功但未获取到课表数据"
-                                        }
+                                        val sid = WbuSyncEngine.getSavedStudentId(appContext)
+                                        performCourseImportPipeline(engine, sid)
                                     } else {
                                         wbuError = engine.lastLocalLoginError?.takeIf { it.isNotBlank() } ?: "扫码登录失败，请重试"
                                         wbuQrState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = "登录失败，点二维码重试")
@@ -956,20 +1196,8 @@ fun WeeklyScheduleScreen(
                             )
 
                             if (fullLoginOk) {
-                                wbuSyncStatus = "登录成功，正在获取课表..."
-                                val courses = vpnEngine.fetchCourseData(activeTableId)
-                                if (courses != null && courses.isNotEmpty()) {
-                                    viewModel.importCourses(courses)
-                                    viewModel.applySemesterConfig(vpnEngine.fetchSemesterConfig(
-                                        xnxq = vpnEngine.lastResolvedXnxq,
-                                        xqdm = vpnEngine.lastResolvedXqdm,
-                                    ))
-                                    wbuSyncStatus = ""
-                                    showWbuAuthDialog = false
-                                    snackbarHostState.showSuccessSnackbar("课表导入成功！")
-                                    return@launch
-                                }
-                                wbuError = "登录成功但未获取到课表数据"
+                                performCourseImportPipeline(vpnEngine, studentId)
+                                return@launch
                             } else {
                                 isWbuSyncing = false
                                 wbuSyncStatus = ""
@@ -1035,20 +1263,7 @@ fun WeeklyScheduleScreen(
                             return@launch
                         }
 
-                        wbuSyncStatus = "登录成功，正在获取课表..."
-                        val courses = engine.fetchCourseData(activeTableId)
-                        if (courses != null && courses.isNotEmpty()) {
-                            viewModel.importCourses(courses)
-                            viewModel.applySemesterConfig(engine.fetchSemesterConfig(
-                                xnxq = engine.lastResolvedXnxq,
-                                xqdm = engine.lastResolvedXqdm,
-                            ))
-                            wbuSyncStatus = ""
-                            showWbuAuthDialog = false
-                            snackbarHostState.showSuccessSnackbar("课表导入成功！")
-                        } else {
-                            wbuError = "未获取到课表数据"
-                        }
+                        performCourseImportPipeline(engine, studentId)
                     } catch (e: Exception) {
                         Log.e("WbuSync", "同步发生错误", e)
                         wbuError = "同步发生错误: ${e.message}"
@@ -1122,20 +1337,7 @@ fun WeeklyScheduleScreen(
                             }
                         )
                         if (result.success) {
-                            wbuSyncStatus = "登录成功，正在获取课表..."
-                            val courses = engine.fetchCourseData(activeTableId)
-                            if (courses != null && courses.isNotEmpty()) {
-                                viewModel.importCourses(courses)
-                                viewModel.applySemesterConfig(engine.fetchSemesterConfig(
-                                    xnxq = engine.lastResolvedXnxq,
-                                    xqdm = engine.lastResolvedXqdm,
-                                ))
-                                wbuSyncStatus = ""
-                                showWbuAuthDialog = false
-                                snackbarHostState.showSuccessSnackbar("课表导入成功！")
-                            } else {
-                                wbuError = "登录成功但未获取到课表数据"
-                            }
+                            performCourseImportPipeline(engine, sid)
                         } else {
                             wbuError = result.message.ifBlank { "动态码登录失败，请检查验证码" }
                         }
@@ -1349,6 +1551,383 @@ fun WeeklyScheduleScreen(
                         sslIssueDeferred = null
                     }
                 ) { Text("取消") }
+            }
+        )
+    }
+
+    // 1. 学期选择对话框
+    semesterSelectDeferred?.let { deferred ->
+        var selectedValue by remember(semesterSelectOptions) {
+            mutableStateOf(semesterSelectOptions.firstOrNull()?.value.orEmpty())
+        }
+        AlertDialog(
+            onDismissRequest = {
+                deferred.complete(null)
+                semesterSelectDeferred = null
+            },
+            title = { Text("选择导入的学年学期") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    semesterSelectOptions.forEach { opt ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedValue = opt.value }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = selectedValue == opt.value,
+                                onClick = { selectedValue = opt.value }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = opt.text,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deferred.complete(selectedValue)
+                        semesterSelectDeferred = null
+                    },
+                    enabled = selectedValue.isNotBlank()
+                ) {
+                    Text("确定")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        deferred.complete(null)
+                        semesterSelectDeferred = null
+                    }
+                ) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    // 2. 学期冲突确认对话框
+    conflictDialogData?.let { (selectedSemester, currentTable) ->
+        AlertDialog(
+            onDismissRequest = {
+                conflictDeferred?.complete(1)
+                conflictDialogData = null
+                conflictDeferred = null
+            },
+            title = { Text("学期不一致提醒") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "您选择导入的学期是【${selectedSemester}】，而当前课表绑定的学期是【${currentTable.semesterCode}】。\n\n如选择覆盖，当前课表内的课程将被清空重写。"
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { conflictAutoRenameChecked = !conflictAutoRenameChecked }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = conflictAutoRenameChecked,
+                            onCheckedChange = { conflictAutoRenameChecked = it }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "自动修改该课表名称",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        conflictDeferred?.complete(2) // Create new
+                        conflictDialogData = null
+                        conflictDeferred = null
+                    }
+                ) {
+                    Text("新建课表")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        onClick = {
+                            conflictDeferred?.complete(1) // Cancel
+                            conflictDialogData = null
+                            conflictDeferred = null
+                        }
+                    ) {
+                        Text("取消")
+                    }
+                    TextButton(
+                        onClick = {
+                            val act = if (conflictAutoRenameChecked) 3 else 4
+                            conflictDeferred?.complete(act)
+                            conflictDialogData = null
+                            conflictDeferred = null
+                        }
+                    ) {
+                        Text("覆盖课表")
+                    }
+                }
+            }
+        )
+    }
+
+    // 2.5 重复课程冲突处理弹窗（多教师/相同课程，移植自 school.js）
+    duplicateCoursesDialogData?.let { dupInfo ->
+        var selectedStrategy by remember(dupInfo) {
+            mutableStateOf(
+                if (dupInfo.hasMultiTeacher) WbuSyncEngine.DuplicateResolveStrategy.MERGE_TEACHERS
+                else WbuSyncEngine.DuplicateResolveStrategy.KEEP_ONE
+            )
+        }
+        val titleText = when {
+            dupInfo.hasIdentical && dupInfo.hasMultiTeacher ->
+                "重复课程处理（${dupInfo.groupCount} 组 / ${dupInfo.totalConflictCourses} 门）"
+            dupInfo.hasMultiTeacher ->
+                "多教师重复课程处理（${dupInfo.groupCount} 组 / ${dupInfo.totalConflictCourses} 门）"
+            else ->
+                "完全相同的重复课程处理（${dupInfo.groupCount} 组 / ${dupInfo.totalConflictCourses} 门）"
+        }
+
+        AlertDialog(
+            onDismissRequest = {
+                duplicateCoursesDeferred?.complete(null)
+                duplicateCoursesDialogData = null
+                duplicateCoursesDeferred = null
+            },
+            title = { Text(titleText) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "检测到部分课程在同一时间、地点被分为多条记录。请选择处理方式：",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+
+                    if (dupInfo.hasMultiTeacher) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedStrategy = WbuSyncEngine.DuplicateResolveStrategy.MERGE_TEACHERS }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = selectedStrategy == WbuSyncEngine.DuplicateResolveStrategy.MERGE_TEACHERS,
+                                onClick = { selectedStrategy = WbuSyncEngine.DuplicateResolveStrategy.MERGE_TEACHERS }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "合并教师（推荐）",
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                Text(
+                                    text = "如：${dupInfo.sampleCourseName} -> ${dupInfo.sampleTeacherSummary}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    if (dupInfo.hasIdentical || !dupInfo.hasMultiTeacher) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedStrategy = WbuSyncEngine.DuplicateResolveStrategy.KEEP_ONE }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = selectedStrategy == WbuSyncEngine.DuplicateResolveStrategy.KEEP_ONE,
+                                onClick = { selectedStrategy = WbuSyncEngine.DuplicateResolveStrategy.KEEP_ONE }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "只保留一门（去重）",
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                Text(
+                                    text = "如：${dupInfo.sampleCourseName} 仅保留一条",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedStrategy = WbuSyncEngine.DuplicateResolveStrategy.KEEP_ALL }
+                            .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = selectedStrategy == WbuSyncEngine.DuplicateResolveStrategy.KEEP_ALL,
+                            onClick = { selectedStrategy = WbuSyncEngine.DuplicateResolveStrategy.KEEP_ALL }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "全部保留（${dupInfo.totalConflictCourses} 门）",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        duplicateCoursesDeferred?.complete(selectedStrategy)
+                        duplicateCoursesDialogData = null
+                        duplicateCoursesDeferred = null
+                    }
+                ) {
+                    Text("确定")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        duplicateCoursesDeferred?.complete(null)
+                        duplicateCoursesDialogData = null
+                        duplicateCoursesDeferred = null
+                    }
+                ) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    // 2.7 学号冲突确认对话框
+    studentIdConflictData?.let { (currSid, newSid) ->
+        AlertDialog(
+            onDismissRequest = {
+                studentIdConflictDeferred?.complete(1)
+                studentIdConflictData = null
+                studentIdConflictDeferred = null
+            },
+            title = { Text(stringResource(R.string.title_student_id_conflict)) },
+            text = {
+                Text(
+                    text = stringResource(R.string.msg_student_id_conflict, currSid, newSid),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        studentIdConflictDeferred?.complete(2) // 新建独立课表
+                        studentIdConflictData = null
+                        studentIdConflictDeferred = null
+                    }
+                ) {
+                    Text(stringResource(R.string.action_create_new_table_recommend))
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        onClick = {
+                            studentIdConflictDeferred?.complete(1) // 取消
+                            studentIdConflictData = null
+                            studentIdConflictDeferred = null
+                        }
+                    ) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
+                    TextButton(
+                        onClick = {
+                            studentIdConflictDeferred?.complete(3) // 执意覆盖
+                            studentIdConflictData = null
+                            studentIdConflictDeferred = null
+                        }
+                    ) {
+                        Text(stringResource(R.string.action_overwrite_anyway))
+                    }
+                }
+            }
+        )
+    }
+
+    // 3. 教务系统发布新学期提示对话框
+    newSemesterPromptXnxq?.let { newXnxq ->
+        AlertDialog(
+            onDismissRequest = {
+                newSemesterPromptXnxq = null
+                newSemesterPromptEngine = null
+            },
+            title = { Text("发现新学期课表") },
+            text = {
+                Text("教务系统当前已有新学期【$newXnxq】的课表。是否立即导入并新建该学期课表？")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val engine = newSemesterPromptEngine
+                        val xnxqToImport = newXnxq
+                        newSemesterPromptXnxq = null
+                        newSemesterPromptEngine = null
+                        if (engine != null) {
+                            coroutineScope.launch {
+                                try {
+                                    val sid = engine.lastResolvedStudentId ?: WbuSyncEngine.getSavedStudentId(appContext)
+                                    val currentAllTables = viewModel.getAllCourseTables()
+                                    val newName = computeNonConflictingTableName(xnxqToImport, sid, currentAllTables)
+                                    val newTable = viewModel.createAndSwitchTable(
+                                        name = newName,
+                                        studentId = sid,
+                                        semesterCode = xnxqToImport
+                                    )
+                                    val courses = engine.fetchCourseData(newTable.id, xnxqToImport)
+                                    if (!courses.isNullOrEmpty()) {
+                                        viewModel.importCourses(courses, targetTableId = newTable.id)
+                                        val cfg = engine.fetchSemesterConfig(xnxq = xnxqToImport, xqdm = engine.lastResolvedXqdm)
+                                        viewModel.applySemesterConfig(cfg, targetTableId = newTable.id)
+                                        snackbarHostState.showSuccessSnackbar("新学期课表已导入！")
+                                    } else {
+                                        snackbarHostState.showSnackbar("新学期暂无课程数据")
+                                    }
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar("新学期导入失败: ${e.message}")
+                                }
+                            }
+                        }
+                    }
+                ) {
+                    Text("立即导入新建")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        newSemesterPromptXnxq = null
+                        newSemesterPromptEngine = null
+                    }
+                ) {
+                    Text("稍后再说")
+                }
             }
         )
     }

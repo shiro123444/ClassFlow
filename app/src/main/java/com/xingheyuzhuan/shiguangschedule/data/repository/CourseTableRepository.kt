@@ -34,6 +34,10 @@ class CourseTableRepository @Inject constructor(
         return courseTableDao.getAllCourseTables()
     }
 
+    suspend fun getCourseTableById(tableId: String): CourseTable? {
+        return courseTableDao.getCourseTableById(tableId)
+    }
+
     /**
      * 获取指定课表ID的完整课程（包含周数）。
      */
@@ -48,11 +52,19 @@ class CourseTableRepository @Inject constructor(
      * @param name 新课表的名称
      */
     @Transaction
-    suspend fun createNewCourseTable(name: String) {
+    suspend fun createNewCourseTable(
+        name: String,
+        studentId: String? = null,
+        semesterCode: String? = null,
+        isArchived: Boolean = false
+    ): CourseTable {
         val newTable = CourseTable(
             id = UUID.randomUUID().toString(),
             name = name,
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            studentId = studentId,
+            semesterCode = semesterCode,
+            isArchived = isArchived
         )
         courseTableDao.insert(newTable)
 
@@ -66,6 +78,7 @@ class CourseTableRepository @Inject constructor(
         // 3. 插入默认课表配置
         val newConfig = CourseTableConfig(courseTableId = newTable.id)
         appSettingsRepository.insertOrUpdateCourseConfig(newConfig)
+        return newTable
     }
 
     /**
