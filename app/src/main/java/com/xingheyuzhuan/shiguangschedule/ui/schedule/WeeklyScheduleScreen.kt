@@ -771,11 +771,12 @@ fun WeeklyScheduleScreen(
             }
         }
 
-        val startQrFlow: () -> Unit = {
+        val startQrFlow: (Boolean) -> Unit = { useVpn ->
             wbuError = ""
             qrJob?.cancel()
-            val engine = WbuSyncEngine(context = appContext, useVpn = wbuInitialUseVpn)
+            val engine = WbuSyncEngine(context = appContext, useVpn = useVpn)
             activeAuthEngine = engine
+            activeVpnEngine = engine
             wbuQrState = QrUiState(qrContent = null, phase = QrPhase.GENERATING, statusText = "正在获取二维码...")
             coroutineScope.launch {
                 val session = engine.startQrLogin("QR")
@@ -796,10 +797,39 @@ fun WeeklyScheduleScreen(
                                 try {
                                     val activeTableId = viewModel.uiState.value.tableId
                                     wbuSyncStatus = "登录成功，正在获取课表..."
-                                    if (engine.completeQrLogin(session, "QR") && activeTableId != null) {
+                                    val qrOk = engine.completeQrLogin(
+                                        session = session,
+                                        flowTag = "QR",
+                                        vpnPasswordProvider = {
+                                            val d = CompletableDeferred<String?>()
+                                            withContext(Dispatchers.Main) {
+                                                vpnPasswordError = null
+                                                vpnPasswordDeferred = d
+                                            }
+                                            d.await()
+                                        },
+                                        smsCodeProvider = { maskedPhone, isStillValid, sendInterval, promptText ->
+                                            val deferred = CompletableDeferred<String?>()
+                                            withContext(Dispatchers.Main) {
+                                                smsError = null
+                                                smsVerifying = false
+                                                smsDeferred = deferred
+                                                smsDialogPhone = maskedPhone
+                                                smsDialogIsStillValid = isStillValid
+                                                smsDialogSendInterval = sendInterval
+                                                smsDialogPromptText = promptText
+                                            }
+                                            deferred.await()
+                                        }
+                                    )
+                                    if (qrOk && activeTableId != null) {
                                         val courses = engine.fetchCourseData(activeTableId)
                                         if (courses != null && courses.isNotEmpty()) {
                                             viewModel.importCourses(courses)
+                                            viewModel.applySemesterConfig(engine.fetchSemesterConfig(
+                                                xnxq = engine.lastResolvedXnxq,
+                                                xqdm = engine.lastResolvedXqdm,
+                                            ))
                                             wbuSyncStatus = ""
                                             showWbuAuthDialog = false
                                             snackbarHostState.showSuccessSnackbar("课表导入成功！")
@@ -807,7 +837,7 @@ fun WeeklyScheduleScreen(
                                             wbuError = "登录成功但未获取到课表数据"
                                         }
                                     } else {
-                                        wbuError = "扫码登录失败，请重试"
+                                        wbuError = engine.lastLocalLoginError?.takeIf { it.isNotBlank() } ?: "扫码登录失败，请重试"
                                         wbuQrState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = "登录失败，点二维码重试")
                                     }
                                 } finally {
@@ -849,8 +879,12 @@ fun WeeklyScheduleScreen(
                     wbuQrState = null
                 } else if (wbuQrState == null) {
                     // 选中二维码即自动尝试生成
-                    startQrFlow()
+                    startQrFlow(wbuInitialUseVpn)
                 }
+            },
+            onUseVpnChange = {
+                wbuInitialUseVpn = it
+                WbuSyncEngine.setSavedUseVpn(appContext, it)
             },
             qrState = wbuQrState,
             onPasswordLogin = { studentId, password, useVpn, authMode ->
@@ -1023,9 +1057,10 @@ fun WeeklyScheduleScreen(
                     }
                 }
             },
-            onSendDynamicCode = { sid ->
-                val engine = WbuSyncEngine(context = appContext, useVpn = wbuInitialUseVpn)
+            onSendDynamicCode = { sid, useVpn ->
+                val engine = WbuSyncEngine(context = appContext, useVpn = useVpn)
                 activeAuthEngine = engine
+                activeVpnEngine = engine
                 val result = engine.sendDynamicCode(
                     sid.trim(), "DYNAMIC",
                     captchaProvider = { captcha ->
@@ -1047,7 +1082,14 @@ fun WeeklyScheduleScreen(
                     try {
                         val activeTableId = viewModel.uiState.value.tableId ?: return@launch
                         if (!confirmCampusIfDirect(useVpn)) return@launch
-                        val engine = activeAuthEngine ?: WbuSyncEngine(context = appContext, useVpn = useVpn)
+                        val engine = if (activeAuthEngine?.useVpn == useVpn) {
+                            activeAuthEngine!!
+                        } else {
+                            val newEngine = WbuSyncEngine(context = appContext, useVpn = useVpn)
+                            activeAuthEngine = newEngine
+                            newEngine
+                        }
+                        activeVpnEngine = engine
                         // 没有现成 prep 时（用户直接填已有验证码）临时取表单参数
                         val prep = dynamicPrep ?: engine.obtainDynamicCodeForm("DYNAMIC")
                         if (prep == null) {
@@ -1055,7 +1097,30 @@ fun WeeklyScheduleScreen(
                             return@launch
                         }
                         wbuSyncStatus = "正在登录..."
-                        val result = engine.dynamicCodeLogin(sid.trim(), code, prep, "DYNAMIC")
+                        val result = engine.dynamicCodeLogin(
+                            sid.trim(), code, prep, "DYNAMIC",
+                            vpnPasswordProvider = {
+                                val d = CompletableDeferred<String?>()
+                                withContext(Dispatchers.Main) {
+                                    vpnPasswordError = null
+                                    vpnPasswordDeferred = d
+                                }
+                                d.await()
+                            },
+                            smsCodeProvider = { maskedPhone, isStillValid, sendInterval, promptText ->
+                                val deferred = CompletableDeferred<String?>()
+                                withContext(Dispatchers.Main) {
+                                    smsError = null
+                                    smsVerifying = false
+                                    smsDeferred = deferred
+                                    smsDialogPhone = maskedPhone
+                                    smsDialogIsStillValid = isStillValid
+                                    smsDialogSendInterval = sendInterval
+                                    smsDialogPromptText = promptText
+                                }
+                                deferred.await()
+                            }
+                        )
                         if (result.success) {
                             wbuSyncStatus = "登录成功，正在获取课表..."
                             val courses = engine.fetchCourseData(activeTableId)
@@ -1082,8 +1147,8 @@ fun WeeklyScheduleScreen(
                     }
                 }
             },
-            onStartQr = startQrFlow,
-            onRefreshQr = startQrFlow
+            onStartQr = { useVpn -> startQrFlow(useVpn) },
+            onRefreshQr = { useVpn -> startQrFlow(useVpn) }
         )
     }
 

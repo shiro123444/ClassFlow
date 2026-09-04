@@ -144,7 +144,7 @@ typealias SliderCaptchaProvider = suspend (SliderCaptchaData) -> SliderCaptchaRe
  */
 class WbuSyncEngine(
     private val context: Context,
-    private val useVpn: Boolean = false,
+    val useVpn: Boolean = false,
 ) {
     private val transport = WbuAuthTransport(context, useVpn)
     private val portal = WebVpnClient(transport)
@@ -154,6 +154,12 @@ class WbuSyncEngine(
     private val baseUrl = transport.jwxtBase
     private val cookieStore = transport.cookieStore
     private val prefs = transport.prefs
+
+    /**
+     * 最近一次解析出的学生学号。
+     */
+    @Volatile
+    var lastResolvedStudentId: String? = null
 
     /**
      * 最近一次教务系统直连/镜像表单登录的失败原因（供 UI 判断）。
@@ -248,17 +254,128 @@ class WbuSyncEngine(
         captchaProvider: SliderCaptchaProvider?
     ): DynamicCodeSendResult = cas.sendDynamicCode(studentId, flowTag, captchaProvider)
 
-    /** 仅获取动态码登录表单参数。 */
-    suspend fun obtainDynamicCodeForm(flowTag: String): AuthForm? = cas.obtainDynamicCodeForm(flowTag)
+    /**
+     * 确保 WebVPN 网关隧道处于放行状态：
+     * 1. 优先校验 TWFID（手动配置或已存在的会话凭据）；
+     * 2. 若 TWFID 有效，直接放行（免密）；
+     * 3. 若 TWFID 无效或缺失，直接调用 [vpnPasswordProvider] 弹窗索取 WebVPN/统一认证密码打通门禁（支持短信二次验证）。
+     */
+    suspend fun ensureVpnTunnelReady(
+        studentId: String,
+        vpnPasswordProvider: suspend () -> String?,
+        smsCodeProvider: (suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?)? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (!useVpn) return@withContext true
 
-    /** 用动态码完成登录（含教务会话引导）。 */
+        // 1. 优先校验手动/已有 TWFID
+        val currentTwfid = transport.currentTwfid().trim().ifEmpty {
+            cookieStore.firstOrNull { it.name == "TWFID" && it.value.isNotBlank() }?.value.orEmpty()
+        }
+        if (currentTwfid.isNotEmpty()) {
+            if (portal.validateTwfid(currentTwfid)) {
+                Log.i("WbuSyncEngine", "ensureVpnTunnelReady: Valid TWFID present, skip WebVPN portal login")
+                portal.injectTwfid(currentTwfid)
+                return@withContext true
+            } else {
+                Log.w("WbuSyncEngine", "ensureVpnTunnelReady: Existing TWFID invalid, clearing and prompting for password")
+                WbuAuthTransport.clearTwfid(context)
+                portal.removeTwfidCookie()
+            }
+        }
+
+        // 2. 无有效 TWFID，直接弹窗请求密码
+        val vpnPassword = vpnPasswordProvider()
+        if (vpnPassword.isNullOrBlank()) {
+            lastLocalLoginError = "已取消 WebVPN 密码输入"
+            return@withContext false
+        }
+
+        val effectiveSid = studentId.ifBlank { lastResolvedStudentId ?: getSavedStudentId(context) }
+        val portalStep = portal.portalPasswordLogin(effectiveSid, vpnPassword)
+        when (portalStep) {
+            is PortalLoginStep.Error -> {
+                Log.w("WbuSyncEngine", "WebVPN portal login failed: ${portalStep.message}")
+                lastLocalLoginError = "WebVPN 登录失败: ${portalStep.message}"
+                false
+            }
+            is PortalLoginStep.SmsRequired -> {
+                if (smsCodeProvider == null) {
+                    lastLocalLoginError = "WebVPN 需要短信验证码"
+                    return@withContext false
+                }
+                val code = smsCodeProvider(portalStep.maskedPhone, portalStep.isStillValid, portalStep.sendInterval, portalStep.promptText)
+                if (code.isNullOrBlank()) {
+                    lastLocalLoginError = "已取消 WebVPN 短信验证码输入"
+                    return@withContext false
+                }
+                if (!portal.portalSubmitSms(code)) {
+                    lastLocalLoginError = "WebVPN 短信验证码错误"
+                    return@withContext false
+                }
+                true
+            }
+            is PortalLoginStep.PortalAuthenticated -> {
+                Log.i("WbuSyncEngine", "WebVPN portal authenticated successfully")
+                true
+            }
+        }
+    }
+
+    /**
+     * 凭当前会话中已有的 CASTGC 向 CAS 请求教务系统 Ticket 并跟随重定向完成换票。
+     * WebVPN 模式下会将 302 Location 改写为代理宿主，由 WebVPN 隧道代理至教务系统确立会话。
+     */
+    suspend fun exchangeCastgcForJwxtSession(flowTag: String): Boolean = withContext(Dispatchers.IO) {
+        val serviceTarget = if (WbuAuthTransport.getUseFixedServiceForTicket(context)) {
+            WbuAuthTransport.IDS_PERSON_CENTER_SERVICE
+        } else {
+            "https://jwxt.wbu.edu.cn/admin/caslogin"
+        }
+        val encodedService = URLEncoder.encode(serviceTarget, "UTF-8")
+        val idsLoginUrl = "${transport.idsBase()}/authserver/login?service=$encodedService"
+        Log.i("WbuSyncEngine", "$flowTag 开始使用 CASTGC 换取教务 Ticket: $idsLoginUrl")
+
+        // 仅在已有 CASTGC 时换票；clearAuthCookies = false 保留凭据，consumeTicket = true 跟随并核销 ticket
+        val casResult = cas.casPasswordLogin(
+            studentId = "",
+            password = "",
+            idsLoginUrl = idsLoginUrl,
+            flowTag = flowTag,
+            clearAuthCookies = false,
+            consumeTicket = true
+        )
+        if (!casResult.success) {
+            Log.w("WbuSyncEngine", "$flowTag CASTGC 换票失败: ${casResult.message}")
+            lastLocalLoginFailure = casResult.failure
+            lastLocalLoginError = casResult.message
+            return@withContext false
+        }
+        bootstrapJwxtSession(casResult.landingHtml)
+    }
+
+    /** 仅获取动态码登录表单参数。 */
+    suspend fun obtainDynamicCodeForm(flowTag: String): AuthForm? =
+        cas.obtainDynamicCodeForm(flowTag, if (useVpn) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null)
+
+    /** 用动态码完成登录（含教务会话引导与 WebVPN 门禁就绪检测）。 */
     suspend fun dynamicCodeLogin(
         studentId: String,
         code: String,
         prep: AuthForm,
-        flowTag: String
+        flowTag: String,
+        vpnPasswordProvider: (suspend () -> String?)? = null,
+        smsCodeProvider: (suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?)? = null
     ): DynamicCodeLoginResult = withContext(Dispatchers.IO) {
-        val result = cas.casDynamicCodeLogin(studentId, code, prep, flowTag)
+        // WebVPN 模式下：登录 IDS 时严格使用同源个人中心 service 且不跳转消费，防止未建网关时提前 302 撞入教务
+        val idsTarget = if (useVpn) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null
+        val result = cas.casDynamicCodeLogin(
+            studentId = studentId,
+            code = code,
+            prep = prep,
+            flowTag = flowTag,
+            serviceTarget = idsTarget,
+            consumeTicket = !useVpn
+        )
         if (result.success) {
             prefs.edit()
                 .putString(WbuAuthTransport.prefKeyLastStudentId(), studentId)
@@ -266,30 +383,68 @@ class WbuSyncEngine(
                 .putBoolean(KEY_LAST_USE_VPN_SET, true)
                 .apply()
             transport.persistCookieStore()
-            val boot = bootstrapJwxtSession()
-            DynamicCodeLoginResult(boot, if (boot) "" else "登录成功但教务系统会话未就绪")
+
+            if (useVpn) {
+                if (vpnPasswordProvider != null) {
+                    val vpnReady = ensureVpnTunnelReady(studentId, vpnPasswordProvider, smsCodeProvider)
+                    if (!vpnReady) {
+                        return@withContext DynamicCodeLoginResult(false, lastLocalLoginError ?: "WebVPN 门禁连接失败")
+                    }
+                }
+                // WebVPN 网关打通后，凭新鲜的 CASTGC 请求 jwxt service 换票并建立教务会话
+                val exchangeOk = exchangeCastgcForJwxtSession("$flowTag-EXCHANGE")
+                DynamicCodeLoginResult(exchangeOk, if (exchangeOk) "" else (lastLocalLoginError ?: "换取教务会话失败"))
+            } else {
+                val boot = bootstrapJwxtSession(result.landingHtml)
+                DynamicCodeLoginResult(boot, if (boot) "" else "登录成功但教务系统会话未就绪")
+            }
         } else {
             DynamicCodeLoginResult(false, result.message)
         }
     }
 
     /** 开始二维码登录。 */
-    suspend fun startQrLogin(flowTag: String): QrSession? = cas.startQrLogin(flowTag)
+    suspend fun startQrLogin(flowTag: String): QrSession? =
+        cas.startQrLogin(flowTag, if (useVpn) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null)
 
     /** 轮询二维码状态。 */
     suspend fun pollQrStatus(session: QrSession): QrStatus = cas.pollQrStatus(session)
 
-    /** 扫码确认后完成登录（含教务会话引导）。 */
-    suspend fun completeQrLogin(session: QrSession, flowTag: String): Boolean = withContext(Dispatchers.IO) {
-        val result = cas.casCompleteQrLogin(session)
+    /** 扫码确认后完成登录（含教务会话引导与 WebVPN 门禁就绪检测）。 */
+    suspend fun completeQrLogin(
+        session: QrSession,
+        flowTag: String,
+        vpnPasswordProvider: (suspend () -> String?)? = null,
+        smsCodeProvider: (suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?)? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        // WebVPN 模式下：登录 IDS 时严格使用同源个人中心 service 且不跳转消费
+        val idsTarget = if (useVpn) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null
+        val result = cas.casCompleteQrLogin(session, serviceTarget = idsTarget, consumeTicket = !useVpn)
         if (result.success) {
+            // 获取真实学号始终使用个人中心同源 service
+            val resolvedSid = cas.fetchStudentIdFromCas()
+            if (!resolvedSid.isNullOrBlank()) {
+                lastResolvedStudentId = resolvedSid
+                prefs.edit().putString(WbuAuthTransport.prefKeyLastStudentId(), resolvedSid).apply()
+            }
             prefs.edit()
-                .putString(WbuAuthTransport.prefKeyLastStudentId(), "")
                 .putBoolean(KEY_LAST_USE_VPN, useVpn)
                 .putBoolean(KEY_LAST_USE_VPN_SET, true)
                 .apply()
             transport.persistCookieStore()
-            bootstrapJwxtSession()
+
+            if (useVpn) {
+                if (vpnPasswordProvider != null) {
+                    val vpnReady = ensureVpnTunnelReady(resolvedSid.orEmpty(), vpnPasswordProvider, smsCodeProvider)
+                    if (!vpnReady) {
+                        return@withContext false
+                    }
+                }
+                // WebVPN 网关打通后，凭新鲜的 CASTGC 请求 jwxt service 换票并建立教务会话
+                exchangeCastgcForJwxtSession("$flowTag-EXCHANGE")
+            } else {
+                bootstrapJwxtSession(result.landingHtml)
+            }
         } else {
             false
         }
@@ -387,7 +542,16 @@ class WbuSyncEngine(
                 statusCallback?.invoke(VpnFullLoginStatus.VPN_AUTHENTICATED)
             }
         }
-        return vpnLoginTail(vpnStudentId, password, captchaProvider, authMode, statusCallback)
+        val ok = vpnLoginTail(vpnStudentId, password, captchaProvider, authMode, statusCallback)
+        if (ok) {
+            prefs.edit()
+                .putString(WbuAuthTransport.prefKeyLastStudentId(), vpnStudentId)
+                .putBoolean(KEY_LAST_USE_VPN, true)
+                .putBoolean(KEY_LAST_USE_VPN_SET, true)
+                .apply()
+            transport.persistCookieStore()
+        }
+        return ok
     }
 
     /**
@@ -1182,6 +1346,7 @@ class WbuSyncEngine(
 
         fun hasPersistedSession(context: Context): Boolean = WbuAuthTransport.hasPersistedSession(context)
         fun getSavedUseVpn(context: Context): Boolean? = WbuAuthTransport.getSavedUseVpn(context)
+        fun setSavedUseVpn(context: Context, enabled: Boolean) = WbuAuthTransport.setSavedUseVpn(context, enabled)
         fun getSavedStudentId(context: Context): String = WbuAuthTransport.getSavedStudentId(context)
 
         fun isSimplifiedChinese(context: Context): Boolean = WbuAuthTransport.isSimplifiedChinese(context)

@@ -154,7 +154,12 @@ internal class IdsCasClient(
                     // 最终非 30x 落地响应
                     if (finalUrlStaysOnLogin(currentUrl)) {
                         Log.w("IdsCasClient", "$flowTag CAS redirect landed back on login. url=$currentUrl")
-                        return@withContext CasPasswordLoginResult(false, extractCasError(body).ifBlank { "登录失败，请重试" }, LocalLoginFailure.CREDENTIALS)
+                        val err = if (currentUrl.contains("/por/")) {
+                            "WebVPN 未授权或会话已失效"
+                        } else {
+                            extractCasError(body).ifBlank { "登录失败，请重试" }
+                        }
+                        return@withContext CasPasswordLoginResult(false, err, LocalLoginFailure.CREDENTIALS)
                     } else {
                         return@withContext CasPasswordLoginResult(success = true, landingUrl = currentUrl, landingHtml = body)
                     }
@@ -167,7 +172,8 @@ internal class IdsCasClient(
             }
         }
 
-    private fun finalUrlStaysOnLogin(url: String): Boolean = url.contains("/authserver/login")
+    private fun finalUrlStaysOnLogin(url: String): Boolean =
+        url.contains("/authserver/login") || url.contains("/por/login") || url.contains("/por/")
 
     data class CasLoginPage(
         val hiddenFields: Map<String, String>,
@@ -525,9 +531,10 @@ internal class IdsCasClient(
     }
 
     /** 仅获取动态码登录表单参数，不发短信。 */
-    suspend fun obtainDynamicCodeForm(flowTag: String): AuthForm? = withContext(Dispatchers.IO) {
+    suspend fun obtainDynamicCodeForm(flowTag: String, serviceTarget: String? = null): AuthForm? = withContext(Dispatchers.IO) {
         val authBase = transport.idsBase()
-        val service = URLEncoder.encode(transport.casServiceTarget, "UTF-8")
+        val target = serviceTarget ?: transport.casServiceTarget
+        val service = URLEncoder.encode(target, "UTF-8")
         fetchLoginForm("$authBase/authserver/login?service=$service", "phoneFromId")
     }
 
@@ -536,10 +543,13 @@ internal class IdsCasClient(
         studentId: String,
         code: String,
         prep: AuthForm,
-        flowTag: String
+        flowTag: String,
+        serviceTarget: String? = null,
+        consumeTicket: Boolean = true
     ): CasPasswordLoginResult = withContext(Dispatchers.IO) {
         val authBase = transport.idsBase()
-        val service = URLEncoder.encode(transport.casServiceTarget, "UTF-8")
+        val target = serviceTarget ?: transport.casServiceTarget
+        val service = URLEncoder.encode(target, "UTF-8")
         val postUrl = "$authBase/authserver/login?service=$service"
         val formBuilder = FormBody.Builder()
             .add("username", studentId)
@@ -560,7 +570,7 @@ internal class IdsCasClient(
             .build()
 
         try {
-            postCasFormManualFollow(loginReq, flowTag)
+            postCasFormManualFollow(loginReq, flowTag, consumeTicket = consumeTicket)
         } catch (e: Exception) {
             Log.e("IdsCasClient", "$flowTag dynamicCode login exception", e)
             CasPasswordLoginResult(false, "网络异常: ${e.message}", LocalLoginFailure.CREDENTIALS)
@@ -570,10 +580,11 @@ internal class IdsCasClient(
     // ------------------- 二维码 -------------------
 
     /** 开始二维码登录：解析 qr 登录页 → 获取 uuid → 生成二维码内容。 */
-    suspend fun startQrLogin(flowTag: String): QrSession? = withContext(Dispatchers.IO) {
+    suspend fun startQrLogin(flowTag: String, serviceTarget: String? = null): QrSession? = withContext(Dispatchers.IO) {
         runCatching {
             val authBase = transport.qrBase()
-            val service = URLEncoder.encode(transport.casServiceTarget, "UTF-8")
+            val target = serviceTarget ?: transport.casServiceTarget
+            val service = URLEncoder.encode(target, "UTF-8")
             val qrPageUrl = "$authBase/authserver/login?type=qrcode&service=$service"
             val form = fetchLoginForm(qrPageUrl, "qrLoginForm") ?: run {
                 Log.w("IdsCasClient", "$flowTag qr: cannot parse login form")
@@ -621,8 +632,13 @@ internal class IdsCasClient(
     }
 
     /** 手机扫码确认后提交登录（返回是否已离开登录页）。教务 bootstrap 由调用方负责。 */
-    suspend fun casCompleteQrLogin(session: QrSession): CasPasswordLoginResult = withContext(Dispatchers.IO) {
-        val service = URLEncoder.encode(transport.casServiceTarget, "UTF-8")
+    suspend fun casCompleteQrLogin(
+        session: QrSession,
+        serviceTarget: String? = null,
+        consumeTicket: Boolean = true
+    ): CasPasswordLoginResult = withContext(Dispatchers.IO) {
+        val target = serviceTarget ?: transport.casServiceTarget
+        val service = URLEncoder.encode(target, "UTF-8")
         val postUrl = "${session.authBaseUrl}/authserver/login?display=qrLogin&service=$service"
         val form = FormBody.Builder()
             .add("lt", session.lt)
@@ -642,7 +658,7 @@ internal class IdsCasClient(
             .build()
 
         try {
-            postCasFormManualFollow(loginReq, "QR")
+            postCasFormManualFollow(loginReq, "QR", consumeTicket = consumeTicket)
         } catch (e: Exception) {
             Log.e("IdsCasClient", "qr login exception", e)
             CasPasswordLoginResult(false, "网络异常: ${e.message}", LocalLoginFailure.CREDENTIALS)
@@ -742,8 +758,12 @@ internal class IdsCasClient(
     /**
      * 通过 CAS 协议从 ids 获取当前会话登录用户的真实学号（参考 webvpn_notes.md §九）。
      * 无论用户使用学号、工号还是别名登录，<cas:user> 永远是标准学号。
+     * 固定使用个人中心 service，绝不接触教务系统地址。
      */
-    suspend fun fetchStudentIdFromCas(idsBaseUrl: String, serviceUrl: String): String? = withContext(Dispatchers.IO) {
+    suspend fun fetchStudentIdFromCas(
+        idsBaseUrl: String = transport.idsBase(),
+        serviceUrl: String = WbuAuthTransport.IDS_PERSON_CENTER_SERVICE
+    ): String? = withContext(Dispatchers.IO) {
         runCatching {
             val encodedService = URLEncoder.encode(serviceUrl, "UTF-8")
             val loginCheckUrl = "$idsBaseUrl/authserver/login?service=$encodedService"

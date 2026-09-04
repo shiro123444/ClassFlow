@@ -138,11 +138,12 @@ fun WbuAuthBottomSheet(
     onDismissRequest: () -> Unit,
     onPasswordLogin: (String, String, Boolean, WbuAuthMode) -> Unit,
     onDynamicCodeLogin: (String, String, Boolean) -> Unit,
-    onSendDynamicCode: suspend (String) -> DynamicCodeSendResult,
-    onStartQr: () -> Unit,
-    onRefreshQr: () -> Unit,
+    onSendDynamicCode: suspend (String, Boolean) -> DynamicCodeSendResult,
+    onStartQr: (Boolean) -> Unit,
+    onRefreshQr: (Boolean) -> Unit,
     method: WbuLoginMethod = WbuLoginMethod.PASSWORD,
     onMethodChange: (WbuLoginMethod) -> Unit,
+    onUseVpnChange: (Boolean) -> Unit = {},
     qrState: QrUiState? = null,
     isLoading: Boolean = false,
     statusMessage: String = "",
@@ -230,7 +231,7 @@ fun WbuAuthBottomSheet(
         scope.launch {
             dynamicSendError = ""
             sendingCode = true
-            val result = runCatching { onSendDynamicCode(studentId.trim()) }
+            val result = runCatching { onSendDynamicCode(studentId.trim(), useVpn) }
                 .getOrElse { DynamicCodeSendResult.Failure("发送失败，请重试") }
             sendingCode = false
             when (result) {
@@ -377,7 +378,7 @@ fun WbuAuthBottomSheet(
 
                 WbuLoginMethod.QR -> QrInput(
                     qrState = qrState,
-                    onRefreshQr = onRefreshQr
+                    onRefreshQr = { onRefreshQr(useVpn) }
                 )
             }
 
@@ -419,7 +420,13 @@ fun WbuAuthBottomSheet(
                     }
                     Switch(
                         checked = useVpn,
-                        onCheckedChange = { useVpn = it },
+                        onCheckedChange = {
+                            useVpn = it
+                            onUseVpnChange(it)
+                            if (method == WbuLoginMethod.QR) {
+                                onRefreshQr(it)
+                            }
+                        },
                         enabled = !isLoading
                     )
                 }
@@ -458,7 +465,7 @@ fun WbuAuthBottomSheet(
                         QrPhase.PLACEHOLDER -> "生成二维码"
                         else -> "处理中..."
                     }
-                    Triple(label, !busy, { onStartQr() })
+                    Triple(label, !busy, { onStartQr(useVpn) })
                 }
             }
             Button(

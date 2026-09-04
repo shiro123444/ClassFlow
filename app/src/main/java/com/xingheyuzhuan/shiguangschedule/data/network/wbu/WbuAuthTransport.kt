@@ -211,8 +211,13 @@ internal class WbuAuthTransport(
 
     private val idsPublicBase: String = "http://ids.wbu.edu.cn"
 
-    /** 统一认证(CAS) service 目标。 */
-    val casServiceTarget: String = "https://jwxt.wbu.edu.cn/admin/caslogin"
+    /** 统一认证(CAS) service 目标：支持通过「使用固定service获取ticket」开关定制。 */
+    val casServiceTarget: String
+        get() = if (getUseFixedServiceForTicket(context)) {
+            IDS_PERSON_CENTER_SERVICE
+        } else {
+            "https://jwxt.wbu.edu.cn/admin/caslogin"
+        }
 
     private fun useHttpsWebVpn(): Boolean = getUseHttpsWebVpn(context)
 
@@ -632,6 +637,14 @@ internal class WbuAuthTransport(
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             if (!prefs.getBoolean(KEY_LAST_USE_VPN_SET, false)) return null
             return prefs.getBoolean(KEY_LAST_USE_VPN, false)
+        }
+
+        fun setSavedUseVpn(context: Context, enabled: Boolean) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_LAST_USE_VPN, enabled)
+                .putBoolean(KEY_LAST_USE_VPN_SET, true)
+                .apply()
         }
 
         fun getSavedStudentId(context: Context): String =
