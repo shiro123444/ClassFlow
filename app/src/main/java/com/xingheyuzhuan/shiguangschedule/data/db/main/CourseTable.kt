@@ -12,5 +12,8 @@ data class CourseTable(
     @PrimaryKey
     val id: String, // 使用 String 作为主键，与现有逻辑兼容
     val name: String, // 课表名称
-    val createdAt: Long // 创建时间戳，有助于排序
+    val createdAt: Long, // 创建时间戳，有助于排序
+    val studentId: String? = null, // 绑定的学号
+    val semesterCode: String? = null, // 绑定的学期代码（例如 "2026-2027-1"）
+    val isArchived: Boolean = false // 是否归档锁定（锁定后禁止网络覆盖）
 )

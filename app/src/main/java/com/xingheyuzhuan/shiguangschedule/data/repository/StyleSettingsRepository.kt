@@ -161,8 +161,8 @@ class StyleSettingsRepository @Inject constructor(
     suspend fun setCourseBlockInnerPadding(paddingDp: Float) = updateStyle { it.copy(course_block_inner_padding_dp = paddingDp) }
     /** 设置透明度 (0.0f - 1.0f) */
     suspend fun setCourseBlockAlpha(alpha: Float) = updateStyle { it.copy(course_block_alpha_float = alpha) }
-    /** 设置毛玻璃预设 (0..2) */
-    suspend fun setGlassPreset(preset: Int) = updateStyle { it.copy(glass_preset = preset.coerceIn(0, 2)) }
+    /** 设置毛玻璃预设 (0..3) */
+    suspend fun setGlassPreset(preset: Int) = updateStyle { it.copy(glass_preset = preset.coerceIn(0, 3)) }
     /** 设置背景遮罩透明度 (0.0..0.8) */
     suspend fun setBackgroundDimAlpha(alpha: Float) = updateStyle { it.copy(background_dim_alpha = alpha.coerceIn(0f, 0.8f)) }
     /** 设置背景缩放 (1.0..3.0) */
@@ -171,6 +171,10 @@ class StyleSettingsRepository @Inject constructor(
     suspend fun setBackgroundOffsetX(offset: Float) = updateStyle { it.copy(background_offset_x = offset.coerceIn(-0.5f, 0.5f)) }
     /** 设置背景垂直偏移比例 (-0.5..0.5) */
     suspend fun setBackgroundOffsetY(offset: Float) = updateStyle { it.copy(background_offset_y = offset.coerceIn(-0.5f, 0.5f)) }
+    /** 设置课程块毛玻璃模糊半径 (DP, 0 = 关闭) */
+    suspend fun setCourseBlockBlurRadius(radiusDp: Float) = updateStyle { it.copy(course_block_blur_radius_dp = radiusDp.coerceIn(0f, 30f)) }
+    /** 设置课程块无色玻璃（放弃课程颜色，使用中性玻璃色） */
+    suspend fun setCourseBlockColorless(colorless: Boolean) = updateStyle { it.copy(course_block_colorless = colorless) }
 
     /** 原子化设置背景缩放与偏移，避免连续写入导致卡顿 */
     suspend fun setBackgroundTransform(scale: Float, offsetX: Float, offsetY: Float) = updateStyle {

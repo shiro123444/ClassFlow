@@ -49,6 +49,8 @@ data class ScheduleGridStyleComposed(
     val backgroundScale: Float,
     val backgroundOffsetX: Float,
     val backgroundOffsetY: Float,
+    val courseBlockBlurRadius: Dp,
+    val courseBlockColorless: Boolean,
 
     // ── 上游同步字段 ──
     val pageTextColor: Color?,
@@ -58,6 +60,10 @@ data class ScheduleGridStyleComposed(
     val borderType: BorderTypeProto,
     val scheduleMode: ScheduleModeProto
 ) {
+    /** 背景遮罩模糊半径：由 0..0.8 的遮罩强度映射到 0..40dp */
+    val backgroundBlurRadius: Dp
+        get() = (backgroundDimAlpha * 50f).dp.coerceAtMost(40.dp)
+
     companion object {
         /**
          * 扩展函数：将数据模型 (Float/Long) 转换为 UI 强类型模型 (Dp/Color)。
@@ -92,6 +98,8 @@ data class ScheduleGridStyleComposed(
                 backgroundOffsetX = this.backgroundOffsetX,
                 backgroundOffsetY = this.backgroundOffsetY,
                 backgroundImagePath = this.backgroundImagePath ?: "",
+                courseBlockBlurRadius = this.courseBlockBlurRadiusDp.dp,
+                courseBlockColorless = this.courseBlockColorless,
                 pageTextColor = this.pageTextColorLong?.let { Color(it.toInt()) },
                 courseTextColor = this.courseTextColorLong?.let { Color(it.toInt()) },
                 textAlignCenterHorizontal = this.textAlignCenterHorizontal,

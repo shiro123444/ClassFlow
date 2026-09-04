@@ -97,6 +97,56 @@ class AppSettingsRepository @Inject constructor(
             prefs[AppSettingsModel.KEY_CUSTOM_LIGHT_PRIMARY] = newSettings.customLightPrimary
             prefs[AppSettingsModel.KEY_CUSTOM_DARK_PRIMARY] = newSettings.customDarkPrimary
             prefs[AppSettingsModel.KEY_USE_SAKURA_TIME_THEME] = newSettings.useSakuraTimeTheme
+            prefs[AppSettingsModel.KEY_AUTO_CHECK_UPDATE] = newSettings.autoCheckUpdate
+            prefs[AppSettingsModel.KEY_LAST_CHECK_UPDATE_TIME] = newSettings.lastCheckUpdateTime
+            prefs[AppSettingsModel.KEY_IGNORED_UPDATE_VERSION] = newSettings.ignoredUpdateVersion
+            prefs[AppSettingsModel.KEY_CUSTOM_UPDATE_API_URL] = newSettings.customUpdateApiUrl
+            prefs[AppSettingsModel.KEY_UPDATE_CHANNEL] = newSettings.updateChannel
+        }
+    }
+
+    /**
+     * 更新当前选择的更新渠道（如 stable, beta, dev）。
+     */
+    suspend fun updateUpdateChannel(channel: String) {
+        dataStore.edit { prefs ->
+            prefs[AppSettingsModel.KEY_UPDATE_CHANNEL] = channel
+        }
+    }
+
+    /**
+     * 更新自定义更新服务器地址。
+     */
+    suspend fun updateCustomUpdateApiUrl(url: String) {
+        dataStore.edit { prefs ->
+            prefs[AppSettingsModel.KEY_CUSTOM_UPDATE_API_URL] = url
+        }
+    }
+
+    /**
+     * 更新自动检查更新开关。
+     */
+    suspend fun updateAutoCheckUpdate(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[AppSettingsModel.KEY_AUTO_CHECK_UPDATE] = enabled
+        }
+    }
+
+    /**
+     * 更新上次检查更新时间。
+     */
+    suspend fun updateLastCheckUpdateTime(timeMs: Long) {
+        dataStore.edit { prefs ->
+            prefs[AppSettingsModel.KEY_LAST_CHECK_UPDATE_TIME] = timeMs
+        }
+    }
+
+    /**
+     * 更新已跳过的版本号。
+     */
+    suspend fun updateIgnoredUpdateVersion(version: String) {
+        dataStore.edit { prefs ->
+            prefs[AppSettingsModel.KEY_IGNORED_UPDATE_VERSION] = version
         }
     }
 

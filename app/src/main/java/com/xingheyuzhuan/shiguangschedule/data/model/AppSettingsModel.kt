@@ -49,6 +49,26 @@ enum class StartScreen(val value: String, val labelRes: Int) {
 }
 
 /**
+ * 更新渠道枚举
+ */
+enum class UpdateChannelType(val channelId: String, val title: String, val description: String) {
+    /** 稳定版（默认） */
+    STABLE("stable", "正式版 (stable)", "推荐所有用户使用，版本稳定可靠"),
+
+    /** 公测版 */
+    BETA("beta", "公测版 (beta)", "优先体验新功能，包含少量灰度特性"),
+
+    /** 开发尝鲜版 */
+    DEV("dev", "开发版 (dev)", "包含最新开发中的预览特性，更新频次最高");
+
+    companion object {
+        fun fromId(id: String?): UpdateChannelType {
+            return entries.find { it.channelId == id } ?: STABLE
+        }
+    }
+}
+
+/**
  * 应用主题模式枚举
  */
 enum class AppThemeMode(val value: String, val labelRes: Int) {
@@ -118,10 +138,25 @@ data class AppSettingsModel(
     val customDarkPrimary: Long = Purple80.toArgb().toLong(),
 
     /** * 是否使用 Sakura 时间色板（早/中/晚自动切换樱花色调）
-     * true: ClassFlow 特色时间主题
+     * true: ClassFlow 特色时间主题（首启默认开启）
      * false: 上游固定主题样式（动态取色或自定义种子色）
      */
-    val useSakuraTimeTheme: Boolean = false,
+    val useSakuraTimeTheme: Boolean = true,
+
+    /** 是否开启自动检查更新 */
+    val autoCheckUpdate: Boolean = true,
+
+    /** 上次自动检查更新的时间戳（毫秒） */
+    val lastCheckUpdateTime: Long = 0L,
+
+    /** 用户选择跳过的更新版本号 */
+    val ignoredUpdateVersion: String = "",
+
+    /** 用户自定义的更新服务器地址（优先级高于 BuildConfig.UPDATE_API_URL） */
+    val customUpdateApiUrl: String = "",
+
+    /** 当前选择的更新渠道（默认 "stable"） */
+    val updateChannel: String = UpdateChannelType.STABLE.channelId,
 ) {
     /**
      * 将 DataStore 的 Key 定义在伴生对象中。
@@ -143,6 +178,11 @@ data class AppSettingsModel(
         val KEY_CUSTOM_LIGHT_PRIMARY = longPreferencesKey("custom_light_primary")
         val KEY_CUSTOM_DARK_PRIMARY = longPreferencesKey("custom_dark_primary")
         val KEY_USE_SAKURA_TIME_THEME = booleanPreferencesKey("use_sakura_time_theme")
+        val KEY_AUTO_CHECK_UPDATE = booleanPreferencesKey("auto_check_update")
+        val KEY_LAST_CHECK_UPDATE_TIME = longPreferencesKey("last_check_update_time")
+        val KEY_IGNORED_UPDATE_VERSION = stringPreferencesKey("ignored_update_version")
+        val KEY_CUSTOM_UPDATE_API_URL = stringPreferencesKey("custom_update_api_url")
+        val KEY_UPDATE_CHANNEL = stringPreferencesKey("update_channel")
 
         /**
          * 从 Preferences 中解析出 AppSettingsModel
@@ -164,6 +204,11 @@ data class AppSettingsModel(
                 customLightPrimary = prefs[KEY_CUSTOM_LIGHT_PRIMARY] ?: d.customLightPrimary,
                 customDarkPrimary = prefs[KEY_CUSTOM_DARK_PRIMARY] ?: d.customDarkPrimary,
                 useSakuraTimeTheme = prefs[KEY_USE_SAKURA_TIME_THEME] ?: d.useSakuraTimeTheme,
+                autoCheckUpdate = prefs[KEY_AUTO_CHECK_UPDATE] ?: d.autoCheckUpdate,
+                lastCheckUpdateTime = prefs[KEY_LAST_CHECK_UPDATE_TIME] ?: d.lastCheckUpdateTime,
+                ignoredUpdateVersion = prefs[KEY_IGNORED_UPDATE_VERSION] ?: d.ignoredUpdateVersion,
+                customUpdateApiUrl = prefs[KEY_CUSTOM_UPDATE_API_URL] ?: d.customUpdateApiUrl,
+                updateChannel = prefs[KEY_UPDATE_CHANNEL] ?: d.updateChannel,
             )
         }
     }

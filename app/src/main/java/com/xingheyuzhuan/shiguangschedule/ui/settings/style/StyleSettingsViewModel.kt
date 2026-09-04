@@ -186,7 +186,9 @@ class StyleSettingsViewModel @Inject constructor(
     }
 
     fun updateAlpha(alpha: Float) = viewModelScope.launch { styleRepository.setCourseBlockAlpha(alpha) }
+    fun updateCourseBlockColorless(colorless: Boolean) = viewModelScope.launch { styleRepository.setCourseBlockColorless(colorless) }
     fun updateGlassPreset(preset: Int) = viewModelScope.launch { styleRepository.setGlassPreset(preset) }
+    fun updateCourseBlockBlurRadius(radius: Float) = viewModelScope.launch { styleRepository.setCourseBlockBlurRadius(radius) }
     fun updateBackgroundDimAlpha(alpha: Float) = viewModelScope.launch { styleRepository.setBackgroundDimAlpha(alpha) }
     fun updateBackgroundScale(scale: Float) = viewModelScope.launch { styleRepository.setBackgroundScale(scale) }
     fun updateBackgroundOffsetX(offset: Float) = viewModelScope.launch { styleRepository.setBackgroundOffsetX(offset) }
@@ -201,23 +203,41 @@ class StyleSettingsViewModel @Inject constructor(
     }
 
     fun applyGlassPreset(preset: Int) = viewModelScope.launch {
-        val safePreset = preset.coerceIn(0, 2)
+        val safePreset = preset.coerceIn(0, 3)
         styleRepository.setGlassPreset(safePreset)
         when (safePreset) {
             0 -> {
-                styleRepository.setCourseBlockAlpha(0.95f)
+                styleRepository.setCourseBlockAlpha(0.5f)
                 styleRepository.setCourseBlockCornerRadius(8f)
-                styleRepository.setBackgroundDimAlpha(0.08f)
+                styleRepository.setCourseBlockInnerPadding(4f)
+                styleRepository.setCourseBlockOuterPadding(3f)
+                styleRepository.setCourseBlockBlurRadius(0f)
+                styleRepository.setBorderType(BorderTypeProto.BORDER_TYPE_NONE)
             }
             1 -> {
-                styleRepository.setCourseBlockAlpha(0.72f)
-                styleRepository.setCourseBlockCornerRadius(16f)
-                styleRepository.setBackgroundDimAlpha(0.2f)
+                styleRepository.setCourseBlockAlpha(0.5f)
+                styleRepository.setCourseBlockCornerRadius(10f)
+                styleRepository.setCourseBlockInnerPadding(7f)
+                styleRepository.setCourseBlockOuterPadding(3f)
+                styleRepository.setCourseBlockBlurRadius(8f)
+                styleRepository.setBorderType(BorderTypeProto.BORDER_TYPE_GLASS)
+            }
+            2 -> {
+                styleRepository.setCourseBlockAlpha(0.62f)
+                styleRepository.setCourseBlockCornerRadius(12f)
+                styleRepository.setCourseBlockInnerPadding(7f)
+                styleRepository.setCourseBlockOuterPadding(3f)
+                styleRepository.setCourseBlockBlurRadius(16f)
+                styleRepository.setBorderType(BorderTypeProto.BORDER_TYPE_GLASS)
             }
             else -> {
-                styleRepository.setCourseBlockAlpha(0.62f)
-                styleRepository.setCourseBlockCornerRadius(20f)
-                styleRepository.setBackgroundDimAlpha(0.32f)
+                // 棱角：圆角 0、无边框、模糊 10、不透明度 50%、内部填充 4、外部间距 1
+                styleRepository.setCourseBlockAlpha(0.5f)
+                styleRepository.setCourseBlockCornerRadius(0f)
+                styleRepository.setCourseBlockBlurRadius(10f)
+                styleRepository.setCourseBlockInnerPadding(4f)
+                styleRepository.setCourseBlockOuterPadding(1f)
+                styleRepository.setBorderType(BorderTypeProto.BORDER_TYPE_NONE)
             }
         }
     }

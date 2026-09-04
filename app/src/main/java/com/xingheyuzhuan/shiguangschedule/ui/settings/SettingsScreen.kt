@@ -34,6 +34,8 @@ import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.Destination
 import com.xingheyuzhuan.shiguangschedule.ui.components.DatePickerModal
 import com.xingheyuzhuan.shiguangschedule.ui.components.DockSafeBottomPadding
+import com.xingheyuzhuan.shiguangschedule.ui.components.NavigationRailWidth
+import com.xingheyuzhuan.shiguangschedule.ui.components.isWideScreen
 import com.xingheyuzhuan.shiguangschedule.ui.components.NativeNumberPicker
 import com.xingheyuzhuan.shiguangschedule.ui.components.OnboardingTargets
 import com.xingheyuzhuan.shiguangschedule.ui.theme.ThemeGradients
@@ -47,7 +49,9 @@ import java.time.format.DateTimeParseException
 fun SettingsScreen(
     navBridge: NavBridge,
     semesterStartDateItemModifier: Modifier = Modifier,
+    manageCourseTablesModifier: Modifier = Modifier,
     forceShowSemesterStartDateCard: Boolean = false,
+    forceScrollToManageTables: Boolean = false,
     onSemesterStartDateSet: (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -91,6 +95,15 @@ fun SettingsScreen(
         }
     }
 
+    LaunchedEffect(forceScrollToManageTables) {
+        if (forceScrollToManageTables) {
+            // LazyColumn 中 index=0 是 Header，index=1 是通用设置，index=2 是高级功能。
+            // 直接将高级功能卡片顶部平滑推到屏幕顶部，管理课表就会居中在屏幕中上方偏下位置
+            kotlinx.coroutines.delay(100)
+            settingsListState.animateScrollToItem(index = 2, scrollOffset = 0)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -99,6 +112,7 @@ fun SettingsScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .padding(start = if (isWideScreen) NavigationRailWidth else 0.dp)
                 .statusBarsPadding()
                 .padding(horizontal = 20.dp),
             state = settingsListState,
@@ -223,6 +237,7 @@ fun SettingsScreen(
                     SettingDivider()
                     // 管理课表设置项
                     SettingTile(
+                        contentHighlightModifier = manageCourseTablesModifier,
                         icon = Icons.Rounded.Book,
                         title = stringResource(R.string.title_manage_course_tables),
                         subtitle = stringResource(R.string.desc_manage_course_tables),
@@ -359,7 +374,7 @@ fun ProfileHeader() {
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
                 Text(
-                    text = "欢迎每一位 wbuer~",
+                    text = "欢迎每一位WBUer~",
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                 )

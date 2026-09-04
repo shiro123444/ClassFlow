@@ -3,6 +3,10 @@ package com.xingheyuzhuan.shiguangschedule.ui.schedule
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xingheyuzhuan.shiguangschedule.R
+import com.xingheyuzhuan.shiguangschedule.data.db.main.Course
+import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTable
+import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTableConfig
+import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWeek
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWithWeeks
 import com.xingheyuzhuan.shiguangschedule.data.db.main.TimeSlot
 import com.xingheyuzhuan.shiguangschedule.data.model.ScheduleGridStyle
@@ -684,8 +688,51 @@ class WeeklyScheduleViewModel @Inject constructor(
         return result
     }
 
-    suspend fun importCourses(courses: List<CourseWithWeeks>) {
-        val currentTableId = _uiState.value.tableId ?: uiState.value.tableId ?: run {
+    suspend fun getTableById(tableId: String): CourseTable? {
+        return courseTableRepository.getCourseTableById(tableId)
+    }
+
+    suspend fun getCourseConfigOnce(tableId: String): CourseTableConfig? {
+        return appSettingsRepository.getCourseConfigOnce(tableId)
+    }
+
+    suspend fun getAllCourseTables(): List<CourseTable> {
+        return courseTableRepository.getAllCourseTables().first()
+    }
+
+    suspend fun createAndSwitchTable(
+        name: String,
+        studentId: String? = null,
+        semesterCode: String? = null
+    ): CourseTable {
+        val newTable = courseTableRepository.createNewCourseTable(
+            name = name,
+            studentId = studentId,
+            semesterCode = semesterCode
+        )
+        switchCourseTable(newTable.id)
+        return newTable
+    }
+
+    suspend fun updateTableMeta(
+        tableId: String,
+        name: String? = null,
+        studentId: String? = null,
+        semesterCode: String? = null,
+        isArchived: Boolean? = null
+    ) {
+        val table = courseTableRepository.getCourseTableById(tableId) ?: return
+        val updated = table.copy(
+            name = name ?: table.name,
+            studentId = studentId ?: table.studentId,
+            semesterCode = semesterCode ?: table.semesterCode,
+            isArchived = isArchived ?: table.isArchived
+        )
+        courseTableRepository.updateCourseTable(updated)
+    }
+
+    suspend fun importCourses(courses: List<CourseWithWeeks>, targetTableId: String? = null) {
+        val currentTableId = targetTableId ?: _uiState.value.tableId ?: uiState.value.tableId ?: run {
             courses.firstOrNull()?.course?.courseTableId ?: return
         }
         
@@ -699,9 +746,25 @@ class WeeklyScheduleViewModel @Inject constructor(
 
         // 然后批量插入最新拿到的所有课程
         courses.forEach { courseWithWeeks ->
+            val courseToInsert = courseWithWeeks.course.copy(courseTableId = currentTableId)
             val weeks = courseWithWeeks.weeks.map { it.weekNumber }
-            courseTableRepository.upsertCourse(courseWithWeeks.course, weeks)
+            courseTableRepository.upsertCourse(courseToInsert, weeks)
         }
+    }
+
+    /** 写入学期配置（开学日期/总周数）；config 为 null 时跳过。 */
+    suspend fun applySemesterConfig(
+        config: com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSemesterConfig?,
+        targetTableId: String? = null
+    ) {
+        if (config == null) return
+        val tableId = targetTableId ?: _uiState.value.tableId ?: uiState.value.tableId ?: return
+        val current = appSettingsRepository.getCourseConfigOnce(tableId)
+        val updated = (current ?: com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTableConfig(courseTableId = tableId)).copy(
+            semesterStartDate = config.semesterStartDate ?: current?.semesterStartDate,
+            semesterTotalWeeks = config.semesterTotalWeeks
+        )
+        appSettingsRepository.insertOrUpdateCourseConfig(updated)
     }
 }
 

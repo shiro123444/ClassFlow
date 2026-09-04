@@ -125,11 +125,12 @@
 -keep class com.xingheyuzhuan.shiguangschedule.data.model.** { *; }
 
 # -------------------------------------------------------------------------
-# 10. 极简优化：Release 版本自动删除所有 Log.d (调试日志)
+# 10. 极简优化：Release 版本自动删除所有调试与普通信息日志 (Log.d/v/i)
 # -------------------------------------------------------------------------
 -assumenosideeffects class android.util.Log {
     public static int d(...);
     public static int v(...);
+    public static int i(...);
 }
 
 # -------------------------------------------------------------------------

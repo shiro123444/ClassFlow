@@ -7,6 +7,7 @@ import com.xingheyuzhuan.shiguangschedule.data.db.main.TimeSlot
 import com.xingheyuzhuan.shiguangschedule.data.repository.AppSettingsRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.TimeSlotRepository
 import com.xingheyuzhuan.shiguangschedule.data.sync.SyncManager
+import com.xingheyuzhuan.shiguangschedule.tool.UpdateChecker
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,8 +35,9 @@ class MyApplication : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
 
-        // 在应用启动时清理临时分享文件
+        // 在应用启动时清理临时分享文件与已安装过期的更新安装包
         clearShareTempFiles()
+        UpdateChecker.clearOutdatedUpdateFiles(this)
 
         // Room → DataStore 一次性迁移（幂等：DataStore 已有数据时跳过）
         CoroutineScope(Dispatchers.IO).launch {

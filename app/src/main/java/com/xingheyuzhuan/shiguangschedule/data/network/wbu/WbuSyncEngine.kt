@@ -8,39 +8,29 @@ import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWithWeeks
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWeek
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.Cookie
-import okhttp3.CookieJar
 import okhttp3.FormBody
-import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
-import org.json.JSONException
-import org.json.JSONTokener
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.math.BigInteger
 import java.net.URLEncoder
 import java.security.KeyFactory
-import java.security.SecureRandom
-import java.security.cert.X509Certificate
 import java.security.spec.RSAPublicKeySpec
-import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
-import javax.crypto.spec.IvParameterSpec
-import javax.crypto.spec.SecretKeySpec
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
-sealed class VpnLoginStep {
-    data class SmsRequired(val maskedPhone: String) : VpnLoginStep()
-    object VpnAuthenticated : VpnLoginStep()
-    data class Error(val message: String) : VpnLoginStep()
+/**
+ * 登录认证方式：统一身份认证(CAS) 或 教务系统直接表单。
+ */
+enum class WbuAuthMode {
+    UNIFIED_CAS,
+    JYXT_LEGACY
 }
 
+/**
+ * 完整 WebVPN 登录全过程的状态（供 UI 显示文案）。
+ */
 enum class VpnFullLoginStatus {
     VPN_AUTHENTICATED,
     SMS_REQUIRED,
@@ -51,592 +41,615 @@ enum class VpnFullLoginStatus {
     CAS_FAILED
 }
 
+/**
+ * 教务系统直连(含 VPN 镜像)表单登录的失败原因。
+ */
+enum class LocalLoginFailure {
+    /** 服务端回跳 /admin/login?jcaptchaError=1，疑似需要超星验证码 */
+    CAPTCHA,
+
+    /** 停止在 /admin/login 但无验证码标识，通常是账号或密码错误 */
+    CREDENTIALS
+}
+
+/**
+ * 登录方式：密码 / 二维码 / 手机动态码。
+ */
+enum class WbuLoginMethod {
+    PASSWORD,
+    DYNAMIC_CODE,
+    QR
+}
+
+/**
+ * 二维码登录轮询状态。
+ */
+enum class QrStatus {
+    WAIT,
+    CONFIRM,
+    SUCCESS,
+    EXPIRED,
+    ERROR
+}
+
+/**
+ * 学期配置：从 /admin/api/getZclistByXnxq 派生。
+ */
+data class WbuSemesterConfig(
+    val semesterStartDate: String?,
+    val semesterTotalWeeks: Int
+)
+
+/**
+ * 二维码登录会话。
+ */
+data class QrSession(
+    val uuid: String,
+    val content: String,
+    val execution: String,
+    val lt: String,
+    val authBaseUrl: String
+)
+
+/**
+ * 登录页表单参数（execution/lt）。
+ */
+data class AuthForm(
+    val execution: String,
+    val lt: String
+)
+
+/**
+ * 发送动态码的结果。
+ */
+sealed class DynamicCodeSendResult {
+    data class Success(val prep: AuthForm) : DynamicCodeSendResult()
+    data class Failure(val message: String, val waitSeconds: Int = 0) : DynamicCodeSendResult()
+}
+
+/**
+ * 动态码登录结果。失败时 [message] 尽可能给出服务端真实文案。
+ */
+data class DynamicCodeLoginResult(
+    val success: Boolean,
+    val message: String = ""
+)
+
+/**
+ * 统一身份认证滑块验证码数据。
+ */
+data class SliderCaptchaData(
+    val smallImageBase64: String,
+    val bigImageBase64: String,
+    val tagWidth: Int,
+    val canvasLength: Int = 280
+)
+
+/**
+ * 用户针对滑块验证码的操作结果。
+ */
+sealed class SliderCaptchaResult {
+    data class Move(val moveLength: Int) : SliderCaptchaResult()
+    object Refresh : SliderCaptchaResult()
+    object Cancel : SliderCaptchaResult()
+}
+
+typealias SliderCaptchaProvider = suspend (SliderCaptchaData) -> SliderCaptchaResult
+
+/**
+ * 教务引擎：负责 /admin 教务登录、课程/学期抓取，以及登录编排。
+ *
+ * WebVPN 门户与 ids 统一认证分别由 [WebVpnClient] / [IdsCasClient] 承担；
+ * 三者共享同一个 [WbuAuthTransport]（客户端、Cookie、基址、TLS）。
+ */
 class WbuSyncEngine(
     private val context: Context,
-    private val useVpn: Boolean = false,
+    val useVpn: Boolean = false,
 ) {
+    private val transport = WbuAuthTransport(context, useVpn)
+    private val portal = WebVpnClient(transport)
+    private val cas = IdsCasClient(transport)
 
-    private val casRandom = SecureRandom()
-
-    private val prefs by lazy { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
-
-    private val cookieStore = CopyOnWriteArrayList<Cookie>()
-
-    private val cookieJar = object : CookieJar {
-        override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-            cookies.forEach { cookie ->
-                cookieStore.removeAll {
-                    it.name == cookie.name && it.domain == cookie.domain && it.path == cookie.path
-                }
-                if (!cookie.expiresAt.let { expiresAt -> expiresAt <= System.currentTimeMillis() }) {
-                    cookieStore.add(cookie)
-                }
-            }
-            persistCookieStore()
-        }
-
-        override fun loadForRequest(url: HttpUrl): List<Cookie> {
-            val now = System.currentTimeMillis()
-            val validCookies = cookieStore.filter { it.expiresAt > now }
-            cookieStore.removeAll { it.expiresAt <= now }
-            return validCookies.filter { it.matches(url) }
-        }
-    }
-
-    private val client: OkHttpClient
-
-    init {
-        restoreCookieStore()
-
-        val builder = OkHttpClient.Builder()
-            .cookieJar(cookieJar)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .followSslRedirects(true)
-            .addInterceptor { chain ->
-                val req = chain.request().newBuilder()
-                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-                    .build()
-                chain.proceed(req)
-            }
-
-        // WebVPN uses a certificate that may not be in Android's trust store
-        if (useVpn) {
-            val trustAllManager = object : X509TrustManager {
-                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
-                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
-                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-            }
-            val sslContext = SSLContext.getInstance("TLS")
-            sslContext.init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
-            builder.sslSocketFactory(sslContext.socketFactory, trustAllManager)
-            builder.hostnameVerifier { hostname, _ ->
-                hostname.endsWith(".wbu.edu.cn") || hostname == "wbu.edu.cn"
-            }
-        }
-
-        client = builder.build()
-    }
-
-    // Base URL is different if using VPN but for WBU specific JWXT.
-    private val baseUrl = if (useVpn) "http://jwxt-wbu-edu-cn-s.webvpn.wbu.edu.cn:8118" else "https://jwxt.wbu.edu.cn"
-    private val vpnBaseUrl = "https://webvpn.wbu.edu.cn"
+    private val client = transport.client
+    private val baseUrl = transport.jwxtBase
+    private val cookieStore = transport.cookieStore
+    private val prefs = transport.prefs
 
     /**
-     * 第一步：模拟登录获取 Session 和内部校验信息
+     * 最近一次解析出的学生学号。
      */
-    suspend fun login(studentId: String, password: String): Boolean = withContext(Dispatchers.IO) {
+    @Volatile
+    var lastResolvedStudentId: String? = null
+
+    /**
+     * 最近一次教务系统直连/镜像表单登录的失败原因（供 UI 判断）。
+     */
+    @Volatile
+    var lastLocalLoginFailure: LocalLoginFailure? = null
+
+    /**
+     * 教务系统直连/镜像表单登录失败时，从服务端返回页提取的真实错误文案。成功时为 null。
+     */
+    @Volatile
+    var lastLocalLoginError: String? = null
+
+    /**
+     * 教务系统直连/镜像登录是否因**网络异常**而失败。
+     */
+    @Volatile
+    var lastLocalLoginNetworkError: Boolean = false
+
+    /**
+     * WebVPN TLS 证书校验异常回调（转发到共享 transport）。
+     */
+    var sslIssueHandler: (suspend (message: String) -> Boolean)?
+        get() = transport.sslIssueHandler
+        set(v) { transport.sslIssueHandler = v }
+
+    /**
+     * 教务服务端通过 getCurrentXnxq 真实返回的当前学期（不会因用户手动挑选其它学期而被覆盖）。
+     */
+    @Volatile
+    var systemCurrentXnxq: String? = null
+
+    /**
+     * 最近一次 fetchCourseData 解析出的当前学期，供 fetchSemesterConfig 复用。
+     */
+    @Volatile
+    var lastResolvedXnxq: String? = null
+
+    /**
+     * 最近一次 fetchCourseData 解析出的校区，供 fetchSemesterConfig 复用。
+     */
+    @Volatile
+    var lastResolvedXqdm: String? = null
+
+    init {
+        transport.restoreCookieStore()
+        // 手动 TWFID：构造时即注入（内存），使后续所有请求自动携带。
+        val initialTwfid = transport.currentTwfid().trim()
+        if (initialTwfid.isNotEmpty()) portal.injectTwfid(initialTwfid)
+    }
+
+    // ------------------- 登录编排入口（UI 可见，签名不变） -------------------
+
+    suspend fun login(
+        studentId: String,
+        password: String,
+        captchaProvider: SliderCaptchaProvider? = null,
+        authMode: WbuAuthMode = WbuAuthMode.UNIFIED_CAS
+    ): Boolean = withContext(Dispatchers.IO) {
+        lastLocalLoginNetworkError = false
+        // 每次启动全新登录前，清理旧的历史会话凭据（保留手动 TWFID），确保必须重新认证一次且不受残留干扰
+        transport.startNewLoginSession()
         try {
             val success = if (useVpn) {
-                loginViaVpnCas(studentId, password)
+                loginViaVpnCas(studentId, password, captchaProvider, authMode)
             } else {
-                loginDirect(studentId, password)
+                loginDirect(studentId, password, captchaProvider, authMode)
             }
             if (success) {
                 prefs.edit()
-                    .putString(KEY_LAST_STUDENT_ID, studentId)
+                    .putString(WbuAuthTransport.prefKeyLastStudentId(), studentId)
                     .putBoolean(KEY_LAST_USE_VPN, useVpn)
                     .putBoolean(KEY_LAST_USE_VPN_SET, true)
                     .apply()
-                persistCookieStore()
+                transport.persistCookieStore()
             }
             return@withContext success
         } catch (e: Exception) {
             Log.e("WbuSyncEngine", "Login failed", e)
+            lastLocalLoginNetworkError = true
             false
         }
     }
 
-    suspend fun hasActiveSession(): Boolean = withContext(Dispatchers.IO) {
-        try {
-            return@withContext canAccessTermApi()
-        } catch (e: Exception) {
-            Log.w("WbuSyncEngine", "Session probe failed", e)
-            false
-        }
-    }
+    suspend fun hasActiveSession(): Boolean = false
 
-    fun clearPersistedSession() {
-        cookieStore.clear()
-        prefs.edit().remove(KEY_COOKIES_JSON).apply()
-    }
+    fun clearPersistedSession() = transport.clearPersistedSession()
+
+    fun importCookiesFromWebView(cookieManager: android.webkit.CookieManager) =
+        transport.importCookiesFromWebView(cookieManager)
+
+    // ------------------- 对外透传（ids CAS 原语，UI 直接调用；教务 bootstrap 由引擎完成） -------------------
+
+    /** 发送动态码。 */
+    suspend fun sendDynamicCode(
+        studentId: String,
+        flowTag: String,
+        captchaProvider: SliderCaptchaProvider?
+    ): DynamicCodeSendResult = cas.sendDynamicCode(studentId, flowTag, captchaProvider)
 
     /**
-     * 从 Android WebView CookieManager 导入 cookies 到 OkHttp cookie jar。
-     * 用于 WebView 手动登录 WebVPN 后桥接 session。
+     * 确保 WebVPN 网关隧道处于放行状态：
+     * 1. 优先校验 TWFID（手动配置或已存在的会话凭据）；
+     * 2. 若 TWFID 有效，直接放行（免密）；
+     * 3. 若 TWFID 无效或缺失，直接调用 [vpnPasswordProvider] 弹窗索取 WebVPN/统一认证密码打通门禁（支持短信二次验证）。
      */
-    fun importCookiesFromWebView(cookieManager: android.webkit.CookieManager) {
-        val urls = listOf(
-            "https://webvpn.wbu.edu.cn",
-            "http://jwxt-wbu-edu-cn-s.webvpn.wbu.edu.cn:8118",
-            "http://ids-wbu-edu-cn.webvpn.wbu.edu.cn:8118",
-        )
+    suspend fun ensureVpnTunnelReady(
+        studentId: String,
+        vpnPasswordProvider: suspend () -> String?,
+        smsCodeProvider: (suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?)? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (!useVpn) return@withContext true
 
-        for (url in urls) {
-            val raw = cookieManager.getCookie(url) ?: continue
-            val httpUrl = url.toHttpUrlOrNull() ?: continue
-            val domain = httpUrl.host
-            // CookieManager returns "name1=value1; name2=value2" format
-            raw.split(";").forEach { segment ->
-                val trimmed = segment.trim()
-                val eqIdx = trimmed.indexOf('=')
-                if (eqIdx <= 0) return@forEach
-                val name = trimmed.substring(0, eqIdx).trim()
-                val value = trimmed.substring(eqIdx + 1).trim()
-                if (name.isBlank()) return@forEach
+        // 1. 优先校验手动/已有 TWFID
+        val currentTwfid = transport.currentTwfid().trim().ifEmpty {
+            cookieStore.firstOrNull { it.name == "TWFID" && it.value.isNotBlank() }?.value.orEmpty()
+        }
+        if (currentTwfid.isNotEmpty()) {
+            if (portal.validateTwfid(currentTwfid)) {
+                Log.i("WbuSyncEngine", "ensureVpnTunnelReady: Valid TWFID present, skip WebVPN portal login")
+                portal.injectTwfid(currentTwfid)
+                return@withContext true
+            } else {
+                Log.w("WbuSyncEngine", "ensureVpnTunnelReady: Existing TWFID invalid, clearing and prompting for password")
+                WbuAuthTransport.clearTwfid(context)
+                portal.removeTwfidCookie()
+            }
+        }
 
-                val cookie = Cookie.Builder()
-                    .name(name)
-                    .value(value)
-                    .domain(domain)
-                    .path("/")
-                    .expiresAt(System.currentTimeMillis() + 24 * 60 * 60 * 1000) // 24h
-                    .build()
+        // 2. 无有效 TWFID，直接弹窗请求密码
+        val vpnPassword = vpnPasswordProvider()
+        if (vpnPassword.isNullOrBlank()) {
+            lastLocalLoginError = "已取消 WebVPN 密码输入"
+            return@withContext false
+        }
 
-                cookieStore.removeAll {
-                    it.name == cookie.name && it.domain == cookie.domain && it.path == cookie.path
+        val effectiveSid = studentId.ifBlank { lastResolvedStudentId ?: getSavedStudentId(context) }
+        val portalStep = portal.portalPasswordLogin(effectiveSid, vpnPassword)
+        when (portalStep) {
+            is PortalLoginStep.Error -> {
+                Log.w("WbuSyncEngine", "WebVPN portal login failed: ${portalStep.message}")
+                lastLocalLoginError = "WebVPN 登录失败: ${portalStep.message}"
+                false
+            }
+            is PortalLoginStep.SmsRequired -> {
+                if (smsCodeProvider == null) {
+                    lastLocalLoginError = "WebVPN 需要短信验证码"
+                    return@withContext false
                 }
-                cookieStore.add(cookie)
+                val code = smsCodeProvider(portalStep.maskedPhone, portalStep.isStillValid, portalStep.sendInterval, portalStep.promptText)
+                if (code.isNullOrBlank()) {
+                    lastLocalLoginError = "已取消 WebVPN 短信验证码输入"
+                    return@withContext false
+                }
+                if (!portal.portalSubmitSms(code)) {
+                    lastLocalLoginError = "WebVPN 短信验证码错误"
+                    return@withContext false
+                }
+                true
             }
-        }
-        persistCookieStore()
-        Log.d("WbuSyncEngine", "Imported ${cookieStore.size} cookies from WebView")
-    }
-
-    /**
-     * WebVPN 密码登录（第一步：RSA 加密密码 → 提交 → 检测是否需要 SMS）
-     */
-    suspend fun loginVpnPassword(studentId: String, password: String): VpnLoginStep = withContext(Dispatchers.IO) {
-        try {
-            // 获取 RSA 公钥和表单字段名
-            val authReq = Request.Builder()
-                .url("$vpnBaseUrl/por/login_auth.csp?apiversion=1")
-                .get().build()
-            val authXml = client.newCall(authReq).execute().use { it.body?.string().orEmpty() }
-
-            val rsaKey = extractXmlTag(authXml, "RSA_ENCRYPT_KEY")
-                ?: return@withContext VpnLoginStep.Error("无法获取加密密钥")
-            val rsaExp = extractXmlTag(authXml, "RSA_ENCRYPT_EXP") ?: "65537"
-            val csrfCode = extractXmlTag(authXml, "CSRF_RAND_CODE") ?: ""
-            val nameField = extractXmlTag(authXml, "N_INPUTNAME") ?: "svpn_name"
-            val passField = extractXmlTag(authXml, "N_INPUTPASS") ?: "svpn_password"
-
-            // Sangfor JS encryptID() logic for password mode is: password + "_" + csrfRandCode.
-            val plainForEncrypt = if (csrfCode.isNotBlank()) "${password}_$csrfCode" else password
-            val encryptedPassword = rsaEncryptSangfor(plainForEncrypt, rsaKey, rsaExp)
-
-            // 提交密码
-            val form = FormBody.Builder()
-                .add("mitm_result", "")
-                .add("svpn_req_randcode", csrfCode)
-                .add(nameField, studentId)
-                .add(passField, encryptedPassword)
-                .add("svpn_rand_code", "")
-                .build()
-
-            val pswReq = Request.Builder()
-                .url("$vpnBaseUrl/por/login_psw.csp?anti_replay=1&encrypt=1&apiversion=1")
-                .post(form)
-                .build()
-            val pswXml = client.newCall(pswReq).execute().use { it.body?.string().orEmpty() }
-            Log.d("WbuSyncEngine", "VPN login_psw response: ${pswXml.take(500)}")
-
-            val errorCode = extractXmlTag(pswXml, "ErrorCode")
-            if (errorCode == "20021") {
-                // Sangfor may return "user had logged in" when VPN session already exists.
-                // Treat as authenticated instead of hard failure.
-                Log.i("WbuSyncEngine", "VPN login_psw indicates existing logged-in session; continue flow")
-                persistCookieStore()
-                return@withContext VpnLoginStep.VpnAuthenticated
+            is PortalLoginStep.PortalAuthenticated -> {
+                Log.i("WbuSyncEngine", "WebVPN portal authenticated successfully")
+                true
             }
-            if (errorCode != "1") {
-                val msg = extractXmlTag(pswXml, "Message") ?: "密码验证失败"
-                Log.w("WbuSyncEngine", "VPN login_psw failed: code=$errorCode msg=$msg")
-                return@withContext VpnLoginStep.Error(msg)
-            }
-
-            val nextAuth = extractXmlTag(pswXml, "NextAuth")
-            if (nextAuth == "2") {
-                // 需要短信验证 → 获取手机号并发送验证码
-                val smsInfoReq = Request.Builder()
-                    .url("$vpnBaseUrl/por/login_sms.csp?apiversion=1")
-                    .post(FormBody.Builder().build())
-                    .build()
-                val smsInfoXml = client.newCall(smsInfoReq).execute().use { it.body?.string().orEmpty() }
-                val maskedPhone = extractXmlTag(smsInfoXml, "USER_PHONE") ?: "未知号码"
-
-                // 触发发送验证码
-                val sendReq = Request.Builder()
-                    .url("$vpnBaseUrl/por/post_sms.csp?apiversion=1")
-                    .post(FormBody.Builder()
-                        .add("phone_number", "")
-                        .add("phone_index", "0")
-                        .build())
-                    .build()
-                client.newCall(sendReq).execute().close()
-
-                return@withContext VpnLoginStep.SmsRequired(maskedPhone)
-            }
-
-            // 不需要 SMS（少见）
-            persistCookieStore()
-            VpnLoginStep.VpnAuthenticated
-        } catch (e: Exception) {
-            Log.e("WbuSyncEngine", "VPN password login failed", e)
-            VpnLoginStep.Error("网络错误: ${e.message}")
         }
     }
 
     /**
-     * 提交 WebVPN 短信验证码
+     * 凭当前会话中已有的 CASTGC 向 CAS 请求教务系统 Ticket 并跟随重定向完成换票。
+     * WebVPN 模式下会将 302 Location 改写为代理宿主，由 WebVPN 隧道代理至教务系统确立会话。
      */
-    suspend fun submitVpnSmsCode(smsCode: String): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val form = FormBody.Builder()
-                .add("svpn_inputsms", smsCode)
-                .build()
-            val req = Request.Builder()
-                .url("$vpnBaseUrl/por/login_sms1.csp?apiversion=1")
-                .post(form)
-                .build()
-            val xml = client.newCall(req).execute().use { it.body?.string().orEmpty() }
-            val ok = extractXmlTag(xml, "ErrorCode") == "1" && extractXmlTag(xml, "Result") == "1"
-            if (ok) persistCookieStore()
-            ok
-        } catch (e: Exception) {
-            Log.e("WbuSyncEngine", "SMS verification failed", e)
+    suspend fun exchangeCastgcForJwxtSession(flowTag: String): Boolean = withContext(Dispatchers.IO) {
+        val serviceTarget = if (WbuAuthTransport.getUseFixedServiceForTicket(context)) {
+            WbuAuthTransport.IDS_PERSON_CENTER_SERVICE
+        } else {
+            "https://jwxt.wbu.edu.cn/admin/caslogin"
+        }
+        val encodedService = URLEncoder.encode(serviceTarget, "UTF-8")
+        val idsLoginUrl = "${transport.idsBase()}/authserver/login?service=$encodedService"
+        Log.i("WbuSyncEngine", "$flowTag 开始使用 CASTGC 换取教务 Ticket: $idsLoginUrl")
+
+        // 仅在已有 CASTGC 时换票；clearAuthCookies = false 保留凭据，consumeTicket = true 跟随并核销 ticket
+        val casResult = cas.casPasswordLogin(
+            studentId = "",
+            password = "",
+            idsLoginUrl = idsLoginUrl,
+            flowTag = flowTag,
+            clearAuthCookies = false,
+            consumeTicket = true
+        )
+        if (!casResult.success) {
+            Log.w("WbuSyncEngine", "$flowTag CASTGC 换票失败: ${casResult.message}")
+            lastLocalLoginFailure = casResult.failure
+            lastLocalLoginError = casResult.message
+            return@withContext false
+        }
+        bootstrapJwxtSession(casResult.landingHtml)
+    }
+
+    /** 仅获取动态码登录表单参数。 */
+    suspend fun obtainDynamicCodeForm(flowTag: String): AuthForm? =
+        cas.obtainDynamicCodeForm(flowTag, if (useVpn) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null)
+
+    /** 用动态码完成登录（含教务会话引导与 WebVPN 门禁就绪检测）。 */
+    suspend fun dynamicCodeLogin(
+        studentId: String,
+        code: String,
+        prep: AuthForm,
+        flowTag: String,
+        vpnPasswordProvider: (suspend () -> String?)? = null,
+        smsCodeProvider: (suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?)? = null
+    ): DynamicCodeLoginResult = withContext(Dispatchers.IO) {
+        // WebVPN 模式下：登录 IDS 时严格使用同源个人中心 service 且不跳转消费，防止未建网关时提前 302 撞入教务
+        val idsTarget = if (useVpn) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null
+        val result = cas.casDynamicCodeLogin(
+            studentId = studentId,
+            code = code,
+            prep = prep,
+            flowTag = flowTag,
+            serviceTarget = idsTarget,
+            consumeTicket = !useVpn
+        )
+        if (result.success) {
+            prefs.edit()
+                .putString(WbuAuthTransport.prefKeyLastStudentId(), studentId)
+                .putBoolean(KEY_LAST_USE_VPN, useVpn)
+                .putBoolean(KEY_LAST_USE_VPN_SET, true)
+                .apply()
+            transport.persistCookieStore()
+
+            if (useVpn) {
+                if (vpnPasswordProvider != null) {
+                    val vpnReady = ensureVpnTunnelReady(studentId, vpnPasswordProvider, smsCodeProvider)
+                    if (!vpnReady) {
+                        return@withContext DynamicCodeLoginResult(false, lastLocalLoginError ?: "WebVPN 门禁连接失败")
+                    }
+                }
+                // WebVPN 网关打通后，凭新鲜的 CASTGC 请求 jwxt service 换票并建立教务会话
+                val exchangeOk = exchangeCastgcForJwxtSession("$flowTag-EXCHANGE")
+                DynamicCodeLoginResult(exchangeOk, if (exchangeOk) "" else (lastLocalLoginError ?: "换取教务会话失败"))
+            } else {
+                val boot = bootstrapJwxtSession(result.landingHtml)
+                DynamicCodeLoginResult(boot, if (boot) "" else "登录成功但教务系统会话未就绪")
+            }
+        } else {
+            DynamicCodeLoginResult(false, result.message)
+        }
+    }
+
+    /** 开始二维码登录。 */
+    suspend fun startQrLogin(flowTag: String): QrSession? =
+        cas.startQrLogin(flowTag, if (useVpn) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null)
+
+    /** 轮询二维码状态。 */
+    suspend fun pollQrStatus(session: QrSession): QrStatus = cas.pollQrStatus(session)
+
+    /** 扫码确认后完成登录（含教务会话引导与 WebVPN 门禁就绪检测）。 */
+    suspend fun completeQrLogin(
+        session: QrSession,
+        flowTag: String,
+        vpnPasswordProvider: (suspend () -> String?)? = null,
+        smsCodeProvider: (suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?)? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        // WebVPN 模式下：登录 IDS 时严格使用同源个人中心 service 且不跳转消费
+        val idsTarget = if (useVpn) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null
+        val result = cas.casCompleteQrLogin(session, serviceTarget = idsTarget, consumeTicket = !useVpn)
+        if (result.success) {
+            // 获取真实学号始终使用个人中心同源 service
+            val resolvedSid = cas.fetchStudentIdFromCas()
+            if (!resolvedSid.isNullOrBlank()) {
+                lastResolvedStudentId = resolvedSid
+                prefs.edit().putString(WbuAuthTransport.prefKeyLastStudentId(), resolvedSid).apply()
+            }
+            prefs.edit()
+                .putBoolean(KEY_LAST_USE_VPN, useVpn)
+                .putBoolean(KEY_LAST_USE_VPN_SET, true)
+                .apply()
+            transport.persistCookieStore()
+
+            if (useVpn) {
+                if (vpnPasswordProvider != null) {
+                    val vpnReady = ensureVpnTunnelReady(resolvedSid.orEmpty(), vpnPasswordProvider, smsCodeProvider)
+                    if (!vpnReady) {
+                        return@withContext false
+                    }
+                }
+                // WebVPN 网关打通后，凭新鲜的 CASTGC 请求 jwxt service 换票并建立教务会话
+                exchangeCastgcForJwxtSession("$flowTag-EXCHANGE")
+            } else {
+                bootstrapJwxtSession(result.landingHtml)
+            }
+        } else {
             false
         }
     }
 
-    /**
-     * 重新发送 WebVPN 短信验证码
-     */
-    suspend fun resendVpnSmsCode(): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val req = Request.Builder()
-                .url("$vpnBaseUrl/por/post_sms.csp?apiversion=1")
-                .post(FormBody.Builder()
-                    .add("phone_number", "")
-                    .add("phone_index", "0")
-                    .build())
-                .build()
-            val xml = client.newCall(req).execute().use { it.body?.string().orEmpty() }
-            extractXmlTag(xml, "ErrorCode") == "1"
-        } catch (e: Exception) {
-            Log.e("WbuSyncEngine", "Resend SMS failed", e)
-            false
-        }
-    }
+    /** 重发 WebVPN 门户短信验证码（返回成功状态及冷却秒数）。 */
+    suspend fun resendVpnSmsCode(): PortalResendSmsResult = portal.portalResendSms()
 
     /**
-     * 完整 WebVPN 登录流程：密码加密 → SMS 验证 → CAS 登录 → JWXT
-     * @param smsCodeProvider 挂起函数，UI 层弹出对话框让用户输入验证码，返回 null 表示取消
+     * 完整 WebVPN 登录流程：门户登录（密码/SMS/手动 TWFID）→ 登录教务。
+     * @param vpnPassword 当 authMode 为 JYXT_LEGACY 且未配置 TWFID 时，用于连接 WebVPN 的统一认证密码；若为 null 则默认尝试使用 password。
      */
     suspend fun loginVpnFull(
         studentId: String,
         password: String,
-        smsCodeProvider: suspend (maskedPhone: String) -> String?,
-        statusCallback: ((VpnFullLoginStatus) -> Unit)? = null
+        smsCodeProvider: suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?,
+        captchaProvider: SliderCaptchaProvider? = null,
+        statusCallback: ((VpnFullLoginStatus) -> Unit)? = null,
+        authMode: WbuAuthMode = WbuAuthMode.UNIFIED_CAS,
+        vpnPassword: String? = null
     ): Boolean {
-        val step = loginVpnPassword(studentId, password)
-        when (step) {
-            is VpnLoginStep.Error -> {
-                Log.w("WbuSyncEngine", "VPN login error: ${step.message}")
+        // 每次启动全新登录前，清理旧的历史会话凭据（保留手动 TWFID），确保必须重新认证一次且不受残留干扰
+        transport.startNewLoginSession()
+
+        // 手动 TWFID：已认证则跳过 WebVPN 门户登录，直接进入教务
+        val manualTwfid = transport.currentTwfid().trim()
+        if (manualTwfid.isNotEmpty()) {
+            if (portal.validateTwfid(manualTwfid)) {
+                Log.i("WbuSyncEngine", "Manual TWFID validated; skip WebVPN credential login")
+                portal.injectTwfid(manualTwfid)
+                return vpnLoginTail(studentId, password, captchaProvider, authMode, statusCallback)
+            } else {
+                Log.w("WbuSyncEngine", "Manual TWFID invalid/expired; clear and fall back to WebVPN login")
+                WbuAuthTransport.clearTwfid(context)
+                portal.removeTwfidCookie()
+            }
+        }
+
+        // 解析登录 WebVPN 门户所需的账号与密码：
+        var vpnStudentId = studentId
+        val effectiveVpnPassword = vpnPassword ?: password
+        var didPreIdsAuth = false
+
+        // 判断是否需要先走公网 IDS 换取真实学号：
+        // 规则：当前学号为9位纯数字（年份后两位+专业代码+学生号，如260593099）。
+        // 1. 若开启「登录WebVPN前必须获取学号」，强制先获取；
+        // 2. 若当前输入的账号不符合9位纯数字（包含字母别名等），自动先去公网 IDS 获取真实学号；
+        // 3. 纯数字学号默认直接登录 WebVPN，不在前期多发无谓请求。
+        val forceFetch = WbuAuthTransport.getForceFetchStudentIdBeforeVpn(context)
+        val isStandardStudentId = isLikelyStudentId(studentId)
+        val needPreIds = authMode == WbuAuthMode.UNIFIED_CAS && (forceFetch || !isStandardStudentId)
+
+        if (needPreIds) {
+            val preSid = performPreIdsAuthAndGetStudentId(studentId, effectiveVpnPassword, captchaProvider)
+            if (preSid != null) {
+                vpnStudentId = preSid
+                didPreIdsAuth = true
+            } else {
                 return false
             }
-            is VpnLoginStep.SmsRequired -> {
+        }
+
+        var portalStep = portal.portalPasswordLogin(vpnStudentId, effectiveVpnPassword)
+
+        // 回退机制：如果用户输入的用户名巧合符合学号模样，导致直接登录 WebVPN 失败，且此前未进行 IDS 预认证：
+        // 自动回退走一次 IDS 预认证换取真实学号，再重试 WebVPN 门户登录。
+        if (portalStep is PortalLoginStep.Error && !didPreIdsAuth && authMode == WbuAuthMode.UNIFIED_CAS) {
+            Log.w("WbuSyncEngine", "WebVPN 直接登录失败（${portalStep.message}），尝试回退走 IDS 解析真实学号...")
+            val fallbackSid = performPreIdsAuthAndGetStudentId(studentId, effectiveVpnPassword, captchaProvider)
+            if (fallbackSid != null && fallbackSid != vpnStudentId) {
+                Log.d("WbuSyncEngine", "回退成功解析出真实学号，正在重试登录 WebVPN...")
+                vpnStudentId = fallbackSid
+                didPreIdsAuth = true
+                portalStep = portal.portalPasswordLogin(vpnStudentId, effectiveVpnPassword)
+            }
+        }
+
+        when (portalStep) {
+            is PortalLoginStep.Error -> {
+                Log.w("WbuSyncEngine", "VPN login error: ${portalStep.message}")
+                lastLocalLoginError = "WebVPN登录失败: ${portalStep.message}"
+                return false
+            }
+            is PortalLoginStep.SmsRequired -> {
                 statusCallback?.invoke(VpnFullLoginStatus.SMS_REQUIRED)
-                val code = smsCodeProvider(step.maskedPhone) ?: return false
-                if (!submitVpnSmsCode(code)) {
+                val code = smsCodeProvider(portalStep.maskedPhone, portalStep.isStillValid, portalStep.sendInterval, portalStep.promptText) ?: return false
+                if (!portal.portalSubmitSms(code)) {
                     Log.w("WbuSyncEngine", "SMS code verification failed")
+                    lastLocalLoginError = "WebVPN 短信验证码错误"
                     return false
                 }
                 statusCallback?.invoke(VpnFullLoginStatus.SMS_VERIFIED)
             }
-            is VpnLoginStep.VpnAuthenticated -> {
+            is PortalLoginStep.PortalAuthenticated -> {
                 statusCallback?.invoke(VpnFullLoginStatus.VPN_AUTHENTICATED)
             }
         }
-
-        // Some environments can access JWXT immediately after VPN+SMS auth.
-        // Probe first to avoid unnecessary CAS captcha challenges.
-        val vpnSessionReady = withContext(Dispatchers.IO) { canAccessTermApi() }
-        if (vpnSessionReady) {
-            Log.i("WbuSyncEngine", "VPN session is already valid for JWXT; skip CAS login")
-            statusCallback?.invoke(VpnFullLoginStatus.VPN_READY_SKIP_CAS)
-            return true
+        val ok = vpnLoginTail(vpnStudentId, password, captchaProvider, authMode, statusCallback)
+        if (ok) {
+            prefs.edit()
+                .putString(WbuAuthTransport.prefKeyLastStudentId(), vpnStudentId)
+                .putBoolean(KEY_LAST_USE_VPN, true)
+                .putBoolean(KEY_LAST_USE_VPN_SET, true)
+                .apply()
+            transport.persistCookieStore()
         }
-
-        statusCallback?.invoke(VpnFullLoginStatus.VPN_READY_NEED_CAS)
-
-        // WebVPN 已认证，接下来走 CAS 登录到教务系统
-        val casOk = withContext(Dispatchers.IO) {
-            loginViaVpnCas(studentId, password)
-        }
-        statusCallback?.invoke(if (casOk) VpnFullLoginStatus.CAS_COMPLETED else VpnFullLoginStatus.CAS_FAILED)
-        return casOk
-    }
-
-    private fun rsaEncryptSangfor(password: String, modulusHex: String, exponentStr: String): String {
-        val modulus = BigInteger(modulusHex, 16)
-        val exponent = parseSangforExponent(exponentStr)
-        val spec = RSAPublicKeySpec(modulus, exponent)
-        val publicKey = KeyFactory.getInstance("RSA").generatePublic(spec)
-        val cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
-        cipher.init(Cipher.ENCRYPT_MODE, publicKey)
-        val encrypted = cipher.doFinal(password.toByteArray(Charsets.UTF_8))
-        return encrypted.joinToString("") { String.format("%02x", it.toInt() and 0xFF) }
-    }
-
-    private fun parseSangforExponent(raw: String): BigInteger {
-        val exp = raw.trim()
-        if (exp.startsWith("0x", ignoreCase = true)) {
-            return BigInteger(exp.substring(2), 16)
-        }
-        if (exp.matches(Regex("0*10001", RegexOption.IGNORE_CASE))) {
-            // Common Sangfor response uses hex exponent 0x10001 (65537).
-            return BigInteger(exp, 16)
-        }
-        if (exp.any { it in 'A'..'F' || it in 'a'..'f' }) {
-            return BigInteger(exp, 16)
-        }
-        return BigInteger(exp)
-    }
-
-    private fun extractXmlTag(xml: String, tag: String): String? {
-        // Handle both plain text and CDATA: <Tag>value</Tag> or <Tag><![CDATA[value]]></Tag>
-        val pattern = Regex("<$tag>(?:<!\\[CDATA\\[(.+?)]]>|([^<]*))</$tag>", RegexOption.IGNORE_CASE)
-        val match = pattern.find(xml) ?: return null
-        return (match.groupValues[1].ifEmpty { match.groupValues[2] }).trim()
+        return ok
     }
 
     /**
-     * 第二步：提取最新学期和学期ID (xhid/xqdm)
+     * 判断字符串是否符合当前 9 位纯数字学号规范（年份后两位 + 专业代码4位 + 学生号3位，如 260593099）。
      */
-    suspend fun fetchCourseData(tableId: String): List<CourseWithWeeks>? = withContext(Dispatchers.IO) {
-        try {
-            Log.i("WbuSyncEngine", "Fetch course data start. tableId=$tableId baseUrl=$baseUrl")
-            // 获取当前学年学期
-            val termReq = Request.Builder()
-                .url("$baseUrl/admin/xsd/xsdcjcx/getCurrentXnxq?sf_request_type=ajax")
-                .header("X-Requested-With", "XMLHttpRequest")
-                .get()
-                .build()
+    private fun isLikelyStudentId(input: String): Boolean =
+        input.trim().matches(Regex("""^\d{9}$"""))
 
-            val termResp = client.newCall(termReq).execute()
-            val termRaw = termResp.body?.string().orEmpty()
-            Log.d("WbuSyncEngine", "Term API response code=${termResp.code} len=${termRaw.length}")
-            if (looksLikeHtml(termRaw)) {
-                Log.w("WbuSyncEngine", "Term API returned HTML; auth/session likely invalid.")
-                return@withContext null
-            }
-
-            val termJson = JSONObject(termRaw)
-            val xnxq = termJson.optString("data", "")
-            if (xnxq.isEmpty()) {
-                Log.w("WbuSyncEngine", "Term API has empty xnxq. raw=${termRaw.take(300)}")
-                return@withContext null
-            }
-            Log.d("WbuSyncEngine", "Resolved term xnxq=$xnxq")
-
-            // 获取页面并提取隐藏域 xhid 和 xqdm
-            val pkglReq = Request.Builder()
-                .url("$baseUrl/admin/xsd/pkgl/xskb/queryKbForXsd?xnxq=$xnxq")
-                .get()
-                .build()
-
-            val pkglResp = client.newCall(pkglReq).execute()
-            val pkglHtml = pkglResp.body?.string() ?: run {
-                Log.w("WbuSyncEngine", "queryKbForXsd returned null body. code=${pkglResp.code}")
-                return@withContext null
-            }
-            val document = Jsoup.parse(pkglHtml)
-
-            // Keep extraction order consistent with web script: id first, then name fallback.
-            var xhid = document.select("#xhid").first()?.attr("value").orEmpty()
-            if (xhid.isBlank()) {
-                xhid = document.select("input[name=xhid]").first()?.attr("value").orEmpty()
-            }
-            var xqdm = document.select("#xqdm").first()?.attr("value").orEmpty()
-            if (xqdm.isBlank()) {
-                xqdm = document.select("input[name=xqdm]").first()?.attr("value").orEmpty()
-            }
-
-            // Some pages no longer expose hidden inputs; try extracting values from inline scripts.
-            if (xhid.isBlank()) {
-                xhid = extractFieldFromHtml(pkglHtml, "xhid").orEmpty()
-            }
-            if (xqdm.isBlank()) {
-                xqdm = extractFieldFromHtml(pkglHtml, "xqdm").orEmpty()
-            }
-
-            if (xhid.isBlank() || xqdm.isBlank()) {
-                Log.w("WbuSyncEngine", "Missing xhid/xqdm from queryKbForXsd after fallback. xhid=$xhid xqdm=$xqdm")
-                Log.d("WbuSyncEngine", "queryKbForXsd snippet=${pkglHtml.take(400)}")
-            } else {
-                Log.d("WbuSyncEngine", "Resolved xhid=$xhid xqdm=$xqdm")
-            }
-
-            // 抓取并解析课表列表。先走完整参数，缺字段时再尝试兜底 URL。
-            val listUrlCandidates = linkedSetOf<String>().apply {
-                if (xhid.isNotBlank() && xqdm.isNotBlank()) {
-                    add("$baseUrl/admin/xsd/pkgl/xskb/sdpkkbList?xnxq=$xnxq&xhid=$xhid&xqdm=$xqdm&zdzc=&zxzc=&xskbxslx=0&sf_request_type=ajax")
-                }
-                add("$baseUrl/admin/xsd/pkgl/xskb/sdpkkbList?xnxq=$xnxq&zdzc=&zxzc=&xskbxslx=0&sf_request_type=ajax")
-                if (xhid.isNotBlank()) {
-                    add("$baseUrl/admin/xsd/pkgl/xskb/sdpkkbList?xnxq=$xnxq&xhid=$xhid&zdzc=&zxzc=&xskbxslx=0&sf_request_type=ajax")
-                }
-                if (xqdm.isNotBlank()) {
-                    add("$baseUrl/admin/xsd/pkgl/xskb/sdpkkbList?xnxq=$xnxq&xqdm=$xqdm&zdzc=&zxzc=&xskbxslx=0&sf_request_type=ajax")
-                }
-            }
-
-            var jsonArray: JSONArray? = null
-            for (candidate in listUrlCandidates) {
-                val listReq = Request.Builder()
-                    .url(candidate)
-                    .header("X-Requested-With", "XMLHttpRequest")
-                    .get()
-                    .build()
-
-                val listResp = client.newCall(listReq).execute()
-                val listRaw = listResp.body?.string().orEmpty()
-                Log.d("WbuSyncEngine", "sdpkkbList try url=$candidate code=${listResp.code} len=${listRaw.length}")
-
-                val listJson = runCatching { JSONObject(listRaw.ifBlank { "{}" }) }.getOrNull()
-                val data = listJson?.optJSONArray("data")
-                if (data == null) {
-                    Log.w("WbuSyncEngine", "sdpkkbList missing data array for url=$candidate raw=${listRaw.take(300)}")
-                    continue
-                }
-
-                Log.d("WbuSyncEngine", "sdpkkbList item count=${data.length()} for url=$candidate")
-                jsonArray = data
-                break
-            }
-
-            if (jsonArray == null) {
-                Log.w("WbuSyncEngine", "All sdpkkbList attempts failed to return data array")
-                return@withContext null
-            }
-
-            val courses = mutableListOf<CourseWithWeeks>()
-
-            for (i in 0 until jsonArray.length()) {
-                val item = jsonArray.optJSONObject(i) ?: continue
-
-                // 使用和 js 相同的逻辑进行字段提取
-                val fromKcmc = cleanImportedText(item.optString("kcmc", ""))
-                val fromJxbmc = cleanImportedText(item.optString("jxbmc", ""))
-                val name = when {
-                    fromKcmc.isNotBlank() -> fromKcmc
-                    fromJxbmc.isNotBlank() -> fromJxbmc
-                    else -> "未命名课程"
-                }
-
-                val teacher = cleanImportedText(item.optString("tmc", ""))
-                val building = cleanImportedText(item.optString("jxlmc", ""))
-                val room = cleanImportedText(item.optString("croommc", ""))
-                val position = if (building.isNotEmpty() && room.isNotEmpty() && !room.contains(building)) {
-                    "$building $room"
-                } else {
-                    room.ifEmpty { building }
-                }
-
-                val day = item.optInt("xingqi", 1).coerceIn(1..7)
-                
-                // 节次解析
-                var startSection = 1
-                val rqxl = item.optString("rqxl", "")
-                if (rqxl.matches(Regex("^\\d{3,4}$"))) {
-                    startSection = (rqxl.toIntOrNull() ?: 100) % 100
-                } else {
-                    startSection = item.optInt("djc", 1)
-                }
-                startSection = startSection.coerceIn(1..30)
-
-                val duration = item.optInt("djs", 1).coerceIn(1..8)
-                val endSection = startSection + duration - 1
-
-                // 周次解析
-                val weekNumbers = parseWeeks(
-                    cleanImportedText(item.optString("zc", "")),
-                    cleanImportedText(item.optString("zcstr", ""))
-                )
-
-                val courseId = java.util.UUID.randomUUID().toString()
-                
-                val course = Course(
-                    id = courseId,
-                    courseTableId = tableId,
-                    name = name,
-                    day = day,
-                    startSection = startSection,
-                    endSection = endSection,
-                    teacher = teacher,
-                    position = position,
-                    isCustomTime = false,
-                    customStartTime = null,
-                    customEndTime = null,
-                    colorInt = pickColorIndexForCourse(name)
-                )
-
-                val courseWeeks = weekNumbers.map {
-                    CourseWeek(courseId = courseId, weekNumber = it)
-                }
-
-                if (courseWeeks.isNotEmpty()) {
-                    courses.add(CourseWithWeeks(course, courseWeeks))
-                }
-            }
-
-            // 合并连续节次（同一天、同一名字老师地点和周次）
-            val merged = mergeContinuousSections(courses)
-            Log.i("WbuSyncEngine", "Fetch course data done. parsed=${courses.size} merged=${merged.size}")
-            return@withContext merged
-
-        } catch (e: Exception) {
-            Log.e("WbuSyncEngine", "Fetch failed", e)
-            null
-        }
-    }
-
-    private fun extractFieldFromHtml(html: String, field: String): String? {
-        // Matches forms like: xhid='123', "xhid":"123", xhid = 123
-        val escapedField = Regex.escape(field)
-        val patterns = listOf(
-            Regex("""$escapedField\s*[:=]\s*['\"]([^'\"]+)['\"]""", RegexOption.IGNORE_CASE),
-            Regex("""$escapedField\s*[:=]\s*(\d+)""", RegexOption.IGNORE_CASE)
+    /**
+     * 在公网 IDS 上完成预认证并提取标准学号。
+     * 注意：这里验证成功后会完整保留 CASTGC 会话，后续教务单点登录可直接复用，绝不清除重复提交。
+     */
+    private suspend fun performPreIdsAuthAndGetStudentId(
+        usernameInput: String,
+        passwordInput: String,
+        captchaProvider: SliderCaptchaProvider?
+    ): String? {
+        // 获取学号始终使用同源个人中心 service，不提前消耗教务系统的 service ticket
+        val serviceTarget = WbuAuthTransport.IDS_PERSON_CENTER_SERVICE
+        val idsLoginUrl = "${transport.idsBase()}/authserver/login?service=${URLEncoder.encode(serviceTarget, "UTF-8")}"
+        // 预认证时只提交到公网 IDS 拿到 CASTGC 与真实学号。
+        // consumeTicket = false: 302 拦截 ST 即止，绝不跟随去 GET 个人中心落地页，省去无谓请求！
+        val casResult = cas.casPasswordLogin(
+            studentId = usernameInput,
+            password = passwordInput,
+            idsLoginUrl = idsLoginUrl,
+            flowTag = "PRE-IDS",
+            captchaProvider = captchaProvider,
+            clearAuthCookies = false,
+            consumeTicket = false
         )
-        for (pattern in patterns) {
-            val m = pattern.find(html) ?: continue
-            val v = m.groupValues.getOrNull(1).orEmpty().trim()
-            if (v.isNotBlank()) return v
+        if (casResult.success) {
+            // 若 302 响应头中直接提取出了 ST，直接调 serviceValidate；否则回退 fetchStudentIdFromCas
+            val realSid = casResult.stTicket?.let { st ->
+                cas.validateTicketForStudentId(transport.idsBase(), st, serviceTarget)
+            } ?: cas.fetchStudentIdFromCas(transport.idsBase(), serviceTarget)
+
+            return if (!realSid.isNullOrBlank()) {
+                Log.d("WbuSyncEngine", "Resolved student ID from input")
+                realSid
+            } else {
+                usernameInput
+            }
+        } else {
+            Log.w("WbuSyncEngine", "Pre-IDS authentication failed: ${casResult.message}")
+            lastLocalLoginFailure = casResult.failure
+            lastLocalLoginError = casResult.message
+            return null
         }
-        return null
     }
 
-    private fun cleanImportedText(value: String?): String {
-        if (value.isNullOrBlank()) return ""
-        return value
-            .replace(Regex("<[^>]+>"), "")
-            .replace("&nbsp;", " ")
-            .replace("&amp;", "&")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace(Regex("\\s+"), " ")
-            .trim()
+    /** 已通过 WebVPN 鉴权后的收尾：登录到教务系统。 */
+    private suspend fun vpnLoginTail(
+        studentId: String,
+        password: String,
+        captchaProvider: SliderCaptchaProvider?,
+        authMode: WbuAuthMode,
+        statusCallback: ((VpnFullLoginStatus) -> Unit)?
+    ): Boolean {
+        statusCallback?.invoke(VpnFullLoginStatus.VPN_READY_NEED_CAS)
+        val ok = withContext(Dispatchers.IO) {
+            if (authMode == WbuAuthMode.JYXT_LEGACY) {
+                loginDirectLegacy(studentId, password)
+            } else {
+                loginViaVpnCas(studentId, password, captchaProvider, authMode)
+            }
+        }
+        statusCallback?.invoke(if (ok) VpnFullLoginStatus.CAS_COMPLETED else VpnFullLoginStatus.CAS_FAILED)
+        return ok
     }
 
-    private fun loginDirect(studentId: String, password: String): Boolean {
-        // Keep direct campus flow deterministic:
-        // jwxt /admin/caslogin -> ids /authserver/login?service=... -> jwxt /admin/?loginType=1
+    // ------------------- 教务登录：直连 -------------------
+
+    private suspend fun loginDirect(
+        studentId: String,
+        password: String,
+        captchaProvider: SliderCaptchaProvider? = null,
+        authMode: WbuAuthMode = WbuAuthMode.UNIFIED_CAS
+    ): Boolean {
+        if (authMode == WbuAuthMode.JYXT_LEGACY) {
+            Log.i("WbuSyncEngine", "Direct campus login uses legacy /admin/login form")
+            return loginDirectLegacy(studentId, password)
+        }
+
         val directCasEntryUrl = "$baseUrl/admin/caslogin"
-        val serviceTarget = "https://jwxt.wbu.edu.cn/admin/caslogin"
+        val serviceTarget = if (WbuAuthTransport.getUseFixedServiceForTicket(context)) {
+            WbuAuthTransport.IDS_PERSON_CENTER_SERVICE
+        } else {
+            "https://jwxt.wbu.edu.cn/admin/caslogin"
+        }
         val encodedService = URLEncoder.encode(serviceTarget, "UTF-8")
-        val fixedIdsLoginUrl = "http://ids.wbu.edu.cn/authserver/login?service=$encodedService"
+        val fixedIdsLoginUrl = "${transport.idsBase()}/authserver/login?service=$encodedService"
 
         val discoveredCasUrl = runCatching {
             client.newCall(Request.Builder().url(directCasEntryUrl).get().build()).execute().use { resp ->
@@ -652,221 +665,52 @@ class WbuSyncEngine(
             }
         }.getOrDefault(fixedIdsLoginUrl)
 
-        val directCasOk = loginViaCas(
+        val casOk = loginViaCas(
             studentId = studentId,
             password = password,
             idsLoginUrl = discoveredCasUrl,
-            flowTag = "DIRECT-CAS"
+            flowTag = "DIRECT-CAS",
+            captchaProvider = captchaProvider
         )
-        if (directCasOk) return true
+        if (casOk) return true
 
-        Log.w("WbuSyncEngine", "Direct fixed CAS flow failed, fallback to legacy /admin/login form")
-
-        val loginPageReq = Request.Builder()
-            .url("$baseUrl/admin/login")
-            .get()
-            .build()
-
-        val hiddenFields = mutableMapOf<String, String>()
-        client.newCall(loginPageReq).execute().use { loginPageResp ->
-            val html = loginPageResp.body?.string().orEmpty()
-            if (html.isBlank()) return false
-            val document = Jsoup.parse(html, "$baseUrl/admin/login")
-            document.select("input[type=hidden][name]").forEach { input ->
-                val name = input.attr("name")
-                if (name.isNotBlank()) {
-                    hiddenFields[name] = input.attr("value")
-                }
-            }
-        }
-
-        val formBuilder = FormBody.Builder()
-        hiddenFields.forEach { (k, v) -> formBuilder.add(k, v) }
-        formBuilder.add("login_name", studentId)
-        formBuilder.add("password", password)
-        if (!hiddenFields.containsKey("loginType")) {
-            formBuilder.add("loginType", "1")
-        }
-
-        val loginPostReq = Request.Builder()
-            .url("$baseUrl/admin/login")
-            .post(formBuilder.build())
-            .addHeader("Content-Type", "application/x-www-form-urlencoded")
-            .build()
-
-        client.newCall(loginPostReq).execute().use { postResp ->
-            val postRespString = postResp.body?.string().orEmpty()
-            val finalUrl = postResp.request.url.toString()
-            val success = finalUrl.contains("/admin/index") ||
-                finalUrl.contains("/admin/?loginType=1") ||
-                postRespString.contains("退出") ||
-                postRespString.contains("我的课表")
-            if (!success) {
-                Log.d("WbuSyncEngine", "Direct login response URL=$finalUrl")
-                Log.d("WbuSyncEngine", "Direct login response body snippet=${postRespString.take(500)}")
-            }
-            if (!success) {
-                return false
-            }
-
-            return canAccessTermApi()
-        }
+        Log.w("WbuSyncEngine", "Direct CAS flow failed and no legacy fallback per selected auth mode")
+        return false
     }
 
-    private fun loginViaCas(
+    // ------------------- 教务登录：经 VPN + CAS -------------------
+
+    private suspend fun loginViaVpnCas(
         studentId: String,
         password: String,
-        idsLoginUrl: String,
-        flowTag: String
+        captchaProvider: SliderCaptchaProvider? = null,
+        authMode: WbuAuthMode = WbuAuthMode.UNIFIED_CAS
     ): Boolean {
-        val hiddenFields = mutableMapOf<String, String>()
-        var pwdEncryptSalt = ""
-
-        client.newCall(
-            Request.Builder().url(idsLoginUrl).get().build()
-        ).execute().use { pageResp ->
-            val loginHtml = pageResp.body?.string().orEmpty()
-            if (loginHtml.isBlank()) {
-                Log.w("WbuSyncEngine", "$flowTag CAS login page is blank. idsLoginUrl=$idsLoginUrl")
-                return false
-            }
-
-            val doc = Jsoup.parse(loginHtml)
-            val pwdForm = doc.selectFirst("form#pwdFromId") ?: run {
-                val candidates = doc.select("form").filter { form ->
-                    val hasUsername = form.select("input[name=username]").isNotEmpty()
-                    val hasPassword = form.select("input[name=password], input#password").isNotEmpty()
-                    val looksPwdForm = form.id().contains("pwd", ignoreCase = true) ||
-                        form.attr("class").contains("pwd", ignoreCase = true)
-                    hasUsername && (hasPassword || looksPwdForm)
-                }
-
-                if (candidates.size == 1) {
-                    Log.w(
-                        "WbuSyncEngine",
-                        "$flowTag CAS missing #pwdFromId; using strict fallback form id='${candidates[0].id()}'"
-                    )
-                    candidates[0]
-                } else {
-                    val formSummary = doc.select("form").joinToString(" | ") { form ->
-                        val id = form.id().ifBlank { "<no-id>" }
-                        val hasUser = form.select("input[name=username]").isNotEmpty()
-                        val hasPwd = form.select("input[name=password], input#password").isNotEmpty()
-                        "id=$id user=$hasUser pwd=$hasPwd"
-                    }
-                    Log.w("WbuSyncEngine", "$flowTag CAS form is ambiguous. forms=[$formSummary]")
-                    Log.d("WbuSyncEngine", "$flowTag CAS snippet=${loginHtml.take(800)}")
-                    return false
-                }
-            }
-
-            pwdForm.select("input[type=hidden][name]").forEach { input ->
-                val key = input.attr("name")
-                if (key.isNotBlank()) {
-                    hiddenFields[key] = input.attr("value")
-                }
-            }
-
-            pwdEncryptSalt = pwdForm.selectFirst("#pwdEncryptSalt")?.attr("value").orEmpty()
-            val scriptNeedCaptcha = Regex("""needCaptcha\s*=\s*['\"]?true['\"]?""", RegexOption.IGNORE_CASE)
-                .containsMatchIn(loginHtml)
-            if (scriptNeedCaptcha) {
-                Log.w("WbuSyncEngine", "$flowTag CAS requires captcha; skip auto submit")
-                return false
-            }
+        if (authMode == WbuAuthMode.JYXT_LEGACY) {
+            Log.i("WbuSyncEngine", "VPN login uses legacy /admin/login form via mirror")
+            return loginDirectLegacy(studentId, password)
         }
 
-        val encryptedCasPassword = encryptCasPassword(password, pwdEncryptSalt)
-        val formBuilder = FormBody.Builder()
-        hiddenFields
-            .filterKeys { it != "password" && it != "passwordText" && it != "username" }
-            .forEach { (k, v) -> formBuilder.add(k, v) }
-        formBuilder.add("username", studentId)
-        formBuilder.add("password", encryptedCasPassword)
-        if (!hiddenFields.containsKey("_eventId")) formBuilder.add("_eventId", "submit")
-        if (!hiddenFields.containsKey("cllt")) formBuilder.add("cllt", "userNameLogin")
-        if (!hiddenFields.containsKey("dllt")) formBuilder.add("dllt", "generalLogin")
-
-        val origin = idsLoginUrl.toHttpUrlOrNull()?.let { "${it.scheme}://${it.host}:${it.port}" }
-        val loginPostReq = Request.Builder()
-            .url(idsLoginUrl)
-            .post(formBuilder.build())
-            .addHeader("Content-Type", "application/x-www-form-urlencoded")
-            .addHeader("Referer", idsLoginUrl)
-            .apply {
-                if (!origin.isNullOrBlank()) addHeader("Origin", origin)
-            }
-            .build()
-
-        var casPostStaysOnLogin = false
-        client.newCall(loginPostReq).execute().use { postResp ->
-            val body = postResp.body?.string().orEmpty()
-            val finalUrl = postResp.request.url.toString()
-            casPostStaysOnLogin = finalUrl.contains("/authserver/login")
-            if (casPostStaysOnLogin) {
-                Log.w("WbuSyncEngine", "$flowTag CAS stayed on login page. URL=$finalUrl")
-                Log.d("WbuSyncEngine", "$flowTag CAS stay snippet=${body.take(500)}")
-            }
-        }
-        if (casPostStaysOnLogin) return false
-
-        client.newCall(Request.Builder().url("$baseUrl/admin/login").get().build()).execute().close()
-        val loginTypeHtml = client.newCall(
-            Request.Builder().url("$baseUrl/admin/?loginType=1").get().build()
-        ).execute().use { it.body?.string().orEmpty() }
-
-        val indexMainUrl = runCatching {
-            val doc = Jsoup.parse(loginTypeHtml, "$baseUrl/admin/?loginType=1")
-            doc.select("a[href*=indexMain], frame[src*=indexMain], iframe[src*=indexMain], script")
-                .firstOrNull()
-                ?.let { el ->
-                    val candidate = el.attr("href").ifBlank { el.attr("src") }
-                    if (candidate.isBlank()) extractIndexMainUrlFromScript(loginTypeHtml)
-                    else resolveAbsoluteUrl("$baseUrl/admin/?loginType=1", candidate)
-                } ?: extractIndexMainUrlFromScript(loginTypeHtml)
-        }.getOrNull()
-
-        if (!indexMainUrl.isNullOrBlank()) {
-            runCatching {
-                client.newCall(Request.Builder().url(indexMainUrl).get().build()).execute().close()
-            }.onFailure {
-                Log.w("WbuSyncEngine", "$flowTag open indexMain failed: ${it.message}")
-            }
-        }
-
-        return canAccessTermApi()
-    }
-
-    private fun loginViaVpnCas(studentId: String, password: String): Boolean {
-        // Follow the same order as manual login:
-        // 1) Open JWXT login page behind VPN
-        // 2) Click unified-auth link (CAS)
-        // 3) Submit CAS credentials
-        // 4) Open admin landing pages to finish session bootstrap
         val jwxtLoginUrl = "$baseUrl/admin/login"
-
-        val serviceTarget = "https://jwxt.wbu.edu.cn/admin/caslogin"
+        val serviceTarget = if (WbuAuthTransport.getUseFixedServiceForTicket(context)) {
+            WbuAuthTransport.IDS_PERSON_CENTER_SERVICE
+        } else {
+            "https://jwxt.wbu.edu.cn/admin/caslogin"
+        }
         val encodedService = URLEncoder.encode(serviceTarget, "UTF-8")
-        val fallbackIdsLoginUrl = "http://ids-wbu-edu-cn.webvpn.wbu.edu.cn:8118/authserver/login?service=$encodedService"
+        val fallbackIdsLoginUrl = "${transport.idsBase()}/authserver/login?service=$encodedService"
 
-        val discoveredCasUrl = runCatching {
-            client.newCall(Request.Builder().url(jwxtLoginUrl).get().build()).execute().use { resp ->
-                val html = resp.body?.string().orEmpty()
-                if (html.isBlank()) return@use null
-                val doc = Jsoup.parse(html, jwxtLoginUrl)
-                val href = doc.select("a[href*=authserver/login][href*=service=]").firstOrNull()?.attr("href")
-                href?.let { resolveAbsoluteUrl(jwxtLoginUrl, it) }
-            }
-        }.getOrNull()
-
-        val idsLoginUrl = discoveredCasUrl ?: fallbackIdsLoginUrl
+        // WebVPN 模式下：禁止提前向代理宿主发起 GET /admin/login 爬取 CAS 链接（避免未授权引发网关 302 跌落）；
+        // 除非显式需要从页面爬取，否则直接使用标准构造的 ids 登录地址。
+        val idsLoginUrl = fallbackIdsLoginUrl
         Log.d("WbuSyncEngine", "Using CAS url: $idsLoginUrl")
 
         val ready = loginViaCas(
             studentId = studentId,
             password = password,
             idsLoginUrl = idsLoginUrl,
-            flowTag = "VPN-CAS"
+            flowTag = "VPN-CAS",
+            captchaProvider = captchaProvider
         )
         if (!ready) {
             Log.w("WbuSyncEngine", "VPN CAS flow completed but JWXT term API is still unavailable. baseUrl=$baseUrl")
@@ -874,46 +718,479 @@ class WbuSyncEngine(
         return ready
     }
 
-    private fun encryptCasPassword(password: String, salt: String): String {
-        val trimmedSalt = salt.trim()
-        if (trimmedSalt.isEmpty()) return password
-        return runCatching {
-            val keyBytes = trimmedSalt.toByteArray(Charsets.UTF_8)
-            val ivText = randomAesString(16)
-            val ivBytes = ivText.toByteArray(Charsets.UTF_8)
-            val plain = randomAesString(64) + password
+    // ------------------- 教务登录：CAS 桥接（调 IdsCasClient，成功后 bootstrap） -------------------
 
-            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-            val keySpec = SecretKeySpec(keyBytes, "AES")
-            val ivSpec = IvParameterSpec(ivBytes)
-            cipher.init(Cipher.ENCRYPT_MODE, keySpec, ivSpec)
-            val encrypted = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
+    private suspend fun loginViaCas(
+        studentId: String,
+        password: String,
+        idsLoginUrl: String,
+        flowTag: String,
+        captchaProvider: SliderCaptchaProvider? = null
+    ): Boolean {
+        clearJwxtSessionCookies()
+        lastLocalLoginFailure = null
+        lastLocalLoginError = null
+
+        // 如果 cookieStore 中已有有效 CASTGC，无需清空已有的认证凭据，直接利用 SSO 换票
+        val hasTgc = cookieStore.any { it.name == "CASTGC" && !it.value.isBlank() }
+        val result = cas.casPasswordLogin(studentId, password, idsLoginUrl, flowTag, captchaProvider, clearAuthCookies = !hasTgc)
+        if (!result.success) {
+            lastLocalLoginFailure = result.failure
+            lastLocalLoginError = result.message
+            return false
+        }
+        return bootstrapJwxtSession(result.landingHtml)
+    }
+
+    // ------------------- 教务登录：legacy 表单 -------------------
+
+    private suspend fun loginDirectLegacy(
+        studentId: String,
+        password: String
+    ): Boolean {
+        clearJwxtSessionCookies()
+        lastLocalLoginFailure = null
+        lastLocalLoginError = null
+        lastLocalLoginNetworkError = false
+        try {
+            val loginPageReq = Request.Builder()
+                .url("$baseUrl/admin/login")
+                .get()
+                .build()
+
+            val hiddenFields = mutableMapOf<String, String>()
+            client.newCall(loginPageReq).execute().use { loginPageResp ->
+                val html = loginPageResp.body?.string().orEmpty()
+                if (html.isBlank()) return false
+                val document = Jsoup.parse(html, "$baseUrl/admin/login")
+                document.select("input[type=hidden][name]").forEach { input ->
+                    val name = input.attr("name")
+                    if (name.isNotBlank()) hiddenFields[name] = input.attr("value")
+                }
+            }
+
+            val formBuilder = FormBody.Builder()
+            hiddenFields.forEach { (k, v) -> formBuilder.add(k, v) }
+            formBuilder.add("username", studentId)
+            formBuilder.add("password", rsaEncryptJwxtPassword(password))
+
+            val loginPostReq = Request.Builder()
+                .url("$baseUrl/admin/login")
+                .post(formBuilder.build())
+                .addHeader("Content-Type", "application/x-www-form-urlencoded")
+                .build()
+
+            client.newCall(loginPostReq).execute().use { postResp ->
+                val postRespString = postResp.body?.string().orEmpty()
+                val finalUrl = postResp.request.url.toString()
+                val success = !finalUrl.contains("/admin/login")
+                if (!success) {
+                    Log.d("WbuSyncEngine", "Legacy login response URL=$finalUrl")
+                    Log.d("WbuSyncEngine", "Legacy login response body snippet=${postRespString.take(500)}")
+                    lastLocalLoginFailure = if (finalUrl.contains("jcaptchaError")) {
+                        LocalLoginFailure.CAPTCHA
+                    } else {
+                        lastLocalLoginError = extractLoginErrorMessage(postRespString)
+                        LocalLoginFailure.CREDENTIALS
+                    }
+                    return false
+                }
+
+                resolveAndPersistStudentId(studentId)
+                return canAccessTermApi()
+            }
+        } catch (e: Exception) {
+            Log.w("WbuSyncEngine", "Legacy login network error", e)
+            lastLocalLoginNetworkError = true
+            return false
+        }
+    }
+
+    /**
+     * 登录成功后的 JWXT 会话引导。
+     * 默认：解析落地页 indexMain 并打开，最后校验课表接口。
+     * 「no indexMain verify」开启时：跳过 indexMain，仅校验会话 cookie + 拿学号。
+     *
+     * @param landingHtml CAS 落地页 HTML（ticket 消费 auto-follow 已取到），非空则复用，避免重复 GET /admin/?loginType=1；
+     *                    为空时才回退重新 GET。
+     */
+    private suspend fun bootstrapJwxtSession(landingHtml: String? = null): Boolean {
+        // 「no indexMain verify」：不解析/打开 indexMain，仅验证会话 cookie 是否就绪 + 拿学号。
+        if (WbuAuthTransport.getNoIndexMainVerify(context)) {
+            val ready = hasJwxtSessionCookie()
+            if (ready) {
+                Log.i("WbuSyncEngine", "no indexMain verify: session cookie present, resolve student id")
+                resolveAndPersistStudentId(WbuSyncEngine.getSavedStudentId(context))
+            }
+            return ready
+        }
+
+        val loginTypeHtml: String = landingHtml?.takeIf { it.isNotBlank() } ?: run {
+            client.newCall(
+                Request.Builder().url("$baseUrl/admin/?loginType=1").get().build()
+            ).execute().use { it.body?.string().orEmpty() }
+        }
+
+        val indexMainUrl = runCatching {
+            val doc = Jsoup.parse(loginTypeHtml, "$baseUrl/admin/?loginType=1")
+            // 仅在明确带有 indexMain 属性的 a, frame, iframe 标签中查找，严禁宽泛匹配 script 标签
+            val candidate = doc.select("a[href*=indexMain], frame[src*=indexMain], iframe[src*=indexMain]")
+                .firstOrNull()
+                ?.let { el -> el.attr("href").ifBlank { el.attr("src") } }
+                ?.takeIf { it.isNotBlank() }
+
+            if (candidate != null) {
+                resolveAbsoluteUrl("$baseUrl/admin/?loginType=1", candidate)
+            } else {
+                extractIndexMainUrlFromScript(loginTypeHtml)
+            }
+        }.getOrNull()
+
+        if (!indexMainUrl.isNullOrBlank()) {
+            runCatching {
+                client.newCall(Request.Builder().url(indexMainUrl).get().build()).execute().close()
+            }.onFailure { Log.w("WbuSyncEngine", "bootstrapJwxtSession open indexMain failed: ${it.message}") }
+        }
+
+        return canAccessTermApi()
+    }
+
+    /** 判断教务会话 cookie 是否已就绪（jw_uf / JSESSIONID 任一存在即视为有会话）。 */
+    private fun hasJwxtSessionCookie(): Boolean {
+        val hasJwUf = cookieStore.any { it.name == "jw_uf" }
+        val hasSession = cookieStore.any { it.name == "JSESSIONID" }
+        return hasJwUf || hasSession
+    }
+
+    // ------------------- 学期 / 课表抓取 -------------------
+
+    data class WbuSemesterOption(val value: String, val text: String)
+
+    suspend fun fetchSemesterOptions(): List<WbuSemesterOption> = withContext(Dispatchers.IO) {
+        runCatching {
+            val currentXnxq = systemCurrentXnxq?.takeIf { it.isNotBlank() } ?: run {
+                val termReq = Request.Builder()
+                    .url("$baseUrl/admin/xsd/xsdcjcx/getCurrentXnxq?sf_request_type=ajax")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .get()
+                    .build()
+                val termRaw = client.newCall(termReq).execute().use { it.body?.string().orEmpty() }
+                if (!transport.looksLikeHtml(termRaw) && termRaw.isNotBlank()) {
+                    JSONObject(termRaw).optString("data", "").also {
+                        if (it.isNotBlank()) {
+                            systemCurrentXnxq = it
+                            if (lastResolvedXnxq.isNullOrBlank()) lastResolvedXnxq = it
+                        }
+                    }
+                } else null
+            } ?: lastResolvedXnxq
+
+            val queryUrl = if (!currentXnxq.isNullOrBlank()) {
+                "$baseUrl/admin/xsd/pkgl/xskb/queryKbForXsd?xnxq=${URLEncoder.encode(currentXnxq, "UTF-8")}"
+            } else {
+                "$baseUrl/admin/xsd/pkgl/xskb/queryKbForXsd"
+            }
+
+            val pageHtml = client.newCall(
+                Request.Builder().url(queryUrl).get().build()
+            ).execute().use { it.body?.string().orEmpty() }
+
+            if (pageHtml.isBlank() || transport.looksLikeHtml(pageHtml).not() && !pageHtml.contains("xnxq1")) {
+                // 如果没有返回期望页面，至少返回当前已知的学期
+                return@withContext if (!currentXnxq.isNullOrBlank()) {
+                    listOf(WbuSemesterOption(value = currentXnxq, text = currentXnxq))
+                } else emptyList()
+            }
+
+            val doc = Jsoup.parse(pageHtml)
+            val options = mutableListOf<WbuSemesterOption>()
+            doc.select("#xnxq1 option").forEach { opt ->
+                val v = opt.attr("value").trim()
+                val t = opt.text().trim()
+                if (v.isNotBlank()) {
+                    options.add(WbuSemesterOption(value = v, text = t.ifBlank { v }))
+                }
+            }
+
+            if (options.isEmpty() && !currentXnxq.isNullOrBlank()) {
+                options.add(WbuSemesterOption(value = currentXnxq, text = currentXnxq))
+            }
+            options
+        }.getOrElse { e ->
+            Log.w("WbuSyncEngine", "fetchSemesterOptions failed: ${e.message}", e)
+            emptyList()
+        }
+    }
+
+    suspend fun fetchCourseData(tableId: String, targetXnxq: String? = null): List<CourseWithWeeks>? = withContext(Dispatchers.IO) {
+        try {
+            Log.i("WbuSyncEngine", "Fetch course data start. tableId=$tableId baseUrl=$baseUrl targetXnxq=$targetXnxq")
+            // 优先使用传入的 targetXnxq，其次复用已解析的学期
+            val xnxq = targetXnxq?.takeIf { it.isNotBlank() } ?: systemCurrentXnxq?.takeIf { it.isNotBlank() } ?: lastResolvedXnxq?.takeIf { it.isNotBlank() } ?: run {
+                val termReq = Request.Builder()
+                    .url("$baseUrl/admin/xsd/xsdcjcx/getCurrentXnxq?sf_request_type=ajax")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .get()
+                    .build()
+                val termRaw = client.newCall(termReq).execute().use { it.body?.string().orEmpty() }
+                Log.d("WbuSyncEngine", "Term API response len=${termRaw.length}")
+                if (transport.looksLikeHtml(termRaw)) {
+                    Log.w("WbuSyncEngine", "Term API returned HTML; auth/session likely invalid.")
+                    return@withContext null
+                }
+                JSONObject(termRaw).optString("data", "").also { resolved ->
+                    if (resolved.isNotBlank()) {
+                        systemCurrentXnxq = resolved
+                        lastResolvedXnxq = resolved
+                    }
+                }
+            }
+            if (xnxq.isBlank()) {
+                Log.w("WbuSyncEngine", "Term API has empty xnxq.")
+                return@withContext null
+            }
+            lastResolvedXnxq = xnxq
+
+            val pkglHtml = client.newCall(
+                Request.Builder()
+                    .url("$baseUrl/admin/xsd/pkgl/xskb/queryKbForXsd?xnxq=$xnxq")
+                    .get()
+                    .build()
+            ).execute().use { it.body?.string() ?: run { Log.w("WbuSyncEngine", "queryKbForXsd null body"); return@withContext null } }
+
+            val document = Jsoup.parse(pkglHtml)
+            var xhid = document.select("#xhid").first()?.attr("value").orEmpty()
+            if (xhid.isBlank()) xhid = document.select("input[name=xhid]").first()?.attr("value").orEmpty()
+            var xqdm = document.select("#xqdm").first()?.attr("value").orEmpty()
+            if (xqdm.isBlank()) xqdm = document.select("input[name=xqdm]").first()?.attr("value").orEmpty()
+            if (xhid.isBlank()) xhid = extractFieldFromHtml(pkglHtml, "xhid").orEmpty()
+            if (xqdm.isBlank()) xqdm = extractFieldFromHtml(pkglHtml, "xqdm").orEmpty()
+            lastResolvedXqdm = xqdm.takeIf { it.isNotBlank() } ?: lastResolvedXqdm
+
+            val listUrlCandidates = linkedSetOf<String>().apply {
+                if (xhid.isNotBlank() && xqdm.isNotBlank()) {
+                    add("$baseUrl/admin/xsd/pkgl/xskb/sdpkkbList?xnxq=$xnxq&xhid=$xhid&xqdm=$xqdm&zdzc=&zxzc=&xskbxslx=0&sf_request_type=ajax")
+                }
+                add("$baseUrl/admin/xsd/pkgl/xskb/sdpkkbList?xnxq=$xnxq&zdzc=&zxzc=&xskbxslx=0&sf_request_type=ajax")
+                if (xhid.isNotBlank()) {
+                    add("$baseUrl/admin/xsd/pkgl/xskb/sdpkkbList?xnxq=$xnxq&xhid=$xhid&zdzc=&zxzc=&xskbxslx=0&sf_request_type=ajax")
+                }
+                if (xqdm.isNotBlank()) {
+                    add("$baseUrl/admin/xsd/pkgl/xskb/sdpkkbList?xnxq=$xnxq&xqdm=$xqdm&zdzc=&zxzc=&xskbxslx=0&sf_request_type=ajax")
+                }
+            }
+
+            var jsonArray: JSONArray? = null
+            for (candidate in listUrlCandidates) {
+                val listRaw = client.newCall(
+                    Request.Builder()
+                        .url(candidate)
+                        .header("X-Requested-With", "XMLHttpRequest")
+                        .get()
+                        .build()
+                ).execute().use { it.body?.string().orEmpty() }
+                val data = runCatching { JSONObject(listRaw.ifBlank { "{}" }) }
+                    .getOrNull()?.optJSONArray("data")
+                if (data != null) { jsonArray = data; break }
+            }
+            if (jsonArray == null) {
+                Log.w("WbuSyncEngine", "All sdpkkbList attempts failed to return data array")
+                return@withContext null
+            }
+
+            val draftCourses = buildDraftCourses(jsonArray, keepTeacherId())
+            if (draftCourses.isEmpty()) {
+                Log.w("WbuSyncEngine", "No parseable courses from sdpkkbList")
+                return@withContext emptyList()
+            }
+            val mergedDrafts = mergeAndDistinctCourses(draftCourses)
+
+            val courses = mergedDrafts.map { draft ->
+                val courseId = java.util.UUID.randomUUID().toString()
+                val course = Course(
+                    id = courseId,
+                    courseTableId = tableId,
+                    name = draft.name,
+                    day = draft.day,
+                    startSection = draft.startSection,
+                    endSection = draft.endSection,
+                    teacher = draft.teacher,
+                    position = draft.position,
+                    isCustomTime = false,
+                    customStartTime = null,
+                    customEndTime = null,
+                    colorInt = pickColorIndexForCourse(draft.name)
+                )
+                val weeks = draft.weeks.map { CourseWeek(courseId = courseId, weekNumber = it) }
+                CourseWithWeeks(course, weeks)
+            }
+            Log.i("WbuSyncEngine", "Fetch course data done. merged=${courses.size}")
+            return@withContext courses
+        } catch (e: Exception) {
+            Log.e("WbuSyncEngine", "Fetch failed", e)
+            null
+        }
+    }
+
+    suspend fun fetchSemesterConfig(xnxq: String? = null, xqdm: String? = null): WbuSemesterConfig? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                // 优先使用传入参数，其次复用先前在 fetchCourseData/canAccessTermApi 中已成功解析的学期与校区代码，避免重复请求
+                var termXnxq = xnxq?.takeIf { it.isNotBlank() } ?: lastResolvedXnxq?.takeIf { it.isNotBlank() }
+                var campusXqdm = xqdm?.takeIf { it.isNotBlank() } ?: lastResolvedXqdm?.takeIf { it.isNotBlank() }
+                if (termXnxq == null) {
+                    val termRaw = client.newCall(
+                        Request.Builder()
+                            .url("$baseUrl/admin/xsd/xsdcjcx/getCurrentXnxq?sf_request_type=ajax")
+                            .header("X-Requested-With", "XMLHttpRequest")
+                            .get()
+                            .build()
+                    ).execute().use { it.body?.string().orEmpty() }
+                    if (transport.looksLikeHtml(termRaw) || termRaw.isBlank()) return@withContext null
+                    termXnxq = JSONObject(termRaw).optString("data", "")
+                }
+                if (termXnxq.isBlank()) return@withContext null
+
+                if (campusXqdm.isNullOrBlank()) {
+                    val pageHtml = client.newCall(
+                        Request.Builder()
+                            .url("$baseUrl/admin/xsd/pkgl/xskb/queryKbForXsd?xnxq=${URLEncoder.encode(termXnxq, "UTF-8")}")
+                            .get()
+                            .build()
+                    ).execute().use { it.body?.string().orEmpty() }
+                    campusXqdm = runCatching { Jsoup.parse(pageHtml).select("#xqdm").first()?.attr("value") }
+                        .getOrNull()?.trim().orEmpty()
+                }
+
+                val cfgRaw = client.newCall(
+                    Request.Builder()
+                        .url("$baseUrl/admin/api/getZclistByXnxq?xnxq=${URLEncoder.encode(termXnxq, "UTF-8")}&role=&userId=&xqid=${URLEncoder.encode(campusXqdm, "UTF-8")}")
+                        .header("X-Requested-With", "XMLHttpRequest")
+                        .get()
+                        .build()
+                ).execute().use { it.body?.string().orEmpty() }
+                if (cfgRaw.isBlank()) return@withContext null
+                val data = JSONObject(cfgRaw).optJSONObject("data") ?: return@withContext null
+                val zclist = data.optJSONArray("zclist") ?: return@withContext null
+
+                val items = mutableListOf<Pair<Int, String>>()
+                for (i in 0 until zclist.length()) {
+                    val z = zclist.optJSONObject(i) ?: continue
+                    val zc = z.optInt("zc", 0)
+                    val minrq = z.optString("minrq", "")
+                    if (zc > 0 && minrq.isNotBlank()) items.add(zc to minrq)
+                }
+                if (items.isEmpty()) return@withContext null
+                val sorted = items.sortedBy { it.first }
+                WbuSemesterConfig(
+                    semesterStartDate = sorted.first().second.take(10),
+                    semesterTotalWeeks = sorted.maxOf { it.first }
+                )
+            }.getOrNull()
+        }
+
+    // ------------------- 教务登录后的学号解析 -------------------
+
+    private fun resolveAndPersistStudentId(fallbackStudentId: String) {
+        val username = cookieStore.firstOrNull { it.name == "username" }?.value
+        val sid = username?.takeIf { it.isNotBlank() } ?: fallbackStudentId
+        if (username.isNullOrBlank()) {
+            runCatching {
+                client.newCall(Request.Builder().url("$baseUrl/admin").get().build()).execute().use { resp -> }
+                cookieStore.firstOrNull { it.name == "username" }?.value
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { prefs.edit().putString(WbuAuthTransport.prefKeyLastStudentId(), it).apply() }
+            }
+            return
+        }
+        prefs.edit().putString(WbuAuthTransport.prefKeyLastStudentId(), sid).apply()
+        lastResolvedStudentId = sid
+        Log.d("WbuSyncEngine", "Resolved student id from username cookie: $sid")
+    }
+
+    // ------------------- 会话/连接状态 -------------------
+
+    private fun clearJwxtSessionCookies() {
+        runCatching {
+            val loginUrl = "$baseUrl/admin/login".toHttpUrlOrNull() ?: return
+            cookieStore.removeAll { it.matches(loginUrl) && it.name != "TWFID" }
+            transport.persistCookieStore()
+        }.onFailure { Log.w("WbuSyncEngine", "clearJwxtSessionCookies failed", it) }
+    }
+
+    private fun canAccessTermApi(): Boolean {
+        return runCatching {
+            val termReq = Request.Builder()
+                .url("$baseUrl/admin/xsd/xsdcjcx/getCurrentXnxq?sf_request_type=ajax")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .get()
+                .build()
+            // 使用不自动重定向的客户端探测，防止 302 自动跳入 WebVPN /por/ 门户产生多余请求
+            val manualClient = client.newBuilder().followRedirects(false).build()
+            manualClient.newCall(termReq).execute().use { resp ->
+                if (resp.code in 300..399) {
+                    Log.w("WbuSyncEngine", "Session check failed: term API returned 30x redirect (location=${resp.header("Location")})")
+                    return@use false
+                }
+                val body = resp.body?.string().orEmpty()
+                if (transport.looksLikeHtml(body)) {
+                    Log.w("WbuSyncEngine", "Session check failed: term API returned HTML login page.")
+                    return@use false
+                }
+                val term = JSONObject(body).optString("data", "")
+                // 顺手记录学期，供 fetchCourseData 复用，避免重复 getCurrentXnxq。
+                if (term.isNotBlank()) {
+                    systemCurrentXnxq = term
+                    lastResolvedXnxq = term
+                }
+                term.isNotBlank()
+            }
+        }.getOrElse { e ->
+            Log.w("WbuSyncEngine", "Session check failed: ${e.message}", e)
+            false
+        }
+    }
+
+    // ------------------- 密码加密 -------------------
+
+    private fun rsaEncryptJwxtPassword(password: String): String {
+        return runCatching {
+            val modulus = BigInteger(JWXT_RSA_MODULUS, 16)
+            val exponent = BigInteger(JWXT_RSA_EXPONENT, 16)
+            val spec = RSAPublicKeySpec(modulus, exponent)
+            val publicKey = KeyFactory.getInstance("RSA").generatePublic(spec)
+            val cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
+            cipher.init(Cipher.ENCRYPT_MODE, publicKey)
+            val encrypted = cipher.doFinal(password.toByteArray(Charsets.UTF_8))
             Base64.encodeToString(encrypted, Base64.NO_WRAP)
         }.getOrElse {
-            Log.w("WbuSyncEngine", "CAS password encryption failed, fallback to plain password", it)
+            Log.w("WbuSyncEngine", "JWXT RSA password encryption failed, fallback to plaintext", it)
             password
         }
     }
 
-    private fun randomAesString(len: Int): String {
-        val chars = "ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678"
-        val out = StringBuilder(len)
-        repeat(len) {
-            val idx = casRandom.nextInt(chars.length)
-            out.append(chars[idx])
-        }
-        return out.toString()
+    // ------------------- 文案/URL 解析基元 -------------------
+
+    private fun extractLoginErrorMessage(html: String): String? {
+        val m = Regex("""var\s+error\s*=\s*"([^"]*)"\s*;?""", RegexOption.IGNORE_CASE).find(html) ?: return null
+        val raw = m.groupValues.getOrNull(1)?.trim().orEmpty()
+        if (raw.isBlank()) return null
+        return raw.replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
+            .replace("\\\"", "\"").replace("\\'", "'").replace("\\\\", "\\").trim()
     }
 
-    private fun resolveAbsoluteUrl(baseUrl: String, maybeRelative: String): String {
-        val raw = maybeRelative.trim()
-        if (raw.startsWith("http://") || raw.startsWith("https://")) return raw
-        if (raw.startsWith("//")) {
-            val scheme = if (baseUrl.startsWith("https://")) "https:" else "http:"
-            return "$scheme$raw"
+    private fun extractFieldFromHtml(html: String, field: String): String? {
+        val escapedField = Regex.escape(field)
+        val patterns = listOf(
+            Regex("""$escapedField\s*[:=]\s*['\"]([^'\"]+)['\"]""", RegexOption.IGNORE_CASE),
+            Regex("""$escapedField\s*[:=]\s*(\d+)""", RegexOption.IGNORE_CASE)
+        )
+        for (pattern in patterns) {
+            val m = pattern.find(html) ?: continue
+            val v = m.groupValues.getOrNull(1).orEmpty().trim()
+            if (v.isNotBlank()) return v
         }
-        val base = baseUrl.toHttpUrlOrNull() ?: return raw
-        return base.resolve(raw)?.toString() ?: raw
+        return null
     }
 
     private fun extractIndexMainUrlFromScript(html: String): String? {
@@ -925,188 +1202,179 @@ class WbuSyncEngine(
 
     private fun extractCasLoginUrlFromHtml(html: String): String? {
         val match = Regex("""([\"'])([^\"']*authserver/login[^\"']*service=[^\"']+)\1""", RegexOption.IGNORE_CASE)
-            .find(html)
-            ?: return null
+            .find(html) ?: return null
         return match.groupValues.getOrNull(2)?.trim()?.takeIf { it.isNotBlank() }
     }
+
+    private fun resolveAbsoluteUrl(baseUrl: String, maybeRelative: String): String =
+        transport.resolveAbsoluteUrl(baseUrl, maybeRelative)
+
+    private fun cleanImportedText(value: String?): String {
+        if (value.isNullOrBlank()) return ""
+        return value
+            .replace(Regex("<[^>]+>"), "")
+            .replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private fun stripTeacherId(teacher: String): String = cleanTeacherId(teacher)
+    private fun keepTeacherId(): Boolean = WbuAuthTransport.getKeepTeacherId(context)
+    private fun keepBuilding(): Boolean = WbuAuthTransport.getKeepBuilding(context)
 
     private fun pickColorIndexForCourse(courseName: String, poolSize: Int = 12): Int {
         if (poolSize <= 0) return 0
         return kotlin.math.abs(courseName.hashCode()) % poolSize
     }
 
-    private fun canAccessTermApi(): Boolean {
-        return runCatching {
-            val termReq = Request.Builder()
-                .url("$baseUrl/admin/xsd/xsdcjcx/getCurrentXnxq?sf_request_type=ajax")
-                .header("X-Requested-With", "XMLHttpRequest")
-                .get()
-                .build()
+    // ------------------- 课表解析 -------------------
 
-            client.newCall(termReq).execute().use { resp ->
-                val body = resp.body?.string().orEmpty()
-                if (looksLikeHtml(body)) {
-                    Log.w("WbuSyncEngine", "Session check failed: term API returned HTML login page.")
-                    return@use false
-                }
+    private data class DraftCourse(
+        val name: String,
+        val teacher: String,
+        val position: String,
+        val day: Int,
+        val startSection: Int,
+        val endSection: Int,
+        val weeks: List<Int>
+    )
 
-                val json = JSONObject(body)
-                val term = json.optString("data", "")
-                term.isNotBlank()
+    private fun buildDraftCourses(jsonArray: JSONArray, keepTeacherId: Boolean): List<DraftCourse> {
+        data class Cell(val day: Int, val section: Int)
+        val byCell = LinkedHashMap<Cell, LinkedHashMap<String, LinkedHashSet<Int>>>()
+        var maxSection = 0
+
+        for (i in 0 until jsonArray.length()) {
+            val item = jsonArray.optJSONObject(i) ?: continue
+            val fromKcmc = cleanImportedText(item.optString("kcmc", ""))
+            val fromJxbmc = cleanImportedText(item.optString("jxbmc", ""))
+            val name = when {
+                fromKcmc.isNotBlank() -> fromKcmc
+                fromJxbmc.isNotBlank() -> fromJxbmc
+                else -> "未命名课程"
             }
-        }.getOrElse { e ->
-            Log.w("WbuSyncEngine", "Session check failed: ${e.message}", e)
-            false
-        }
-    }
-
-    private fun looksLikeHtml(content: String): Boolean {
-        val trimmed = content.trimStart()
-        return trimmed.startsWith("<html", ignoreCase = true) ||
-            trimmed.startsWith("<!doctype html", ignoreCase = true)
-    }
-
-    private fun persistCookieStore() {
-        val array = JSONArray()
-        cookieStore.forEach { cookie ->
-            val obj = JSONObject()
-                .put("name", cookie.name)
-                .put("value", cookie.value)
-                .put("domain", cookie.domain)
-                .put("path", cookie.path)
-                .put("expiresAt", cookie.expiresAt)
-                .put("secure", cookie.secure)
-                .put("httpOnly", cookie.httpOnly)
-                .put("hostOnly", cookie.hostOnly)
-                .put("persistent", cookie.persistent)
-            array.put(obj)
-        }
-        prefs.edit().putString(KEY_COOKIES_JSON, array.toString()).apply()
-    }
-
-    private fun restoreCookieStore() {
-        val raw = prefs.getString(KEY_COOKIES_JSON, null) ?: return
-        try {
-            val token = JSONTokener(raw).nextValue()
-            val arr = when (token) {
-                is JSONArray -> token
-                else -> JSONArray()
+            val rawTeacher = cleanImportedText(item.optString("tmc", ""))
+            val teacher = if (keepTeacherId) rawTeacher else stripTeacherId(rawTeacher)
+            val building = cleanImportedText(item.optString("jxlmc", ""))
+            val room = cleanImportedText(item.optString("croommc", ""))
+            val position = if (keepBuilding() && building.isNotEmpty() && room.isNotEmpty() && !room.contains(building)) {
+                "$building $room"
+            } else {
+                room.ifEmpty { building }
             }
-            val restored = mutableListOf<Cookie>()
-            for (i in 0 until arr.length()) {
-                val obj = arr.optJSONObject(i) ?: continue
-                val name = obj.optString("name")
-                val value = obj.optString("value")
-                val domain = obj.optString("domain")
-                if (name.isBlank() || value.isBlank() || domain.isBlank()) continue
-
-                val builder = Cookie.Builder()
-                    .name(name)
-                    .value(value)
-                    .path(obj.optString("path", "/"))
-
-                val hostOnly = obj.optBoolean("hostOnly", false)
-                if (hostOnly) {
-                    builder.hostOnlyDomain(domain)
-                } else {
-                    builder.domain(domain)
-                }
-
-                if (obj.optBoolean("persistent", false)) {
-                    val expiresAt = obj.optLong("expiresAt", 0L)
-                    if (expiresAt > System.currentTimeMillis()) {
-                        builder.expiresAt(expiresAt)
-                    }
-                }
-
-                if (obj.optBoolean("secure", false)) {
-                    builder.secure()
-                }
-                if (obj.optBoolean("httpOnly", false)) {
-                    builder.httpOnly()
-                }
-
-                restored.add(builder.build())
+            val day = item.optInt("xingqi", 1).coerceIn(1..7)
+            val startSection = run {
+                val rqxl = item.optString("rqxl", "")
+                val fromRqxl = if (rqxl.matches(Regex("^\\d{3,4}$"))) (rqxl.toIntOrNull() ?: 100) % 100 else null
+                (fromRqxl ?: item.optInt("djc", 1)).coerceIn(1..30)
             }
+            val weeks = parseWeeks(cleanImportedText(item.optString("zc", "")), cleanImportedText(item.optString("zcstr", "")))
+            if (name.isBlank() || weeks.isEmpty()) continue
 
-            cookieStore.clear()
-            cookieStore.addAll(restored)
-        } catch (e: JSONException) {
-            Log.w("WbuSyncEngine", "Failed to restore cookies; clearing persisted session", e)
-            prefs.edit().remove(KEY_COOKIES_JSON).apply()
-            cookieStore.clear()
+            maxSection = maxOf(maxSection, startSection)
+            val sig = "$name\u0001$teacher\u0001$position"
+            byCell.getOrPut(Cell(day, startSection)) { LinkedHashMap() }
+                .getOrPut(sig) { LinkedHashSet() }.addAll(weeks)
         }
+
+        val drafts = mutableListOf<DraftCourse>()
+        for (day in 1..7) {
+            var runStart: Int? = null
+            var runSig = ""
+            fun flushRun(endSection: Int) {
+                val start = runStart ?: return
+                if (start == 0 || runSig.isEmpty()) { runStart = null; runSig = ""; return }
+                byCell[Cell(day, start)]?.forEach { (sig, weeks) ->
+                    val parts = sig.split('\u0001')
+                    if (parts.size == 3) drafts.add(DraftCourse(parts[0], parts[1], parts[2], day, start, endSection, weeks.sorted()))
+                }
+                runStart = null
+                runSig = ""
+            }
+            for (s in 1..maxSection + 1) {
+                val cell = byCell[Cell(day, s)]
+                val sig = cell?.entries
+                    ?.sortedBy { it.key }
+                    ?.joinToString("\u0001") { (sk, ws) -> "$sk|${ws.sorted().joinToString(",")}" }
+                    .orEmpty()
+                val ended = s == maxSection + 1
+                if (runStart != null && (ended || sig.isEmpty() || sig != runSig)) flushRun(s - 1)
+                if (!ended && sig.isNotEmpty() && runStart == null) { runStart = s; runSig = sig }
+            }
+        }
+        return drafts
     }
 
-    companion object {
-        private const val PREFS_NAME = "wbu_sync_auth"
-        private const val KEY_COOKIES_JSON = "cookies_json"
-        private const val KEY_LAST_USE_VPN = "last_use_vpn"
-        private const val KEY_LAST_USE_VPN_SET = "last_use_vpn_set"
-        private const val KEY_LAST_STUDENT_ID = "last_student_id"
-        private const val KEY_USE_WEBVIEW_VPN_MANUAL_MODE = "use_webview_vpn_manual_mode"
+    private fun mergeAndDistinctCourses(list: List<DraftCourse>): List<DraftCourse> {
+        if (list.size <= 1) return list
+        val norm = list.map { it.copy(weeks = it.weeks.sorted().distinct()) }
 
-        fun hasPersistedSession(context: Context): Boolean {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            return !prefs.getString(KEY_COOKIES_JSON, null).isNullOrBlank()
+        val sorted1 = norm.sortedWith(compareBy(
+            { it.name }, { it.teacher }, { it.position }, { it.day },
+            { it.weeks.joinToString(",") }, { it.startSection }
+        ))
+        val step1 = mutableListOf<DraftCourse>()
+        var cur = sorted1[0]
+        for (i in 1 until sorted1.size) {
+            val nxt = sorted1[i]
+            val same = cur.name == nxt.name && cur.teacher == nxt.teacher &&
+                cur.position == nxt.position && cur.day == nxt.day && cur.weeks == nxt.weeks
+            val continuous = cur.endSection + 1 == nxt.startSection
+            val duplicate = cur.startSection == nxt.startSection && cur.endSection == nxt.endSection
+            when {
+                same && continuous -> cur = cur.copy(endSection = nxt.endSection)
+                same && duplicate -> { /* skip */ }
+                else -> { step1.add(cur); cur = nxt }
+            }
         }
+        step1.add(cur)
 
-        fun getSavedUseVpn(context: Context): Boolean? {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            if (!prefs.getBoolean(KEY_LAST_USE_VPN_SET, false)) return null
-            return prefs.getBoolean(KEY_LAST_USE_VPN, false)
+        val sorted2 = step1.sortedWith(compareBy(
+            { it.name }, { it.teacher }, { it.position }, { it.day },
+            { it.startSection }, { it.endSection }
+        ))
+        val step2 = mutableListOf<DraftCourse>()
+        var c = sorted2[0]
+        for (i in 1 until sorted2.size) {
+            val n = sorted2[i]
+            val sameSection = c.name == n.name && c.teacher == n.teacher &&
+                c.position == n.position && c.day == n.day &&
+                c.startSection == n.startSection && c.endSection == n.endSection
+            if (sameSection) {
+                c = c.copy(weeks = (c.weeks + n.weeks).distinct().sorted())
+            } else {
+                step2.add(c)
+                c = n
+            }
         }
-
-        fun getSavedStudentId(context: Context): String {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            return prefs.getString(KEY_LAST_STUDENT_ID, "").orEmpty()
-        }
-
-        fun shouldUseManualWebViewForVpn(context: Context): Boolean {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            return prefs.getBoolean(KEY_USE_WEBVIEW_VPN_MANUAL_MODE, false)
-        }
-
-        fun setManualWebViewForVpn(context: Context, enabled: Boolean) {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            prefs.edit().putBoolean(KEY_USE_WEBVIEW_VPN_MANUAL_MODE, enabled).apply()
-        }
+        step2.add(c)
+        return step2
     }
 
     private fun parseWeeks(zc: String, zcstr: String): List<Int> {
-        val fromZcstr = zcstr.split(",")
-            .mapNotNull { it.trim().toIntOrNull() }
-            .filter { it > 0 }
-            
+        val fromZcstr = zcstr.split(",").mapNotNull { it.trim().toIntOrNull() }.filter { it > 0 }
         if (fromZcstr.isNotEmpty()) return fromZcstr.sorted().distinct()
-
         if (zc.isEmpty()) return emptyList()
 
         val isOddOnly = zc.contains("单")
         val isEvenOnly = zc.contains("双")
         val normalized = zc.replace(Regex("[^\\d,\\-~]"), "")
-        
         val baseWeeks = mutableListOf<Int>()
         for (token in normalized.split(",")) {
             val t = token.trim()
             if (t.isEmpty()) continue
-            
             val single = t.toIntOrNull()
-            if (single != null) {
-                baseWeeks.add(single)
-                continue
-            }
-            
+            if (single != null) { baseWeeks.add(single); continue }
             val rangeMatch = Regex("^(\\d+)\\s*[-\\~]\\s*(\\d+)$").find(t)
             if (rangeMatch != null) {
                 val start = Math.min(rangeMatch.groupValues[1].toInt(), rangeMatch.groupValues[2].toInt())
                 val end = Math.max(rangeMatch.groupValues[1].toInt(), rangeMatch.groupValues[2].toInt())
-                for (w in start..end) {
-                    baseWeeks.add(w)
-                }
+                for (w in start..end) baseWeeks.add(w)
             }
         }
-
         return baseWeeks.filter {
             when {
                 isOddOnly -> it % 2 != 0
@@ -1116,51 +1384,170 @@ class WbuSyncEngine(
         }.sorted().distinct()
     }
 
-    private fun mergeContinuousSections(courses: List<CourseWithWeeks>): List<CourseWithWeeks> {
-        if (courses.isEmpty()) return emptyList()
+    // ------------------- 静态偏好访问（转发，UI 接口不变） -------------------
 
-        val sorted = courses.sortedWith(compareBy(
-            { it.course.day },
-            { it.weeks.joinToString { w -> w.weekNumber.toString() } },
-            { it.course.name },
-            { it.course.teacher },
-            { it.course.position },
-            { it.course.startSection ?: 0 }
-        ))
+    /**
+     * 重复课程冲突组信息（用于 UI 弹窗）。
+     */
+    data class DuplicateGroupInfo(
+        val sampleCourseName: String,
+        val sampleTeacherSummary: String,
+        val totalConflictCourses: Int,
+        val groupCount: Int,
+        val hasIdentical: Boolean,
+        val hasMultiTeacher: Boolean
+    )
 
-        val merged = mutableListOf<CourseWithWeeks>()
-        var i = 0
+    enum class DuplicateResolveStrategy {
+        KEEP_ALL,
+        MERGE_TEACHERS,
+        KEEP_ONE
+    }
 
-        while (i < sorted.size) {
-            val current = sorted[i]
-            var currentEnd = current.course.endSection
-            var j = i + 1
+    companion object {
+        /**
+         * 分析课程列表中是否存在同时间、同地点、同名但多教师或完全相同的重复课程。
+         */
+        fun analyzeDuplicateCourses(courses: List<CourseWithWeeks>): DuplicateGroupInfo? {
+            if (courses.size <= 1) return null
+            val groups = courses.groupBy { cw ->
+                val c = cw.course
+                val weeksStr = cw.weeks.map { it.weekNumber }.sorted().joinToString(",")
+                "${c.name}|${c.position}|${c.day}|${c.startSection}|${c.endSection}|$weeksStr"
+            }.values.filter { it.size > 1 }
 
-            while (j < sorted.size) {
-                val next = sorted[j]
-                val currentWeeksStr = current.weeks.map { it.weekNumber }.joinToString()
-                val nextWeeksStr = next.weeks.map { it.weekNumber }.joinToString()
+            if (groups.isEmpty()) return null
 
-                if (next.course.day == current.course.day &&
-                    next.course.name == current.course.name &&
-                    next.course.teacher == current.course.teacher &&
-                    next.course.position == current.course.position &&
-                    nextWeeksStr == currentWeeksStr &&
-                    (next.course.startSection ?: 0) == (currentEnd ?: 0) + 1
-                ) {
-                    currentEnd = next.course.endSection
-                    j++
+            var hasIdentical = false
+            var hasMultiTeacher = false
+            var sampleMultiGroup: List<CourseWithWeeks>? = null
+
+            for (g in groups) {
+                val teachers = g.map { it.course.teacher.trim() }.filter { it.isNotEmpty() }.distinct()
+                if (teachers.size > 1) {
+                    hasMultiTeacher = true
+                    if (sampleMultiGroup == null) sampleMultiGroup = g
                 } else {
-                    break
+                    hasIdentical = true
                 }
             }
 
-            val mergedCourse = current.course.copy(endSection = currentEnd)
-            val mergedWeeks = current.weeks.map { it.copy(courseId = mergedCourse.id) }
-            merged.add(CourseWithWeeks(mergedCourse, mergedWeeks))
-            i = j
+            val targetSampleGroup = sampleMultiGroup ?: groups.first()
+            val sampleCourse = targetSampleGroup.first().course
+            val teachersCombined = targetSampleGroup.map { it.course.teacher.trim() }
+                .filter { it.isNotEmpty() }.distinct().joinToString("、")
+
+            val totalCoursesInConflicts = groups.sumOf { it.size }
+            return DuplicateGroupInfo(
+                sampleCourseName = sampleCourse.name,
+                sampleTeacherSummary = teachersCombined.ifBlank { "多位教师" },
+                totalConflictCourses = totalCoursesInConflicts,
+                groupCount = groups.size,
+                hasIdentical = hasIdentical,
+                hasMultiTeacher = hasMultiTeacher
+            )
         }
-        return merged
+
+        /**
+         * 根据策略解决重复课程。
+         */
+        fun resolveDuplicateCourses(
+            courses: List<CourseWithWeeks>,
+            strategy: DuplicateResolveStrategy
+        ): List<CourseWithWeeks> {
+            if (strategy == DuplicateResolveStrategy.KEEP_ALL || courses.size <= 1) return courses
+
+            val grouped = courses.groupBy { cw ->
+                val c = cw.course
+                val weeksStr = cw.weeks.map { it.weekNumber }.sorted().joinToString(",")
+                "${c.name}|${c.position}|${c.day}|${c.startSection}|${c.endSection}|$weeksStr"
+            }
+
+            val result = mutableListOf<CourseWithWeeks>()
+            for ((_, group) in grouped) {
+                if (group.size == 1) {
+                    result.add(group.first())
+                } else {
+                    val first = group.first()
+                    when (strategy) {
+                        DuplicateResolveStrategy.MERGE_TEACHERS -> {
+                            val combinedTeachers = group.map { it.course.teacher.trim() }
+                                .filter { it.isNotEmpty() }.distinct().joinToString("、")
+                            val mergedCourse = first.course.copy(
+                                teacher = if (combinedTeachers.isNotBlank()) combinedTeachers else first.course.teacher
+                            )
+                            result.add(first.copy(course = mergedCourse))
+                        }
+                        DuplicateResolveStrategy.KEEP_ONE -> {
+                            result.add(first)
+                        }
+                        DuplicateResolveStrategy.KEEP_ALL -> {
+                            result.addAll(group)
+                        }
+                    }
+                }
+            }
+            return result
+        }
+
+        private const val KEY_LAST_USE_VPN = "last_use_vpn"
+        private const val KEY_LAST_USE_VPN_SET = "last_use_vpn_set"
+
+        /** 教务系统直连登录（/admin/login）JSEncrypt 硬编码公钥（1024 位 PKCS#1）。 */
+        private const val JWXT_RSA_MODULUS = "B3B58F37A7A94BF018359A825981DE8C39E1B41A55602A5D134EBC7C612CB8C9897E0F907FC1E12B40AF2A39E472860E0FBB8F336FBACD0104E84FDFF1E223ACB70C0EC4DD1B2935D884FE0AAC74B5FDB69B757FCDA04A89DF4AD5C2997517C89563B64C303DCE97A1DA3D4A989927A753ECBFC49D2D6EB889CBC1B71F9AF501"
+        private const val JWXT_RSA_EXPONENT = "010001"
+
+        /** 「使用 PC User-Agent」：默认关闭。 */
+        fun getUsePcUserAgent(context: Context): Boolean = WbuAuthTransport.getUsePcUserAgent(context)
+        fun setUsePcUserAgent(context: Context, enabled: Boolean) = WbuAuthTransport.setUsePcUserAgent(context, enabled)
+
+        /** 「不检测校园网环境」：默认关闭。 */
+        fun getSkipCampusCheck(context: Context): Boolean = WbuAuthTransport.getSkipCampusCheck(context)
+        fun setSkipCampusCheck(context: Context, enabled: Boolean) = WbuAuthTransport.setSkipCampusCheck(context, enabled)
+
+        /** 「保留教师工号」：默认关闭。 */
+        fun getKeepTeacherId(context: Context): Boolean = WbuAuthTransport.getKeepTeacherId(context)
+        fun setKeepTeacherId(context: Context, enabled: Boolean) = WbuAuthTransport.setKeepTeacherId(context, enabled)
+
+        /** 「保留建筑名称」：默认关闭。 */
+        fun getKeepBuilding(context: Context): Boolean = WbuAuthTransport.getKeepBuilding(context)
+        fun setKeepBuilding(context: Context, enabled: Boolean) = WbuAuthTransport.setKeepBuilding(context, enabled)
+        fun getSelectSemesterOnImport(context: Context): Boolean = WbuAuthTransport.getSelectSemesterOnImport(context)
+        fun setSelectSemesterOnImport(context: Context, enabled: Boolean) = WbuAuthTransport.setSelectSemesterOnImport(context, enabled)
+
+        /** 去除教师名末尾工号。 */
+        fun cleanTeacherId(teacher: String): String {
+            val m = Regex("^(.+?)\\s*[（(](\\d{4,})[）)]$").find(teacher.trim()) ?: return teacher
+            return m.groupValues[1].trim()
+        }
+
+        fun hasPersistedSession(context: Context): Boolean = WbuAuthTransport.hasPersistedSession(context)
+        fun getSavedUseVpn(context: Context): Boolean? = WbuAuthTransport.getSavedUseVpn(context)
+        fun setSavedUseVpn(context: Context, enabled: Boolean) = WbuAuthTransport.setSavedUseVpn(context, enabled)
+        fun getSavedStudentId(context: Context): String = WbuAuthTransport.getSavedStudentId(context)
+
+        fun isSimplifiedChinese(context: Context): Boolean = WbuAuthTransport.isSimplifiedChinese(context)
+
+        /** 「IDS addr not from Jwxt」：为 true 时不从教务登录页发现 CAS 链接，直接用 ids 基址构造。默认关闭。 */
+        fun getIdsAddrNotFromJwxt(context: Context): Boolean = WbuAuthTransport.getIdsAddrNotFromJwxt(context)
+        fun setIdsAddrNotFromJwxt(context: Context, enabled: Boolean) =
+            WbuAuthTransport.setIdsAddrNotFromJwxt(context, enabled)
+
+        /** 「no indexMain verify」：为 true 时不解析/打开 indexMain，仅校验会话 cookie + 拿学号。默认关闭。 */
+        fun getNoIndexMainVerify(context: Context): Boolean = WbuAuthTransport.getNoIndexMainVerify(context)
+        fun setNoIndexMainVerify(context: Context, enabled: Boolean) =
+            WbuAuthTransport.setNoIndexMainVerify(context, enabled)
+
+        /** 「登录WebVPN前必须获取学号」：为 true 时无论输入格式如何均先从 ids 换取学号。默认关闭。 */
+        fun getForceFetchStudentIdBeforeVpn(context: Context): Boolean =
+            WbuAuthTransport.getForceFetchStudentIdBeforeVpn(context)
+        fun setForceFetchStudentIdBeforeVpn(context: Context, enabled: Boolean) =
+            WbuAuthTransport.setForceFetchStudentIdBeforeVpn(context, enabled)
+
+        /** 「使用固定service获取ticket」：为 true 时提取学号使用同源个人中心 service。默认关闭。 */
+        fun getUseFixedServiceForTicket(context: Context): Boolean =
+            WbuAuthTransport.getUseFixedServiceForTicket(context)
+        fun setUseFixedServiceForTicket(context: Context, enabled: Boolean) =
+            WbuAuthTransport.setUseFixedServiceForTicket(context, enabled)
     }
 }
-

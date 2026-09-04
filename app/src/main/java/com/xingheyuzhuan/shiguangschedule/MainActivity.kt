@@ -39,10 +39,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.rounded.Book
 import androidx.compose.material.icons.rounded.Celebration
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Swipe
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.rounded.OpenWith
+import androidx.compose.material.icons.rounded.UnfoldMore
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -88,6 +97,22 @@ import com.canopas.lib.showcase.IntroShowcaseScope
 import com.canopas.lib.showcase.component.IntroShowcaseState
 import com.canopas.lib.showcase.component.ShowcaseStyle
 import com.canopas.lib.showcase.component.rememberIntroShowcaseState
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.DisposableEffect
+import com.xingheyuzhuan.shiguangschedule.tool.ReleaseUpdateInfo
+import com.xingheyuzhuan.shiguangschedule.tool.UpdateChecker
+import com.xingheyuzhuan.shiguangschedule.tool.UpdateStatus
+import com.xingheyuzhuan.shiguangschedule.ui.components.AppDownloadProgressDialog
+import com.xingheyuzhuan.shiguangschedule.ui.components.AppUpdateFoundDialog
+import com.xingheyuzhuan.shiguangschedule.ui.components.InstallPermissionPromptDialog
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.io.File
 import com.xingheyuzhuan.shiguangschedule.data.model.AppSettingsModel
 import com.xingheyuzhuan.shiguangschedule.data.model.AppThemeMode
 import com.xingheyuzhuan.shiguangschedule.data.model.StartScreen
@@ -95,6 +120,8 @@ import com.xingheyuzhuan.shiguangschedule.data.repository.AppSettingsRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.CourseConversionRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.TimeSlotRepository
 import com.xingheyuzhuan.shiguangschedule.ui.components.BottomNavigationBar
+import com.xingheyuzhuan.shiguangschedule.ui.components.LeftNavigationRail
+import com.xingheyuzhuan.shiguangschedule.ui.components.isWideScreen
 import com.xingheyuzhuan.shiguangschedule.ui.components.isOnboardingCompleted
 import com.xingheyuzhuan.shiguangschedule.ui.components.markOnboardingCompleted
 import com.xingheyuzhuan.shiguangschedule.ui.schedule.WeeklyScheduleScreen
@@ -108,7 +135,6 @@ import com.xingheyuzhuan.shiguangschedule.ui.settings.backup.BackupScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.contribution.ContributionScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.conversion.CourseTableConversionScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.course.AddEditCourseScreen
-import com.xingheyuzhuan.shiguangschedule.ui.settings.coursemanagement.COURSE_NAME_ARG
 import com.xingheyuzhuan.shiguangschedule.ui.settings.coursemanagement.CourseInstanceListScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.coursemanagement.CourseNameListScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.coursetables.ManageCourseTablesScreen
@@ -213,6 +239,58 @@ fun AppNavigation(
     var isFloatingCourseMode by remember { mutableStateOf(false) }
     val showBottomDock = currentDestination?.isMainScreen == true && !isFloatingCourseMode
 
+    val coroutineScope = rememberCoroutineScope()
+    val updateChecker = remember(context) { UpdateChecker(context.applicationContext) }
+    var autoUpdateFoundInfo by remember { mutableStateOf<ReleaseUpdateInfo?>(null) }
+    var autoUpdateStatus by remember { mutableStateOf<UpdateStatus>(UpdateStatus.Idle) }
+    var showAutoInstallPermissionDialog by remember { mutableStateOf(false) }
+    var autoPendingApkFile by remember { mutableStateOf<File?>(null) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val apk = autoPendingApkFile
+                if (apk != null && apk.exists() && updateChecker.canRequestPackageInstalls()) {
+                    updateChecker.installApk(apk)
+                    autoPendingApkFile = null
+                    showAutoInstallPermissionDialog = false
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        delay(1500)
+        val settings = appSettingsRepository.getAppSettingsOnce()
+        if (!settings.autoCheckUpdate) return@LaunchedEffect
+        val effectiveApiUrl = settings.customUpdateApiUrl.ifBlank { BuildConfig.UPDATE_API_URL }.trim()
+        if (effectiveApiUrl.isBlank()) return@LaunchedEffect
+
+        val now = System.currentTimeMillis()
+        val checkIntervalMs = 24 * 60 * 60 * 1000L
+        if (now - settings.lastCheckUpdateTime < checkIntervalMs) return@LaunchedEffect
+
+        val status = updateChecker.checkUpdate(
+            customApiUrl = effectiveApiUrl,
+            channel = settings.updateChannel
+        )
+
+        if (status is UpdateStatus.Found) {
+            // 发现新版本：若未被用户明确标记跳过，则弹出更新提示
+            if (status.info.latestVersionName != settings.ignoredUpdateVersion) {
+                autoUpdateFoundInfo = status.info
+            }
+        } else if (status is UpdateStatus.Latest) {
+            // 只有在已是最新版本时，才记录24小时冷却，避免频繁请求
+            appSettingsRepository.updateLastCheckUpdateTime(now)
+        }
+    }
+
     // NavBridge 实现（navigation3 后向兼容层，供各 Screen 使用）
     val navBridge: NavBridge = remember(backStack, context) {
         object : NavBridge {
@@ -260,11 +338,9 @@ fun AppNavigation(
 
     var showOnboarding by remember { mutableStateOf(!isOnboardingCompleted(context)) }
     val introShowcaseState = rememberIntroShowcaseState()
-    var pendingSyncStepAdvance by remember { mutableStateOf(false) }
     val completeOnboarding = {
         markOnboardingCompleted(context)
         showOnboarding = false
-        pendingSyncStepAdvance = false
     }
 
     BackHandler(enabled = showOnboarding) {
@@ -272,32 +348,16 @@ fun AppNavigation(
     }
 
     // Keep onboarding on the expected route for each step.
-    LaunchedEffect(showOnboarding, introShowcaseState.currentTargetIndex, currentDestination, pendingSyncStepAdvance) {
+    LaunchedEffect(showOnboarding, introShowcaseState.currentTargetIndex, currentDestination) {
         if (!showOnboarding) return@LaunchedEffect
         val currentIndex = introShowcaseState.currentTargetIndex
-        if (pendingSyncStepAdvance && currentIndex != 2) {
-            pendingSyncStepAdvance = false
-        }
         when {
-            pendingSyncStepAdvance && currentDestination !is Destination.Settings -> {
-                navBridge.navigateToMain(Destination.Settings)
-            }
-
-            pendingSyncStepAdvance && currentDestination is Destination.Settings && currentIndex == 2 -> {
-                introShowcaseState.goToNext(
-                    onComplete = completeOnboarding,
-                    allowCompleteOnMissingTarget = false
-                )
-                pendingSyncStepAdvance = false
-            }
-
-            currentIndex < LAST_ONBOARDING_TARGET_INDEX &&
-                currentDestination !is Destination.CourseSchedule -> {
+            // Steps 0..3: stay on CourseSchedule
+            currentIndex in 0..3 && currentDestination !is Destination.CourseSchedule -> {
                 navBridge.navigateToMain(Destination.CourseSchedule)
             }
-
-            currentIndex == LAST_ONBOARDING_TARGET_INDEX &&
-                currentDestination !is Destination.Settings -> {
+            // Step 4: manage tables guide on Settings screen
+            currentIndex == 4 && currentDestination !is Destination.Settings -> {
                 navBridge.navigateToMain(Destination.Settings)
             }
         }
@@ -312,11 +372,14 @@ fun AppNavigation(
     // navigation3 转场动画（主页面间无过渡，其余页面滑动+渐变）
     val animSpec = tween<IntOffset>(300)
 
+    // Backdrop blur source for the floating dock (glass nav bar samples content behind it).
+    val dockHazeState = remember { HazeState() }
+
     Box(modifier = Modifier.fillMaxSize()) {
         IntroShowcase(
             showIntroShowCase = showOnboarding,
             state = introShowcaseState,
-            dismissOnClickOutside = false,
+            dismissOnClickOutside = introShowcaseState.currentTargetIndex != 3,
             onShowCaseCompleted = {
                 // Canopas callback fires both on true finish and on temporary missing-target transitions.
                 // Only complete when the index has actually moved beyond the last onboarding step.
@@ -325,7 +388,7 @@ fun AppNavigation(
                 }
             }
         ) {
-            // ── Step 0: Welcome  +  Step 1: Swipe ── both target weekTitle
+            // ── Step 0: Welcome  +  Step 1: Swipe  +  Step 2: Course Drag & Resize ── target weekTitle
             val weekTitleTargetModifier =
                 if (showOnboarding && currentDestination is Destination.CourseSchedule) {
                     Modifier
@@ -357,15 +420,29 @@ fun AppNavigation(
                                 )
                             }
                         )
+                        .introShowCaseTarget(
+                            index = 2,
+                            style = showcaseStyle,
+                            content = {
+                                OnboardingCard(
+                                    title = stringResource(R.string.onboarding_title_course_drag),
+                                    body = stringResource(R.string.onboarding_body_course_drag),
+                                    isLastStep = false,
+                                    icon = { CourseDragGestureAnimation() },
+                                    showcaseState = introShowcaseState,
+                                    onComplete = completeOnboarding
+                                )
+                            }
+                        )
                 } else {
                     Modifier
                 }
 
-            // ── Step 2: Sync button ──
+            // ── Step 3: Sync button ──
             val syncButtonTargetModifier =
                 if (showOnboarding && currentDestination is Destination.CourseSchedule) {
                     Modifier.introShowCaseTarget(
-                        index = 2,
+                        index = 3,
                         style = showcaseStyle,
                         content = {
                             OnboardingCard(
@@ -383,25 +460,26 @@ fun AppNavigation(
                     Modifier
                 }
 
-            // Transition anchor: keep step-2 target available while moving to Settings,
-            // so the showcase does not complete early on a missing target.
-            val syncStepTransitionModifier =
-                if (
-                    showOnboarding &&
-                    pendingSyncStepAdvance &&
-                    currentDestination is Destination.Settings &&
-                    introShowcaseState.currentTargetIndex == 2
-                ) {
+            // ── Step 4: Manage Course Tables (Settings page item) ── (新手引导最后一步)
+            val manageCourseTablesTargetModifier =
+                if (showOnboarding && currentDestination is Destination.Settings) {
                     Modifier.introShowCaseTarget(
-                        index = 2,
+                        index = 4,
                         style = showcaseStyle,
                         content = {
                             OnboardingCard(
-                                title = stringResource(R.string.onboarding_title_3),
-                                body = stringResource(R.string.onboarding_body_3),
-                                isLastStep = false,
-                                advanceByTapAnywhere = false,
-                                icon = { TapGestureAnimation() },
+                                title = stringResource(R.string.onboarding_title_manage_tables),
+                                body = stringResource(R.string.onboarding_body_manage_tables),
+                                isLastStep = true,
+                                advanceByTapAnywhere = true,
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Book,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                },
                                 showcaseState = introShowcaseState,
                                 onComplete = completeOnboarding
                             )
@@ -415,33 +493,13 @@ fun AppNavigation(
             val bottomNavTargetModifier =
                 Modifier
 
-            // ── Step 3: Semester start date (Settings page) ──
-            val semesterSettingTargetModifier =
-                if (showOnboarding && currentDestination is Destination.Settings) {
-                    Modifier.introShowCaseTarget(
-                        index = 3,
-                        style = showcaseStyle.copy(backgroundColor = Color(0xFF12222E)),
-                        content = {
-                            OnboardingCard(
-                                title = stringResource(R.string.onboarding_title_5),
-                                body = stringResource(R.string.onboarding_body_5),
-                                isLastStep = true,
-                                icon = { TapGestureAnimation() },
-                                showcaseState = introShowcaseState,
-                                onComplete = completeOnboarding
-                            )
-                        }
-                    )
-                } else {
-                    Modifier
-                }
-
             NavDisplay(
                 backStack = backStack,
                 onBack = navBridge::popBackStack,
                 modifier = Modifier
                     .fillMaxSize()
-                    .nestedScroll(dockNestedScrollConnection),
+                    .nestedScroll(dockNestedScrollConnection)
+                    .hazeSource(dockHazeState),
                 transitionSpec = {
                     val fromMain = initialState.metadata[ShiguangNavMetadata.IsMainScreenKey] ?: false
                     val toMain = targetState.metadata[ShiguangNavMetadata.IsMainScreenKey] ?: false
@@ -487,9 +545,10 @@ fun AppNavigation(
                                 navBridge = navBridge,
                                 weekTitleModifier = weekTitleTargetModifier,
                                 syncButtonModifier = syncButtonTargetModifier,
+                                hazeState = dockHazeState,
                                 onFloatingModeChange = { isFloatingCourseMode = it },
                                 onWeekTitleClickIntercept = {
-                                    if (showOnboarding && introShowcaseState.currentTargetIndex in 0..1) {
+                                    if (showOnboarding && introShowcaseState.currentTargetIndex in 0..2) {
                                         introShowcaseState.goToNext(
                                             onComplete = completeOnboarding,
                                             allowCompleteOnMissingTarget = false
@@ -503,37 +562,25 @@ fun AppNavigation(
                                     if (!showOnboarding) {
                                         false
                                     } else {
-                                        if (introShowcaseState.currentTargetIndex == 2) {
-                                            pendingSyncStepAdvance = true
-                                            if (currentDestination !is Destination.Settings) {
-                                                navBridge.navigateToMain(Destination.Settings)
-                                            }
+                                        if (introShowcaseState.currentTargetIndex == 3) {
+                                            navBridge.navigateToMain(Destination.Settings)
+                                            introShowcaseState.goToNext(
+                                                onComplete = completeOnboarding,
+                                                allowCompleteOnMissingTarget = false
+                                            )
+                                            true
+                                        } else {
+                                            true
                                         }
-                                        true
                                     }
                                 }
                             )
 
-                            Destination.Settings -> Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .then(syncStepTransitionModifier)
-                            ) {
-                                SettingsScreen(
-                                    navBridge = navBridge,
-                                    semesterStartDateItemModifier = semesterSettingTargetModifier,
-                                    forceShowSemesterStartDateCard = showOnboarding &&
-                                        introShowcaseState.currentTargetIndex == LAST_ONBOARDING_TARGET_INDEX,
-                                    onSemesterStartDateSet = {
-                                        if (
-                                            showOnboarding &&
-                                            introShowcaseState.currentTargetIndex == LAST_ONBOARDING_TARGET_INDEX
-                                        ) {
-                                            completeOnboarding()
-                                        }
-                                    }
-                                )
-                            }
+                            Destination.Settings -> SettingsScreen(
+                                navBridge = navBridge,
+                                manageCourseTablesModifier = manageCourseTablesTargetModifier,
+                                forceScrollToManageTables = showOnboarding && introShowcaseState.currentTargetIndex == 4
+                            )
 
                             Destination.TodaySchedule -> TodayScheduleScreen(navBridge = navBridge)
                             Destination.TimeSlotSettings -> TimeSlotManagementScreen(onBackClick = navBridge::popBackStack)
@@ -587,7 +634,18 @@ fun AppNavigation(
                 }
             }
 
-            if (showBottomDock) {
+            // 宽屏（平板）→ 左侧导航栏（ClassFlow 定制）；手机 → 底部悬浮 dock
+            if (showBottomDock && isWideScreen) {
+                LeftNavigationRail(
+                    navBridge = navBridge,
+                    currentDestination = currentDestination,
+                    hazeState = dockHazeState,
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                )
+            }
+
+            if (showBottomDock && !isWideScreen) {
                 Box(
                     modifier = bottomNavTargetModifier
                         .align(Alignment.BottomCenter)
@@ -600,6 +658,7 @@ fun AppNavigation(
                         navBridge = navBridge,
                         currentDestination = currentDestination,
                         isTransparent = true,
+                        hazeState = dockHazeState,
                         onTabClickIntercept = {
                             if (showOnboarding && introShowcaseState.currentTargetIndex == LAST_ONBOARDING_TARGET_INDEX) {
                                 completeOnboarding()
@@ -611,6 +670,67 @@ fun AppNavigation(
                     )
                 }
             }
+        }
+
+        if (autoUpdateFoundInfo != null && autoUpdateStatus !is UpdateStatus.Downloading) {
+            val info = autoUpdateFoundInfo!!
+            AppUpdateFoundDialog(
+                info = info,
+                currentVersionName = BuildConfig.VERSION_NAME,
+                onDismiss = {
+                    autoUpdateFoundInfo = null
+                },
+                onSkipVersion = {
+                    coroutineScope.launch {
+                        appSettingsRepository.updateIgnoredUpdateVersion(info.latestVersionName)
+                    }
+                    autoUpdateFoundInfo = null
+                },
+                onUpdateConfirm = {
+                        coroutineScope.launch {
+                            autoUpdateStatus = UpdateStatus.Downloading()
+                            val result = updateChecker.downloadAndInstallUpdate(
+                                downloadUrl = info.downloadUrl,
+                                versionName = info.latestVersionName,
+                                expectedSize = info.expectedSize,
+                                expectedMd5 = info.expectedMd5,
+                                onProgress = { progress, currentBytes, totalBytes ->
+                                    autoUpdateStatus = UpdateStatus.Downloading(progress, currentBytes, totalBytes)
+                                }
+                            )
+                        if (result.isSuccess) {
+                            val apk = result.getOrNull()
+                            autoPendingApkFile = apk
+                            autoUpdateStatus = UpdateStatus.Idle
+                            autoUpdateFoundInfo = null
+                            appSettingsRepository.updateIgnoredUpdateVersion("")
+                            if (!updateChecker.canRequestPackageInstalls()) {
+                                showAutoInstallPermissionDialog = true
+                            }
+                        } else {
+                            autoUpdateStatus = UpdateStatus.Idle
+                        }
+                    }
+                }
+            )
+        }
+
+        if (autoUpdateStatus is UpdateStatus.Downloading) {
+            AppDownloadProgressDialog(
+                downloading = autoUpdateStatus as UpdateStatus.Downloading
+            )
+        }
+
+        if (showAutoInstallPermissionDialog) {
+            InstallPermissionPromptDialog(
+                onConfirm = {
+                    showAutoInstallPermissionDialog = false
+                    updateChecker.openInstallPermissionSettings()
+                },
+                onDismiss = {
+                    showAutoInstallPermissionDialog = false
+                }
+            )
         }
     }
 }
@@ -659,14 +779,14 @@ private fun IntroShowcaseScope.OnboardingCard(
     onComplete: () -> Unit
 ) {
     val continueHint = when {
-        isLastStep -> "? 点击任意处完成"
+        isLastStep -> "✓ 点击任意处完成"
         advanceByTapAnywhere -> "点击任意处继续 →"
         else -> "请点击右上角同步按钮继续 →"
     }
 
     Box(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
             .then(
                 if (advanceByTapAnywhere || isLastStep) {
                     Modifier.clickable(
@@ -688,28 +808,28 @@ private fun IntroShowcaseScope.OnboardingCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp)
-                .verticalScroll(rememberScrollState()),
+                .padding(top = if (isLastStep) 4.dp else 0.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
         if (icon != null) {
             icon()
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
         }
         Text(
             text = title,
             color = Color.White,
-            fontSize = 22.sp,
+            fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = body,
             color = Color.White.copy(alpha = 0.92f),
-            fontSize = 15.sp,
+            fontSize = 14.sp,
             textAlign = TextAlign.Center
         )
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = continueHint,
             color = Color.White.copy(alpha = 0.6f),
@@ -720,9 +840,171 @@ private fun IntroShowcaseScope.OnboardingCard(
     }
 }
 
-private const val LAST_ONBOARDING_TARGET_INDEX = 3
+private const val LAST_ONBOARDING_TARGET_INDEX = 4
 
 // ── Gesture hint animations ──
+
+@Composable
+private fun CourseDragGestureAnimation() {
+    val infiniteTransition = rememberInfiniteTransition(label = "course_drag_anim")
+
+    // phase: 0f..4200f (循环演示完整手势)
+    val progress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 4200f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "phase"
+    )
+
+    // 计算各阶段状态:
+    // 0..800ms: 长按激活 -> 触点波纹渐显，端点出现
+    // 800..1900ms: 拖动底部端点向下延长节数
+    // 1900..3300ms: 拖动卡片整体向右移至屏幕边缘并悬浮挂起
+    // 3300..4200ms: 边缘释放悬停，淡出还原
+    val (blockHeightDp, blockOffsetXDp, handlesAlpha, touchIndicatorOffset, isNearEdge) = when {
+        progress < 800f -> {
+            val p = progress / 800f
+            Quint(66f, -14f, p, Offset(-14f, 0f), false)
+        }
+        progress < 1900f -> {
+            val p = ((progress - 800f) / 1100f).coerceIn(0f, 1f)
+            val stretch = kotlin.math.sin(p * Math.PI.toFloat()) * 28f
+            Quint(66f + stretch, -14f, 1f, Offset(10f, 33f + stretch), false)
+        }
+        progress < 3300f -> {
+            val p = ((progress - 1900f) / 1400f).coerceIn(0f, 1f)
+            val moveX = -14f + p * 62f // 从 -14f 移动到 +48f，直接跨上右侧屏幕边缘虚线
+            val nearEdge = p > 0.65f
+            Quint(66f, moveX, 1f, Offset(moveX, 0f), nearEdge)
+        }
+        else -> {
+            val p = ((progress - 3300f) / 900f).coerceIn(0f, 1f)
+            Quint(66f, 48f, 1f - p, Offset(48f, 0f), true)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .size(width = 176.dp, height = 112.dp)
+            .padding(vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        // 模拟右侧屏幕边缘基准线与目标周次提示
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .width(28.dp)
+                .height(96.dp)
+                .background(
+                    color = if (isNearEdge) Color(0xFF60A5FA).copy(alpha = 0.28f) else Color.White.copy(alpha = 0.06f),
+                    shape = RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)
+                )
+                .border(
+                    width = 1.2.dp,
+                    color = if (isNearEdge) Color(0xFF93C5FD).copy(alpha = 0.85f) else Color.White.copy(alpha = 0.25f),
+                    shape = RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = if (isNearEdge) "跨周\n释放" else "屏幕\n边缘",
+                color = if (isNearEdge) Color.White else Color.White.copy(alpha = 0.5f),
+                fontSize = 9.sp,
+                lineHeight = 11.sp,
+                fontWeight = if (isNearEdge) FontWeight.Bold else FontWeight.Normal,
+                textAlign = TextAlign.Center
+            )
+        }
+
+        // 模拟课程卡片
+        Box(
+            modifier = Modifier
+                .offset(x = blockOffsetXDp.dp)
+                .width(92.dp)
+                .height(blockHeightDp.dp)
+                .background(
+                    color = if (isNearEdge) Color(0xFF2563EB).copy(alpha = 0.95f) else Color(0xFF3B82F6).copy(alpha = 0.88f),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                .border(
+                    width = if (isNearEdge) 1.5.dp else 1.dp,
+                    color = if (isNearEdge) Color(0xFFBAE6FD) else Color.White.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(12.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = if (isNearEdge) "跨周挂起中" else "示例课程",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.OpenWith,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Text(
+                        text = if (isNearEdge) "移动至下周" else "长按拖动",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 9.sp
+                    )
+                }
+            }
+
+            // 上端点
+            if (handlesAlpha > 0.01f && !isNearEdge) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = (-5).dp, y = (-5).dp)
+                        .size(11.dp)
+                        .background(Color.White.copy(alpha = handlesAlpha), CircleShape)
+                        .border(1.5.dp, Color(0xFF1D4ED8).copy(alpha = handlesAlpha), CircleShape)
+                )
+                // 下端点
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .offset(x = 5.dp, y = 5.dp)
+                        .size(11.dp)
+                        .background(Color.White.copy(alpha = handlesAlpha), CircleShape)
+                        .border(1.5.dp, Color(0xFF1D4ED8).copy(alpha = handlesAlpha), CircleShape)
+                )
+            }
+        }
+
+        // 手指触控指示光标
+        if (handlesAlpha > 0.05f) {
+            Box(
+                modifier = Modifier
+                    .offset(x = touchIndicatorOffset.x.dp, y = touchIndicatorOffset.y.dp)
+                    .size(24.dp)
+                    .background(Color.White.copy(alpha = 0.28f * handlesAlpha), CircleShape)
+                    .border(1.5.dp, Color.White.copy(alpha = 0.9f * handlesAlpha), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(Color.White.copy(alpha = 0.95f * handlesAlpha), CircleShape)
+                )
+            }
+        }
+    }
+}
+
+private data class Quint<A, B, C, D, E>(val first: A, val second: B, val third: C, val fourth: D, val fifth: E)
 
 @Composable
 private fun SwipeGestureAnimation() {

@@ -340,7 +340,7 @@ private fun QuickTemplateSection(
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("快捷时间模板", style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = false, onClick = onApplyWbuTemplate, label = { Text("WBU 13 节模板") })
+                FilterChip(selected = false, onClick = onApplyWbuTemplate, label = { Text("WBU 12 节模板") })
                 FilterChip(selected = false, onClick = onApplyCompactTemplate, label = { Text("10 节紧凑模板") })
             }
             Button(onClick = onOpenBatchGenerator, modifier = Modifier.fillMaxWidth()) {

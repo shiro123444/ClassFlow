@@ -275,7 +275,7 @@ fun CourseTableConversionScreen(
             SettingsCard(title = stringResource(R.string.section_school_import)) {
                 SettingTile(
                     icon = Icons.Rounded.School,
-                    title = "武汉商学院教务一键同步",
+                    title = "WBU教务一键同步",
                     subtitle = "自动登录后抓取课表并回写到当前课表",
                     onClick = {
                         navBridge.navigate(Destination.WebView(initialUrl = "https://jwxt.wbu.edu.cn/admin/?loginType=1", assetJsPath = ""))

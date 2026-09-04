@@ -1,4 +1,6 @@
 import org.gradle.api.tasks.compile.JavaCompile
+import java.util.Properties
+import java.io.FileInputStream
 
 plugins {
     alias(libs.plugins.android.application)
@@ -18,12 +20,26 @@ android {
     namespace = "com.xingheyuzhuan.shiguangschedule"
     compileSdk = 37
 
+    val localProperties = Properties().apply {
+        val file = rootProject.file("local.properties")
+        if (file.exists()) {
+            FileInputStream(file).use { load(it) }
+        }
+    }
+
+    val updateApiUrl: String = (project.findProperty("CLASSFLOW_UPDATE_API_URL") as? String)
+        ?: localProperties.getProperty("CLASSFLOW_UPDATE_API_URL")
+        ?: System.getenv("CLASSFLOW_UPDATE_API_URL")
+        ?: ""
+
     defaultConfig {
         applicationId = "com.shiro.classflow"
         minSdk = 26
         targetSdk = 37
-        versionCode = 15
-        versionName = "1.0.0.0"
+        versionCode = 16
+        versionName = "1.1.0"
+
+        buildConfigField("String", "UPDATE_API_URL", "\"$updateApiUrl\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -130,12 +146,14 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.navigation3.runtime)
     implementation(libs.androidx.navigation3.ui)
+    implementation(libs.haze)
     implementation(libs.androidx.lifecycle.viewmodel.navigation3)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.datastore.core)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.okhttp)
     debugImplementation(libs.okhttp.logging.interceptor)
+    implementation(libs.zxing.core)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     implementation(libs.jgit)

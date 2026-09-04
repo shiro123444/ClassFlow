@@ -45,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -194,7 +195,6 @@ fun WallpaperAdjustScreen(
                         ) {
                             val widthPx = phoneSize.width.toFloat().coerceAtLeast(1f)
                             val heightPx = phoneSize.height.toFloat().coerceAtLeast(1f)
-                            val previewDimAlpha = style.backgroundDimAlpha.coerceAtMost(0.35f)
                             val wallpaperModel = remember(style.backgroundImagePath) { File(style.backgroundImagePath) }
 
                             AsyncImage(
@@ -207,17 +207,10 @@ fun WallpaperAdjustScreen(
                                         scaleY = scale
                                         translationX = widthPx * offsetX
                                         translationY = heightPx * offsetY
-                                    },
+                                    }
+                                    .blur(style.backgroundBlurRadius),
                                 contentScale = ContentScale.Crop,
                                 alignment = Alignment.TopCenter
-                            )
-
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(
-                                        MaterialTheme.colorScheme.surface.copy(alpha = previewDimAlpha)
-                                    )
                             )
 
                             ScheduleGridContent(

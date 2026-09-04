@@ -1,6 +1,6 @@
 package com.xingheyuzhuan.shiguangschedule.ui.settings.coursemanagement
 import com.xingheyuzhuan.shiguangschedule.ui.theme.LocalIsDarkTheme
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
@@ -34,6 +34,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -68,6 +69,10 @@ fun CourseInstanceListScreen(
     navBridge: NavBridge,
     viewModel: CourseInstanceListViewModel = hiltViewModel()
 ) {
+    LaunchedEffect(courseName) {
+        viewModel.initCourseName(courseName)
+    }
+
     // 使用 collectAsStateWithLifecycle 观察 UI 状态（包含颜色列表）
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val courseInstances by viewModel.courseInstances.collectAsStateWithLifecycle()

@@ -34,6 +34,7 @@ import androidx.compose.ui.zIndex
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.model.schedule_style.BorderTypeProto
 import com.xingheyuzhuan.shiguangschedule.data.model.schedule_style.ScheduleModeProto
+import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -47,7 +48,7 @@ fun ScheduleGrid(
     actions: ScheduleGridActions,
     style: ScheduleGridStyleComposed,
     modifier: Modifier = Modifier,
-    showGlassBorder: Boolean = false // 玻璃光边仅在 Sakura 主题下由调用方显式开启（ClassFlow 定制）
+    hazeState: HazeState? = null // 课程块毛玻璃模糊源（用于对课程块背景做真实模糊）
 ) {
     Box(modifier.fillMaxSize()) {
         val density = LocalDensity.current
@@ -198,32 +199,10 @@ fun ScheduleGrid(
                         singleSchedulables.forEach { item ->
                             val isExpanded = state.expandedItem != null && state.expandedItem?.parentBlock === item.parentBlock
 
-                            // 玻璃光边是 ClassFlow 特色（上游无此效果）：仅 Sakura 时间主题下显示；有自定义边框时也不叠加
-                            val glassBorderModifier = if (showGlassBorder && style.borderType == BorderTypeProto.BORDER_TYPE_NONE) {
-                                val borderWidth = when (style.glassPreset) {
-                                    0 -> 0.5.dp
-                                    1 -> 1.dp
-                                    else -> 1.5.dp
-                                }
-                                val borderAlpha = when (style.glassPreset) {
-                                    0 -> 0.16f
-                                    1 -> 0.32f
-                                    else -> 0.42f
-                                }
-                                Modifier.border(
-                                    borderWidth,
-                                    Color.White.copy(alpha = borderAlpha),
-                                    RoundedCornerShape(style.courseBlockCornerRadius)
-                                )
-                            } else {
-                                Modifier
-                            }
-
                             Box(
                                 modifier = Modifier
                                     .padding(style.courseBlockOuterPadding)
                                     .zIndex(if (isExpanded) 2f else 0f)
-                                    .then(glassBorderModifier)
                                     .then(
                                         if (!isExpanded) {
                                             Modifier.pointerInput(item) {
@@ -248,6 +227,7 @@ fun ScheduleGrid(
                                     style = style,
                                     timeSlots = viewState.timeSlots,
                                     isFloating = isExpanded,
+                                    hazeState = hazeState,
                                     modifier = if (isExpanded) {
                                         if (!item.parentBlock.isVisualDemoted) {
                                             Modifier.pointerInput(item, state.gridWidthPx) {
