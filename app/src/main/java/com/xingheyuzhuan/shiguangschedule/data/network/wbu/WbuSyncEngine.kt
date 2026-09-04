@@ -521,7 +521,7 @@ class WbuSyncEngine(
             Log.w("WbuSyncEngine", "WebVPN 直接登录失败（${portalStep.message}），尝试回退走 IDS 解析真实学号...")
             val fallbackSid = performPreIdsAuthAndGetStudentId(studentId, effectiveVpnPassword, captchaProvider)
             if (fallbackSid != null && fallbackSid != vpnStudentId) {
-                Log.i("WbuSyncEngine", "回退成功解析出真实学号 '$fallbackSid'，正在重试登录 WebVPN...")
+                Log.d("WbuSyncEngine", "回退成功解析出真实学号，正在重试登录 WebVPN...")
                 vpnStudentId = fallbackSid
                 didPreIdsAuth = true
                 portalStep = portal.portalPasswordLogin(vpnStudentId, effectiveVpnPassword)
@@ -596,7 +596,7 @@ class WbuSyncEngine(
             } ?: cas.fetchStudentIdFromCas(transport.idsBase(), serviceTarget)
 
             return if (!realSid.isNullOrBlank()) {
-                Log.i("WbuSyncEngine", "Resolved student ID '$realSid' for input '$usernameInput'")
+                Log.d("WbuSyncEngine", "Resolved student ID from input")
                 realSid
             } else {
                 usernameInput

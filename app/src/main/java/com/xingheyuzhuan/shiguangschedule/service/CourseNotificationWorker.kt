@@ -86,9 +86,9 @@ class CourseNotificationWorker @AssistedInject constructor(
 
                 if (remindTime.isAfter(LocalDateTime.now())) {
                     setAlarm(course.id, remindTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), course.name, course.position)
-                    Log.i(TAG, "已为课程 ${course.name} (${course.date}) 设置提醒。地点: ${course.position}，提醒时间: $remindTime")
+                    Log.d(TAG, "已为课程 ${course.name} (${course.date}) 设置提醒。地点: ${course.position}，提醒时间: $remindTime")
                 } else {
-                    Log.i(TAG, "课程 ${course.name} (${course.date}) 的提醒时间已过，不设置。")
+                    Log.d(TAG, "课程 ${course.name} (${course.date}) 的提醒时间已过，不设置。")
                 }
             }
 

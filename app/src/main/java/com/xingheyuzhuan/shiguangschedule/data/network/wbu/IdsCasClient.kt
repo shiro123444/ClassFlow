@@ -60,7 +60,9 @@ internal class IdsCasClient(
                 .toString()
         }.getOrNull() ?: location
         if (rewritten != location) {
-            Log.i("IdsCasClient", "Rewrote CAS redirect to jwxt proxy: $location -> $rewritten")
+            val sanitizedLocation = location.replace(Regex("""ticket=[^&]+"""), "ticket=***")
+            val sanitizedRewritten = rewritten.replace(Regex("""ticket=[^&]+"""), "ticket=***")
+            Log.d("IdsCasClient", "Rewrote CAS redirect to jwxt proxy: $sanitizedLocation -> $sanitizedRewritten")
         }
         return rewritten
     }
@@ -748,7 +750,7 @@ internal class IdsCasClient(
                 val user = Regex("""<cas:user>(.*?)</cas:user>""", RegexOption.IGNORE_CASE)
                     .find(xml)?.groupValues?.getOrNull(1)?.trim()
                 if (!user.isNullOrBlank()) {
-                    Log.i("IdsCasClient", "Resolved standard student ID from CAS: $user")
+                    Log.d("IdsCasClient", "Resolved standard student ID from CAS: ${user.take(2)}***${user.takeLast(2)}")
                     user
                 } else null
             }
