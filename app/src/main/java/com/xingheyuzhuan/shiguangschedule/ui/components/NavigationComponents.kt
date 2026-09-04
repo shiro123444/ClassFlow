@@ -248,9 +248,8 @@ fun BottomNavigationBar(
                         drawRoundRect(
                             brush = Brush.verticalGradient(
                                 listOf(
-                                    Color.White.copy(alpha = if (isDark) 0.22f else 0.88f),
-                                    Color(if (isDark) 0xFFDCEBFF else 0xFFF5F8FF)
-                                        .copy(alpha = if (isDark) 0.18f else 0.65f)
+                                    Color.White.copy(alpha = 0.22f),
+                                    Color(if (isDark) 0xFFDCEBFF else 0xFFF5F8FF).copy(alpha = 0.18f)
                                 ),
                                 startY = top,
                                 endY = top + ih
@@ -454,9 +453,8 @@ fun LeftNavigationRail(
                         drawRoundRect(
                             brush = Brush.verticalGradient(
                                 listOf(
-                                    Color.White.copy(alpha = if (isDark) 0.22f else 0.88f),
-                                    Color(if (isDark) 0xFFDCEBFF else 0xFFF5F8FF)
-                                        .copy(alpha = if (isDark) 0.18f else 0.65f)
+                                    Color.White.copy(alpha = 0.22f),
+                                    Color(if (isDark) 0xFFDCEBFF else 0xFFF5F8FF).copy(alpha = 0.18f)
                                 ),
                                 startY = topY,
                                 endY = topY + currentHeight
