@@ -5,6 +5,7 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.IdsCasClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WebVpnClient
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.DynamicCodeSendResult
 import com.xingheyuzhuan.shiguangschedule.ui.theme.LocalIsDarkTheme
 
@@ -154,8 +155,13 @@ fun WbuAuthBottomSheet(
 ) {
     val isDark = LocalIsDarkTheme.current
     val context = LocalContext.current
+    var rememberPassword by remember { mutableStateOf(WbuAuthTransport.isRememberPasswordEnabled(context)) }
+    var hasSavedPassword by remember { mutableStateOf(WbuAuthTransport.hasSavedPassword(context)) }
+    var isPasswordModified by remember { mutableStateOf(false) }
     var studentId by remember(initialStudentId) { mutableStateOf(initialStudentId) }
-    var password by remember { mutableStateOf("") }
+    var password by remember {
+        mutableStateOf(if (WbuAuthTransport.hasSavedPassword(context)) "••••••••" else "")
+    }
     var useVpn by remember(initialUseVpn) { mutableStateOf(initialUseVpn) }
     var authMode by remember { mutableStateOf(WbuAuthMode.UNIFIED_CAS) }
     var authMenuExpanded by remember { mutableStateOf(false) }
@@ -317,7 +323,23 @@ fun WbuAuthBottomSheet(
             when (method) {
                 WbuLoginMethod.PASSWORD -> PasswordInput(
                     value = password,
-                    onValueChange = { password = it },
+                    onValueChange = { newValue ->
+                        if (hasSavedPassword && !isPasswordModified) {
+                            // 第一次在占位符状态下输入：若按退格删除或直接打字，均视为重新开始输入新密码
+                            isPasswordModified = true
+                            password = if (newValue.startsWith("••••••••")) {
+                                newValue.removePrefix("••••••••")
+                            } else if (newValue.endsWith("••••••••")) {
+                                newValue.removeSuffix("••••••••")
+                            } else if (newValue.contains("••••••••")) {
+                                newValue.replace("••••••••", "")
+                            } else {
+                                newValue
+                            }
+                        } else {
+                            password = newValue
+                        }
+                    },
                     authMode = authMode,
                     onAuthModeChange = { authMode = it },
                     menuExpanded = authMenuExpanded,
@@ -456,7 +478,25 @@ fun WbuAuthBottomSheet(
 
             // 登录按钮
             val (label, enabled, action) = when (method) {
-                WbuLoginMethod.PASSWORD -> Triple("一键全自动同步", studentId.isNotBlank() && password.isNotBlank(), { onPasswordLogin(studentId, password, useVpn, authMode) })
+                WbuLoginMethod.PASSWORD -> {
+                    val canSubmit = studentId.isNotBlank() && (password.isNotBlank() || hasSavedPassword)
+                    Triple(
+                        "一键全自动同步",
+                        canSubmit,
+                        {
+                            val effectivePassword = if (hasSavedPassword && !isPasswordModified) {
+                                WbuAuthTransport.getSavedPassword(context) ?: password
+                            } else {
+                                password
+                            }
+                            if (rememberPassword && effectivePassword.isNotBlank()) {
+                                WbuAuthTransport.savePassword(context, effectivePassword)
+                                hasSavedPassword = true
+                            }
+                            onPasswordLogin(studentId, effectivePassword, useVpn, authMode)
+                        }
+                    )
+                }
                 WbuLoginMethod.DYNAMIC_CODE -> Triple("登录", studentId.isNotBlank() && dynamicCode.length == 6, { onDynamicCodeLogin(studentId, dynamicCode, useVpn) })
                 WbuLoginMethod.QR -> {
                     val phase = qrState?.phase ?: QrPhase.PLACEHOLDER
@@ -595,6 +635,31 @@ fun WbuAuthBottomSheet(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp)
+                    )
+                    ToggleRow(
+                        label = "记住密码",
+                        checked = rememberPassword,
+                        onCheckedChange = {
+                            rememberPassword = it
+                            WbuAuthTransport.setRememberPasswordEnabled(context, it)
+                            if (!it) {
+                                WbuAuthTransport.clearSavedPassword(context)
+                                hasSavedPassword = false
+                                if (!isPasswordModified && password == "••••••••") {
+                                    password = ""
+                                }
+                            } else {
+                                val effective = if (hasSavedPassword && !isPasswordModified) {
+                                    WbuAuthTransport.getSavedPassword(context) ?: ""
+                                } else {
+                                    password
+                                }
+                                if (effective.isNotBlank()) {
+                                    WbuAuthTransport.savePassword(context, effective)
+                                    hasSavedPassword = true
+                                }
+                            }
+                        }
                     )
                     if (!hideSelectSemesterSwitch) {
                         ToggleRow(

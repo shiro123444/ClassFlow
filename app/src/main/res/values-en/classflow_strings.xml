@@ -18,6 +18,8 @@
     <string name="onboarding_body_3">Tap the top-right button to import your schedule</string>
     <string name="onboarding_body_4">"Today" for today · "Schedule" for the week · "Me" for settings</string>
     <string name="onboarding_body_5">Set the start date so weeks display correctly</string>
+    <string name="onboarding_title_manage_tables">Manage Schedules</string>
+    <string name="onboarding_body_manage_tables">Create or switch schedules across semesters. Supports locking, student ID binding, and independent storage.</string>
     <string name="onboarding_finish">Get started</string>
     <string name="onboarding_next">Next</string>
     <string name="onboarding_skip">Skip guide</string>

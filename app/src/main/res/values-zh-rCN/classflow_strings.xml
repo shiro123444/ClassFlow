@@ -16,6 +16,8 @@
     <string name="onboarding_body_3">点击右上角按钮，一键导入教务系统课表</string>
     <string name="onboarding_body_4">「今日课表」看今天 · 「课表」看整周 · 「我的」管理设置</string>
     <string name="onboarding_body_5">设定日期后，课表才能准确显示当前是第几周</string>
+    <string name="onboarding_title_manage_tables">管理多份课表</string>
+    <string name="onboarding_body_manage_tables">在此创建或切换不同学期课表，支持归档锁定与绑定学号，多学期课表互不干扰</string>
     <string name="onboarding_finish">开始使用</string>
     <string name="onboarding_next">下一步</string>
     <string name="onboarding_skip">跳过引导</string>

@@ -39,6 +39,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.rounded.Book
 import androidx.compose.material.icons.rounded.Celebration
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Swipe
@@ -351,10 +352,13 @@ fun AppNavigation(
         if (!showOnboarding) return@LaunchedEffect
         val currentIndex = introShowcaseState.currentTargetIndex
         when {
-            // Keep onboarding on CourseSchedule screen during steps 0..2.
-            currentIndex <= LAST_ONBOARDING_TARGET_INDEX &&
-                currentDestination !is Destination.CourseSchedule -> {
+            // Steps 0..3: stay on CourseSchedule
+            currentIndex in 0..3 && currentDestination !is Destination.CourseSchedule -> {
                 navBridge.navigateToMain(Destination.CourseSchedule)
+            }
+            // Step 4: manage tables guide on Settings screen
+            currentIndex == 4 && currentDestination !is Destination.Settings -> {
+                navBridge.navigateToMain(Destination.Settings)
             }
         }
     }
@@ -375,7 +379,7 @@ fun AppNavigation(
         IntroShowcase(
             showIntroShowCase = showOnboarding,
             state = introShowcaseState,
-            dismissOnClickOutside = false,
+            dismissOnClickOutside = introShowcaseState.currentTargetIndex != 3,
             onShowCaseCompleted = {
                 // Canopas callback fires both on true finish and on temporary missing-target transitions.
                 // Only complete when the index has actually moved beyond the last onboarding step.
@@ -434,7 +438,7 @@ fun AppNavigation(
                     Modifier
                 }
 
-            // ── Step 3: Sync button ── (开场引导最后一步)
+            // ── Step 3: Sync button ──
             val syncButtonTargetModifier =
                 if (showOnboarding && currentDestination is Destination.CourseSchedule) {
                     Modifier.introShowCaseTarget(
@@ -444,9 +448,38 @@ fun AppNavigation(
                             OnboardingCard(
                                 title = stringResource(R.string.onboarding_title_3),
                                 body = stringResource(R.string.onboarding_body_3),
-                                isLastStep = true,
+                                isLastStep = false,
                                 advanceByTapAnywhere = false,
                                 icon = { TapGestureAnimation() },
+                                showcaseState = introShowcaseState,
+                                onComplete = completeOnboarding
+                            )
+                        }
+                    )
+                } else {
+                    Modifier
+                }
+
+            // ── Step 4: Manage Course Tables (Settings page item) ── (新手引导最后一步)
+            val manageCourseTablesTargetModifier =
+                if (showOnboarding && currentDestination is Destination.Settings) {
+                    Modifier.introShowCaseTarget(
+                        index = 4,
+                        style = showcaseStyle,
+                        content = {
+                            OnboardingCard(
+                                title = stringResource(R.string.onboarding_title_manage_tables),
+                                body = stringResource(R.string.onboarding_body_manage_tables),
+                                isLastStep = true,
+                                advanceByTapAnywhere = true,
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Book,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                },
                                 showcaseState = introShowcaseState,
                                 onComplete = completeOnboarding
                             )
@@ -530,8 +563,12 @@ fun AppNavigation(
                                         false
                                     } else {
                                         if (introShowcaseState.currentTargetIndex == 3) {
-                                            completeOnboarding()
-                                            false
+                                            navBridge.navigateToMain(Destination.Settings)
+                                            introShowcaseState.goToNext(
+                                                onComplete = completeOnboarding,
+                                                allowCompleteOnMissingTarget = false
+                                            )
+                                            true
                                         } else {
                                             true
                                         }
@@ -540,7 +577,9 @@ fun AppNavigation(
                             )
 
                             Destination.Settings -> SettingsScreen(
-                                navBridge = navBridge
+                                navBridge = navBridge,
+                                manageCourseTablesModifier = manageCourseTablesTargetModifier,
+                                forceScrollToManageTables = showOnboarding && introShowcaseState.currentTargetIndex == 4
                             )
 
                             Destination.TodaySchedule -> TodayScheduleScreen(navBridge = navBridge)
@@ -740,14 +779,14 @@ private fun IntroShowcaseScope.OnboardingCard(
     onComplete: () -> Unit
 ) {
     val continueHint = when {
-        isLastStep -> "? 点击任意处完成"
+        isLastStep -> "✓ 点击任意处完成"
         advanceByTapAnywhere -> "点击任意处继续 →"
         else -> "请点击右上角同步按钮继续 →"
     }
 
     Box(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
             .then(
                 if (advanceByTapAnywhere || isLastStep) {
                     Modifier.clickable(
@@ -769,28 +808,28 @@ private fun IntroShowcaseScope.OnboardingCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp)
-                .verticalScroll(rememberScrollState()),
+                .padding(top = if (isLastStep) 4.dp else 0.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
         if (icon != null) {
             icon()
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
         }
         Text(
             text = title,
             color = Color.White,
-            fontSize = 22.sp,
+            fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = body,
             color = Color.White.copy(alpha = 0.92f),
-            fontSize = 15.sp,
+            fontSize = 14.sp,
             textAlign = TextAlign.Center
         )
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = continueHint,
             color = Color.White.copy(alpha = 0.6f),
@@ -801,7 +840,7 @@ private fun IntroShowcaseScope.OnboardingCard(
     }
 }
 
-private const val LAST_ONBOARDING_TARGET_INDEX = 3
+private const val LAST_ONBOARDING_TARGET_INDEX = 4
 
 // ── Gesture hint animations ──
 
@@ -809,12 +848,12 @@ private const val LAST_ONBOARDING_TARGET_INDEX = 3
 private fun CourseDragGestureAnimation() {
     val infiniteTransition = rememberInfiniteTransition(label = "course_drag_anim")
 
-    // phase: 0f..4000f (循环演示完整手势)
+    // phase: 0f..4200f (循环演示完整手势)
     val progress by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = 4000f,
+        targetValue = 4200f,
         animationSpec = infiniteRepeatable(
-            animation = tween(4000, easing = LinearEasing),
+            animation = tween(4200, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "phase"
@@ -822,56 +861,84 @@ private fun CourseDragGestureAnimation() {
 
     // 计算各阶段状态:
     // 0..800ms: 长按激活 -> 触点波纹渐显，端点出现
-    // 800..2000ms: 拖动底部端点向下延长节数
-    // 2000..3200ms: 拖动卡片整体向右移至屏幕边缘
-    // 3200..4000ms: 边缘释放悬停，淡出还原
-    val (blockHeightDp, blockOffsetXDp, handlesAlpha, touchIndicatorOffset) = when {
+    // 800..1900ms: 拖动底部端点向下延长节数
+    // 1900..3300ms: 拖动卡片整体向右移至屏幕边缘并悬浮挂起
+    // 3300..4200ms: 边缘释放悬停，淡出还原
+    val (blockHeightDp, blockOffsetXDp, handlesAlpha, touchIndicatorOffset, isNearEdge) = when {
         progress < 800f -> {
             val p = progress / 800f
-            Quadruple(68f, 0f, p, Offset(0f, 0f))
+            Quint(66f, -14f, p, Offset(-14f, 0f), false)
         }
-        progress < 2000f -> {
-            val p = ((progress - 800f) / 1200f).coerceIn(0f, 1f)
-            val stretch = kotlin.math.sin(p * Math.PI.toFloat()) * 30f
-            Quadruple(68f + stretch, 0f, 1f, Offset(24f, 34f + stretch))
+        progress < 1900f -> {
+            val p = ((progress - 800f) / 1100f).coerceIn(0f, 1f)
+            val stretch = kotlin.math.sin(p * Math.PI.toFloat()) * 28f
+            Quint(66f + stretch, -14f, 1f, Offset(10f, 33f + stretch), false)
         }
-        progress < 3400f -> {
-            val p = ((progress - 2000f) / 1400f).coerceIn(0f, 1f)
-            val moveX = p * 42f
-            Quadruple(68f, moveX, 1f, Offset(moveX, 0f))
+        progress < 3300f -> {
+            val p = ((progress - 1900f) / 1400f).coerceIn(0f, 1f)
+            val moveX = -14f + p * 62f // 从 -14f 移动到 +48f，直接跨上右侧屏幕边缘虚线
+            val nearEdge = p > 0.65f
+            Quint(66f, moveX, 1f, Offset(moveX, 0f), nearEdge)
         }
         else -> {
-            val p = ((progress - 3400f) / 600f).coerceIn(0f, 1f)
-            Quadruple(68f, 42f * (1f - p), 1f - p, Offset.Zero)
+            val p = ((progress - 3300f) / 900f).coerceIn(0f, 1f)
+            Quint(66f, 48f, 1f - p, Offset(48f, 0f), true)
         }
     }
 
     Box(
         modifier = Modifier
-            .size(width = 160.dp, height = 112.dp)
+            .size(width = 176.dp, height = 112.dp)
             .padding(vertical = 4.dp),
         contentAlignment = Alignment.Center
     ) {
+        // 模拟右侧屏幕边缘基准线与目标周次提示
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .width(28.dp)
+                .height(96.dp)
+                .background(
+                    color = if (isNearEdge) Color(0xFF60A5FA).copy(alpha = 0.28f) else Color.White.copy(alpha = 0.06f),
+                    shape = RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)
+                )
+                .border(
+                    width = 1.2.dp,
+                    color = if (isNearEdge) Color(0xFF93C5FD).copy(alpha = 0.85f) else Color.White.copy(alpha = 0.25f),
+                    shape = RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = if (isNearEdge) "跨周\n释放" else "屏幕\n边缘",
+                color = if (isNearEdge) Color.White else Color.White.copy(alpha = 0.5f),
+                fontSize = 9.sp,
+                lineHeight = 11.sp,
+                fontWeight = if (isNearEdge) FontWeight.Bold else FontWeight.Normal,
+                textAlign = TextAlign.Center
+            )
+        }
+
         // 模拟课程卡片
         Box(
             modifier = Modifier
                 .offset(x = blockOffsetXDp.dp)
-                .width(96.dp)
+                .width(92.dp)
                 .height(blockHeightDp.dp)
                 .background(
-                    color = Color(0xFF3B82F6).copy(alpha = 0.88f),
+                    color = if (isNearEdge) Color(0xFF2563EB).copy(alpha = 0.95f) else Color(0xFF3B82F6).copy(alpha = 0.88f),
                     shape = RoundedCornerShape(12.dp)
                 )
                 .border(
-                    width = 1.dp,
-                    color = Color.White.copy(alpha = 0.5f),
+                    width = if (isNearEdge) 1.5.dp else 1.dp,
+                    color = if (isNearEdge) Color(0xFFBAE6FD) else Color.White.copy(alpha = 0.5f),
                     shape = RoundedCornerShape(12.dp)
                 ),
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = "示例课程",
+                    text = if (isNearEdge) "跨周挂起中" else "示例课程",
                     color = Color.White,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
@@ -888,7 +955,7 @@ private fun CourseDragGestureAnimation() {
                         modifier = Modifier.size(10.dp)
                     )
                     Text(
-                        text = "长按拖动",
+                        text = if (isNearEdge) "移动至下周" else "长按拖动",
                         color = Color.White.copy(alpha = 0.85f),
                         fontSize = 9.sp
                     )
@@ -896,7 +963,7 @@ private fun CourseDragGestureAnimation() {
             }
 
             // 上端点
-            if (handlesAlpha > 0.01f) {
+            if (handlesAlpha > 0.01f && !isNearEdge) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopStart)
@@ -937,7 +1004,7 @@ private fun CourseDragGestureAnimation() {
     }
 }
 
-private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+private data class Quint<A, B, C, D, E>(val first: A, val second: B, val third: C, val fourth: D, val fifth: E)
 
 @Composable
 private fun SwipeGestureAnimation() {

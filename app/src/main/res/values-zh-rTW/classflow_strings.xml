@@ -16,6 +16,8 @@
     <string name="onboarding_body_3">點擊右上角按鈕，一鍵匯入教務系統課表</string>
     <string name="onboarding_body_4">「今日課表」看今天 · 「課表」看整週 · 「我的」管理設定</string>
     <string name="onboarding_body_5">設定日期後，課表才能準確顯示當前是第幾週</string>
+    <string name="onboarding_title_manage_tables">管理多份課表</string>
+    <string name="onboarding_body_manage_tables">在此建立或切換不同學期課表，支援歸檔鎖定與綁定學號，多學期課表互不干擾</string>
     <string name="onboarding_finish">開始使用</string>
     <string name="onboarding_next">下一步</string>
     <string name="onboarding_skip">跳過引導</string>

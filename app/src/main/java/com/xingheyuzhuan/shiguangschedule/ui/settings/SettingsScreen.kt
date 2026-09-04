@@ -49,7 +49,9 @@ import java.time.format.DateTimeParseException
 fun SettingsScreen(
     navBridge: NavBridge,
     semesterStartDateItemModifier: Modifier = Modifier,
+    manageCourseTablesModifier: Modifier = Modifier,
     forceShowSemesterStartDateCard: Boolean = false,
+    forceScrollToManageTables: Boolean = false,
     onSemesterStartDateSet: (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -90,6 +92,15 @@ fun SettingsScreen(
     LaunchedEffect(forceShowSemesterStartDateCard) {
         if (forceShowSemesterStartDateCard) {
             settingsListState.animateScrollToItem(index = 1)
+        }
+    }
+
+    LaunchedEffect(forceScrollToManageTables) {
+        if (forceScrollToManageTables) {
+            // LazyColumn 中 index=0 是 Header，index=1 是通用设置，index=2 是高级功能。
+            // 直接将高级功能卡片顶部平滑推到屏幕顶部，管理课表就会居中在屏幕中上方偏下位置
+            kotlinx.coroutines.delay(100)
+            settingsListState.animateScrollToItem(index = 2, scrollOffset = 0)
         }
     }
 
@@ -226,6 +237,7 @@ fun SettingsScreen(
                     SettingDivider()
                     // 管理课表设置项
                     SettingTile(
+                        contentHighlightModifier = manageCourseTablesModifier,
                         icon = Icons.Rounded.Book,
                         title = stringResource(R.string.title_manage_course_tables),
                         subtitle = stringResource(R.string.desc_manage_course_tables),

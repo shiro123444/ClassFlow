@@ -1,6 +1,9 @@
 package com.xingheyuzhuan.shiguangschedule.data.network.wbu
 
 import android.content.Context
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import android.util.Log
 import androidx.appcompat.app.AppCompatDelegate
 import java.security.KeyStore
@@ -9,6 +12,10 @@ import java.security.SecureRandom
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
 import java.util.Locale
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 import kotlinx.coroutines.runBlocking
 import okhttp3.ConnectionPool
 import okhttp3.Cookie
@@ -540,6 +547,9 @@ internal class WbuAuthTransport(
         private const val KEY_COOKIES_JSON = "cookies_json"
         private const val KEY_LAST_USE_VPN = "last_use_vpn"
         private const val KEY_LAST_USE_VPN_SET = "last_use_vpn_set"
+        private const val KEY_REMEMBER_PASSWORD = "remember_password"
+        private const val KEY_ENCRYPTED_PASSWORD = "encrypted_password"
+        private const val KEY_PASSWORD_CRYPTO_IV = "password_crypto_iv"
         private const val KEY_LAST_STUDENT_ID = "last_student_id"
         private const val KEY_USE_WEBVIEW_VPN_MANUAL_MODE = "use_webview_vpn_manual_mode"
         private const val KEY_IDS_VIA_WEBVPN = "ids_via_webvpn"
@@ -729,6 +739,92 @@ internal class WbuAuthTransport(
         fun setSendEnglishSms(context: Context, enabled: Boolean) {
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit().putBoolean(KEY_SEND_ENGLISH_SMS, enabled).apply()
+        }
+
+        // ── 密码安全加解密存储 (Android KeyStore AES-GCM) ──
+        private const val KEYSTORE_ALIAS = "ClassFlowWbuCredentialKey"
+        private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
+        private const val CIPHER_TRANSFORMATION = "AES/GCM/NoPadding"
+
+        private fun getSecretKey(): SecretKey {
+            val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+            keyStore.getKey(KEYSTORE_ALIAS, null)?.let { return it as SecretKey }
+
+            val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
+            val spec = KeyGenParameterSpec.Builder(
+                KEYSTORE_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .build()
+            keyGenerator.init(spec)
+            return keyGenerator.generateKey()
+        }
+
+        fun isRememberPasswordEnabled(context: Context): Boolean {
+            return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(KEY_REMEMBER_PASSWORD, false)
+        }
+
+        fun setRememberPasswordEnabled(context: Context, enabled: Boolean) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putBoolean(KEY_REMEMBER_PASSWORD, enabled).apply()
+            if (!enabled) {
+                clearSavedPassword(context)
+            }
+        }
+
+        fun hasSavedPassword(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return isRememberPasswordEnabled(context) &&
+                !prefs.getString(KEY_ENCRYPTED_PASSWORD, null).isNullOrBlank() &&
+                !prefs.getString(KEY_PASSWORD_CRYPTO_IV, null).isNullOrBlank()
+        }
+
+        fun getSavedPassword(context: Context): String? {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            if (!isRememberPasswordEnabled(context)) return null
+            val encryptedBase64 = prefs.getString(KEY_ENCRYPTED_PASSWORD, null) ?: return null
+            val ivBase64 = prefs.getString(KEY_PASSWORD_CRYPTO_IV, null) ?: return null
+            return try {
+                val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
+                val ivBytes = Base64.decode(ivBase64, Base64.NO_WRAP)
+                val gcmSpec = GCMParameterSpec(128, ivBytes)
+                cipher.init(Cipher.DECRYPT_MODE, getSecretKey(), gcmSpec)
+                val decryptedBytes = cipher.doFinal(Base64.decode(encryptedBase64, Base64.NO_WRAP))
+                String(decryptedBytes, Charsets.UTF_8).replace("\u0000", "").trim()
+            } catch (e: Exception) {
+                Log.w("WbuAuthTransport", "Failed to decrypt saved password", e)
+                null
+            }
+        }
+
+        fun savePassword(context: Context, password: String) {
+            if (password.isBlank()) return
+            try {
+                val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
+                cipher.init(Cipher.ENCRYPT_MODE, getSecretKey())
+                val encryptedBytes = cipher.doFinal(password.toByteArray(Charsets.UTF_8))
+                val encryptedBase64 = Base64.encodeToString(encryptedBytes, Base64.NO_WRAP)
+                val ivBase64 = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
+
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_ENCRYPTED_PASSWORD, encryptedBase64)
+                    .putString(KEY_PASSWORD_CRYPTO_IV, ivBase64)
+                    .apply()
+            } catch (e: Exception) {
+                Log.w("WbuAuthTransport", "Failed to encrypt and save password", e)
+            }
+        }
+
+        fun clearSavedPassword(context: Context) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .remove(KEY_ENCRYPTED_PASSWORD)
+                .remove(KEY_PASSWORD_CRYPTO_IV)
+                .apply()
         }
     }
 }
