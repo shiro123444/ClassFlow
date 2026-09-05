@@ -78,6 +78,8 @@ import com.xingheyuzhuan.shiguangschedule.ui.components.QrPhase
 import com.xingheyuzhuan.shiguangschedule.data.model.schedule_style.ScheduleModeProto
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTable
 import java.util.Locale
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -1452,8 +1454,23 @@ fun WeeklyScheduleScreen(
 
     // WebVPN 统一认证密码询问弹窗（教务密码模式且未配置 TWFID 时触发）
     vpnPasswordDeferred?.let { deferred ->
-        var inputPassword by remember { mutableStateOf("") }
+        var rememberVpnPassword by remember { mutableStateOf(WbuSyncEngine.isRememberVpnPasswordEnabled(appContext)) }
+        var hasSavedVpnPassword by remember { mutableStateOf(WbuSyncEngine.hasSavedVpnPassword(appContext)) }
+        var isVpnPasswordModified by remember { mutableStateOf(false) }
+        var inputPassword by remember {
+            mutableStateOf(if (WbuSyncEngine.hasSavedVpnPassword(appContext)) "••••••••" else "")
+        }
         var passwordVisible by remember { mutableStateOf(false) }
+
+        // 延迟清空防抖：关闭弹窗时若用户取消了记住密码，统一清空持久化数据
+        DisposableEffect(rememberVpnPassword) {
+            onDispose {
+                if (!rememberVpnPassword) {
+                    WbuSyncEngine.setRememberVpnPasswordEnabled(appContext, false)
+                    WbuSyncEngine.clearSavedVpnPassword(appContext)
+                }
+            }
+        }
 
         AlertDialog(
             onDismissRequest = {
@@ -1471,17 +1488,101 @@ fun WeeklyScheduleScreen(
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedTextField(
                         value = inputPassword,
-                        onValueChange = { inputPassword = it },
+                        onValueChange = { newValue ->
+                            if (hasSavedVpnPassword && !isVpnPasswordModified) {
+                                isVpnPasswordModified = true
+                                inputPassword = if (newValue.startsWith("••••••••")) {
+                                    newValue.removePrefix("••••••••")
+                                } else if (newValue.endsWith("••••••••")) {
+                                    newValue.removeSuffix("••••••••")
+                                } else if (newValue.contains("••••••••")) {
+                                    newValue.replace("••••••••", "")
+                                } else {
+                                    newValue
+                                }
+                            } else {
+                                inputPassword = newValue
+                            }
+                        },
                         label = { Text("统一认证 (WebVPN) 密码") },
                         singleLine = true,
                         visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                         trailingIcon = {
-                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                Icon(
-                                    imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                    contentDescription = if (passwordVisible) "隐藏密码" else "显示密码"
-                                )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(end = 6.dp)
+                            ) {
+                                IconButton(
+                                    onClick = { passwordVisible = !passwordVisible },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = if (passwordVisible) "隐藏密码" else "显示密码",
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            val next = !rememberVpnPassword
+                                            rememberVpnPassword = next
+                                            if (!next) {
+                                                hasSavedVpnPassword = false
+                                                if (!isVpnPasswordModified && inputPassword == "••••••••") {
+                                                    inputPassword = ""
+                                                }
+                                            } else {
+                                                WbuSyncEngine.setRememberVpnPasswordEnabled(appContext, true)
+                                                val effective = if (hasSavedVpnPassword && !isVpnPasswordModified) {
+                                                    WbuSyncEngine.getSavedVpnPassword(appContext) ?: ""
+                                                } else {
+                                                    inputPassword
+                                                }
+                                                if (effective.isNotBlank()) {
+                                                    WbuSyncEngine.saveVpnPassword(appContext, effective)
+                                                    hasSavedVpnPassword = true
+                                                }
+                                            }
+                                        }
+                                        .padding(horizontal = 4.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "记住密码",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Checkbox(
+                                        checked = rememberVpnPassword,
+                                        onCheckedChange = { checked ->
+                                            rememberVpnPassword = checked
+                                            if (!checked) {
+                                                hasSavedVpnPassword = false
+                                                if (!isVpnPasswordModified && inputPassword == "••••••••") {
+                                                    inputPassword = ""
+                                                }
+                                            } else {
+                                                WbuSyncEngine.setRememberVpnPasswordEnabled(appContext, true)
+                                                val effective = if (hasSavedVpnPassword && !isVpnPasswordModified) {
+                                                    WbuSyncEngine.getSavedVpnPassword(appContext) ?: ""
+                                                } else {
+                                                    inputPassword
+                                                }
+                                                if (effective.isNotBlank()) {
+                                                    WbuSyncEngine.saveVpnPassword(appContext, effective)
+                                                    hasSavedVpnPassword = true
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .scale(0.85f)
+                                    )
+                                }
                             }
                         },
                         modifier = Modifier.fillMaxWidth()
@@ -1489,12 +1590,25 @@ fun WeeklyScheduleScreen(
                 }
             },
             confirmButton = {
+                val canSubmit = inputPassword.isNotBlank() || hasSavedVpnPassword
                 TextButton(
                     onClick = {
-                        deferred.complete(inputPassword)
+                        val effectiveVpn = if (hasSavedVpnPassword && !isVpnPasswordModified) {
+                            WbuSyncEngine.getSavedVpnPassword(appContext) ?: inputPassword
+                        } else {
+                            inputPassword
+                        }
+                        if (rememberVpnPassword && effectiveVpn.isNotBlank()) {
+                            WbuSyncEngine.setRememberVpnPasswordEnabled(appContext, true)
+                            WbuSyncEngine.saveVpnPassword(appContext, effectiveVpn)
+                        } else if (!rememberVpnPassword) {
+                            WbuSyncEngine.setRememberVpnPasswordEnabled(appContext, false)
+                            WbuSyncEngine.clearSavedVpnPassword(appContext)
+                        }
+                        deferred.complete(effectiveVpn)
                         vpnPasswordDeferred = null
                     },
-                    enabled = inputPassword.isNotBlank()
+                    enabled = canSubmit
                 ) {
                     Text("继续连接")
                 }

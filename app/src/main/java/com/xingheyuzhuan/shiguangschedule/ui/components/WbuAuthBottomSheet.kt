@@ -52,6 +52,8 @@ import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -69,6 +71,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -82,6 +85,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -163,7 +167,7 @@ fun WbuAuthBottomSheet(
         mutableStateOf(if (WbuAuthTransport.hasSavedPassword(context)) "••••••••" else "")
     }
     var useVpn by remember(initialUseVpn) { mutableStateOf(initialUseVpn) }
-    var authMode by remember { mutableStateOf(WbuAuthMode.UNIFIED_CAS) }
+    var authMode by remember { mutableStateOf(WbuAuthTransport.getSavedAuthMode(context)) }
     var authMenuExpanded by remember { mutableStateOf(false) }
     var panelExpanded by remember { mutableStateOf(false) }
     var idsVpnEnabled by remember { mutableStateOf(IdsCasClient.getIdsViaWebVpn(context)) }
@@ -264,6 +268,17 @@ fun WbuAuthBottomSheet(
         }
     }
 
+    // 延迟清空密码（防抖机制）：如果用户取消勾选了“记住密码”，在退出 BottomSheet 时统一清空持久化密码，
+    // 避免操作时误触导致数据立刻抹除
+    DisposableEffect(rememberPassword) {
+        onDispose {
+            if (!rememberPassword) {
+                WbuAuthTransport.setRememberPasswordEnabled(context, false)
+                WbuAuthTransport.clearSavedPassword(context)
+            }
+        }
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -321,31 +336,60 @@ fun WbuAuthBottomSheet(
 
             // 按登录方式切换的输入区
             when (method) {
-                WbuLoginMethod.PASSWORD -> PasswordInput(
-                    value = password,
-                    onValueChange = { newValue ->
-                        if (hasSavedPassword && !isPasswordModified) {
-                            // 第一次在占位符状态下输入：若按退格删除或直接打字，均视为重新开始输入新密码
-                            isPasswordModified = true
-                            password = if (newValue.startsWith("••••••••")) {
-                                newValue.removePrefix("••••••••")
-                            } else if (newValue.endsWith("••••••••")) {
-                                newValue.removeSuffix("••••••••")
-                            } else if (newValue.contains("••••••••")) {
-                                newValue.replace("••••••••", "")
+                WbuLoginMethod.PASSWORD -> {
+                    PasswordInput(
+                        value = password,
+                        onValueChange = { newValue ->
+                            if (hasSavedPassword && !isPasswordModified) {
+                                // 第一次在占位符状态下输入：若按退格删除或直接打字，均视为重新开始输入新密码
+                                isPasswordModified = true
+                                password = if (newValue.startsWith("••••••••")) {
+                                    newValue.removePrefix("••••••••")
+                                } else if (newValue.endsWith("••••••••")) {
+                                    newValue.removeSuffix("••••••••")
+                                } else if (newValue.contains("••••••••")) {
+                                    newValue.replace("••••••••", "")
+                                } else {
+                                    newValue
+                                }
                             } else {
-                                newValue
+                                password = newValue
                             }
-                        } else {
-                            password = newValue
-                        }
-                    },
-                    authMode = authMode,
-                    onAuthModeChange = { authMode = it },
-                    menuExpanded = authMenuExpanded,
-                    onMenuExpandedChange = { authMenuExpanded = it },
-                    enabled = !isLoading
-                )
+                        },
+                        authMode = authMode,
+                        onAuthModeChange = { newMode ->
+                            authMode = newMode
+                            if (rememberPassword) {
+                                WbuAuthTransport.setSavedAuthMode(context, newMode)
+                            }
+                        },
+                        menuExpanded = authMenuExpanded,
+                        onMenuExpandedChange = { authMenuExpanded = it },
+                        rememberPassword = rememberPassword,
+                        onRememberPasswordChange = { checked ->
+                            rememberPassword = checked
+                            if (!checked) {
+                                hasSavedPassword = false
+                                if (!isPasswordModified && password == "••••••••") {
+                                    password = ""
+                                }
+                            } else {
+                                WbuAuthTransport.setRememberPasswordEnabled(context, true)
+                                WbuAuthTransport.setSavedAuthMode(context, authMode)
+                                val effective = if (hasSavedPassword && !isPasswordModified) {
+                                    WbuAuthTransport.getSavedPassword(context) ?: ""
+                                } else {
+                                    password
+                                }
+                                if (effective.isNotBlank()) {
+                                    WbuAuthTransport.savePassword(context, effective)
+                                    hasSavedPassword = true
+                                }
+                            }
+                        },
+                        enabled = !isLoading
+                    )
+                }
 
                 WbuLoginMethod.DYNAMIC_CODE -> {
                     OutlinedTextField(
@@ -490,8 +534,14 @@ fun WbuAuthBottomSheet(
                                 password
                             }
                             if (rememberPassword && effectivePassword.isNotBlank()) {
+                                WbuAuthTransport.setRememberPasswordEnabled(context, true)
                                 WbuAuthTransport.savePassword(context, effectivePassword)
+                                WbuAuthTransport.setSavedAuthMode(context, authMode)
                                 hasSavedPassword = true
+                            } else if (!rememberPassword) {
+                                WbuAuthTransport.setRememberPasswordEnabled(context, false)
+                                WbuAuthTransport.clearSavedPassword(context)
+                                hasSavedPassword = false
                             }
                             onPasswordLogin(studentId, effectivePassword, useVpn, authMode)
                         }
@@ -636,31 +686,6 @@ fun WbuAuthBottomSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp)
                     )
-                    ToggleRow(
-                        label = "记住密码",
-                        checked = rememberPassword,
-                        onCheckedChange = {
-                            rememberPassword = it
-                            WbuAuthTransport.setRememberPasswordEnabled(context, it)
-                            if (!it) {
-                                WbuAuthTransport.clearSavedPassword(context)
-                                hasSavedPassword = false
-                                if (!isPasswordModified && password == "••••••••") {
-                                    password = ""
-                                }
-                            } else {
-                                val effective = if (hasSavedPassword && !isPasswordModified) {
-                                    WbuAuthTransport.getSavedPassword(context) ?: ""
-                                } else {
-                                    password
-                                }
-                                if (effective.isNotBlank()) {
-                                    WbuAuthTransport.savePassword(context, effective)
-                                    hasSavedPassword = true
-                                }
-                            }
-                        }
-                    )
                     if (!hideSelectSemesterSwitch) {
                         ToggleRow(
                             label = "选择导入的学期",
@@ -803,6 +828,8 @@ private fun PasswordInput(
     onAuthModeChange: (WbuAuthMode) -> Unit,
     menuExpanded: Boolean,
     onMenuExpandedChange: (Boolean) -> Unit,
+    rememberPassword: Boolean,
+    onRememberPasswordChange: (Boolean) -> Unit,
     enabled: Boolean
 ) {
     OutlinedTextField(
@@ -851,6 +878,33 @@ private fun PasswordInput(
                         }
                     )
                 }
+            }
+        },
+        trailingIcon = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(enabled = enabled) {
+                        onRememberPasswordChange(!rememberPassword)
+                    }
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = "记住密码",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Checkbox(
+                    checked = rememberPassword,
+                    onCheckedChange = { onRememberPasswordChange(it) },
+                    enabled = enabled,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .scale(0.85f)
+                )
             }
         },
         singleLine = true,

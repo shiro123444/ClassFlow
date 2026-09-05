@@ -1526,6 +1526,14 @@ class WbuSyncEngine(
         fun setSavedUseVpn(context: Context, enabled: Boolean) = WbuAuthTransport.setSavedUseVpn(context, enabled)
         fun getSavedStudentId(context: Context): String = WbuAuthTransport.getSavedStudentId(context)
         fun setSavedStudentId(context: Context, studentId: String) = WbuAuthTransport.setSavedStudentId(context, studentId)
+        fun getSavedAuthMode(context: Context): WbuAuthMode = WbuAuthTransport.getSavedAuthMode(context)
+        fun setSavedAuthMode(context: Context, authMode: WbuAuthMode) = WbuAuthTransport.setSavedAuthMode(context, authMode)
+        fun hasSavedVpnPassword(context: Context): Boolean = WbuAuthTransport.hasSavedVpnPassword(context)
+        fun getSavedVpnPassword(context: Context): String? = WbuAuthTransport.getSavedVpnPassword(context)
+        fun saveVpnPassword(context: Context, password: String) = WbuAuthTransport.saveVpnPassword(context, password)
+        fun clearSavedVpnPassword(context: Context) = WbuAuthTransport.clearSavedVpnPassword(context)
+        fun isRememberVpnPasswordEnabled(context: Context): Boolean = WbuAuthTransport.isRememberVpnPasswordEnabled(context)
+        fun setRememberVpnPasswordEnabled(context: Context, enabled: Boolean) = WbuAuthTransport.setRememberVpnPasswordEnabled(context, enabled)
 
         fun isSimplifiedChinese(context: Context): Boolean = WbuAuthTransport.isSimplifiedChinese(context)
 

@@ -550,6 +550,10 @@ internal class WbuAuthTransport(
         private const val KEY_REMEMBER_PASSWORD = "remember_password"
         private const val KEY_ENCRYPTED_PASSWORD = "encrypted_password"
         private const val KEY_PASSWORD_CRYPTO_IV = "password_crypto_iv"
+        private const val KEY_SAVED_AUTH_MODE = "saved_auth_mode"
+        private const val KEY_REMEMBER_VPN_PASSWORD = "remember_vpn_password"
+        private const val KEY_ENCRYPTED_VPN_PASSWORD = "encrypted_vpn_password"
+        private const val KEY_VPN_PASSWORD_CRYPTO_IV = "vpn_password_crypto_iv"
         private const val KEY_LAST_STUDENT_ID = "last_student_id"
         private const val KEY_USE_WEBVIEW_VPN_MANUAL_MODE = "use_webview_vpn_manual_mode"
         private const val KEY_IDS_VIA_WEBVPN = "ids_via_webvpn"
@@ -831,6 +835,89 @@ internal class WbuAuthTransport(
                 .edit()
                 .remove(KEY_ENCRYPTED_PASSWORD)
                 .remove(KEY_PASSWORD_CRYPTO_IV)
+                .remove(KEY_SAVED_AUTH_MODE)
+                .apply()
+        }
+
+        fun getSavedAuthMode(context: Context): WbuAuthMode {
+            val name = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(KEY_SAVED_AUTH_MODE, null) ?: return WbuAuthMode.UNIFIED_CAS
+            return try {
+                WbuAuthMode.valueOf(name)
+            } catch (e: Exception) {
+                WbuAuthMode.UNIFIED_CAS
+            }
+        }
+
+        fun setSavedAuthMode(context: Context, authMode: WbuAuthMode) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_SAVED_AUTH_MODE, authMode.name)
+                .apply()
+        }
+
+        fun isRememberVpnPasswordEnabled(context: Context): Boolean {
+            return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(KEY_REMEMBER_VPN_PASSWORD, false)
+        }
+
+        fun setRememberVpnPasswordEnabled(context: Context, enabled: Boolean) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putBoolean(KEY_REMEMBER_VPN_PASSWORD, enabled).apply()
+            if (!enabled) {
+                clearSavedVpnPassword(context)
+            }
+        }
+
+        fun hasSavedVpnPassword(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return isRememberVpnPasswordEnabled(context) &&
+                !prefs.getString(KEY_ENCRYPTED_VPN_PASSWORD, null).isNullOrBlank() &&
+                !prefs.getString(KEY_VPN_PASSWORD_CRYPTO_IV, null).isNullOrBlank()
+        }
+
+        fun getSavedVpnPassword(context: Context): String? {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            if (!isRememberVpnPasswordEnabled(context)) return null
+            val encryptedBase64 = prefs.getString(KEY_ENCRYPTED_VPN_PASSWORD, null) ?: return null
+            val ivBase64 = prefs.getString(KEY_VPN_PASSWORD_CRYPTO_IV, null) ?: return null
+            return try {
+                val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
+                val ivBytes = Base64.decode(ivBase64, Base64.NO_WRAP)
+                val gcmSpec = GCMParameterSpec(128, ivBytes)
+                cipher.init(Cipher.DECRYPT_MODE, getSecretKey(), gcmSpec)
+                val decryptedBytes = cipher.doFinal(Base64.decode(encryptedBase64, Base64.NO_WRAP))
+                String(decryptedBytes, Charsets.UTF_8).replace("\u0000", "").trim()
+            } catch (e: Exception) {
+                Log.w("WbuAuthTransport", "Failed to decrypt saved VPN password", e)
+                null
+            }
+        }
+
+        fun saveVpnPassword(context: Context, password: String) {
+            if (password.isBlank()) return
+            try {
+                val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
+                cipher.init(Cipher.ENCRYPT_MODE, getSecretKey())
+                val encryptedBytes = cipher.doFinal(password.toByteArray(Charsets.UTF_8))
+                val encryptedBase64 = Base64.encodeToString(encryptedBytes, Base64.NO_WRAP)
+                val ivBase64 = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
+
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_ENCRYPTED_VPN_PASSWORD, encryptedBase64)
+                    .putString(KEY_VPN_PASSWORD_CRYPTO_IV, ivBase64)
+                    .apply()
+            } catch (e: Exception) {
+                Log.w("WbuAuthTransport", "Failed to encrypt and save VPN password", e)
+            }
+        }
+
+        fun clearSavedVpnPassword(context: Context) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .remove(KEY_ENCRYPTED_VPN_PASSWORD)
+                .remove(KEY_VPN_PASSWORD_CRYPTO_IV)
                 .apply()
         }
     }
