@@ -62,6 +62,20 @@ class CourseTableConversionViewModel @Inject constructor(
         )
     }
 
+    fun onExportWakeupClick() {
+        _uiState.value = _uiState.value.copy(
+            showExportTableDialog = true,
+            exportType = ExportType.WAKEUP
+        )
+    }
+
+    fun onExportImageClick() {
+        _uiState.value = _uiState.value.copy(
+            showExportTableDialog = true,
+            exportType = ExportType.IMAGE
+        )
+    }
+
     fun dismissDialog() {
         _uiState.value = _uiState.value.copy(
             showImportTableDialog = false,
@@ -76,7 +90,12 @@ class CourseTableConversionViewModel @Inject constructor(
         }
     }
 
-    fun onExportTableSelected(tableId: String, alarmMinutes: Int?) {
+    fun onExportTableSelected(
+        tableId: String,
+        alarmMinutes: Int?,
+        showDashedDivider: Boolean = false,
+        autoSplitConflict: Boolean = true
+    ) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
@@ -91,6 +110,28 @@ class CourseTableConversionViewModel @Inject constructor(
                     }
                 } else if (_uiState.value.exportType == ExportType.ICS) {
                     _events.send(ConversionEvent.LaunchExportIcsFileCreator(tableId, alarmMinutes))
+                } else if (_uiState.value.exportType == ExportType.WAKEUP) {
+                    val file = courseConversionRepository.exportCourseTableToWakeupFile(tableId, context)
+                    if (file != null) {
+                        _events.send(ConversionEvent.PromptWakeupExportAction(file.name))
+                    } else {
+                        val message = context.getString(R.string.error_export_table_not_found)
+                        _events.send(ConversionEvent.ShowMessage(message))
+                    }
+                } else if (_uiState.value.exportType == ExportType.IMAGE) {
+                    val success = courseConversionRepository.exportCourseTableToImageFile(
+                        tableId = tableId,
+                        context = context,
+                        showDashedDivider = showDashedDivider,
+                        autoSplitConflict = autoSplitConflict
+                    )
+                    if (success) {
+                        val message = context.getString(R.string.toast_image_export_success)
+                        _events.send(ConversionEvent.ShowMessage(message))
+                    } else {
+                        val message = context.getString(R.string.error_image_export_failed)
+                        _events.send(ConversionEvent.ShowMessage(message))
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("CourseTableConversionViewModel", "导出失败：${e.message}", e)
@@ -179,12 +220,16 @@ data class ConversionUiState(
 enum class ExportType {
     NONE,
     JSON,
-    ICS
+    ICS,
+    WAKEUP,
+    IMAGE
 }
 
 sealed class ConversionEvent {
     data class LaunchImportFilePicker(val tableId: String) : ConversionEvent()
     data class LaunchExportFileCreator(val jsonContent: String) : ConversionEvent()
     data class LaunchExportIcsFileCreator(val tableId: String, val alarmMinutes: Int?) : ConversionEvent()
+    data class PromptWakeupExportAction(val fileName: String) : ConversionEvent()
+    data class OpenWakeupFile(val fileName: String) : ConversionEvent()
     data class ShowMessage(val message: String) : ConversionEvent()
 }

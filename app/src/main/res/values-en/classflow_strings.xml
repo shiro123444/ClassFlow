@@ -33,4 +33,22 @@
     <string name="widget_date_dayofweek_format">%1$s %2$s</string>
     <string name="widget_name_large">Today 4x3</string>
     <string name="widget_name_moderate">Today 4x2</string>
+
+    <!-- Schedule Export Features (WakeUp Export and Colorless Schedule Image Export) -->
+    <string name="item_export_wakeup_file">Export to WakeUp</string>
+    <string name="desc_export_wakeup_file">Generate .wakeup_schedule and open with WakeUp</string>
+    <string name="item_export_schedule_image">Export schedule as image</string>
+    <string name="desc_export_schedule_image">All courses · Auto weekend · Colorless theme</string>
+    <string name="toast_wakeup_export_success">WakeUp schedule exported, opening…</string>
+    <string name="toast_image_export_success">Schedule image saved to album!</string>
+    <string name="error_image_export_failed">Failed to save image to album</string>
+    <string name="dialog_title_image_export_settings">Export Schedule Image Settings</string>
+    <string name="option_show_dashed_divider">Show dashed dividers between courses</string>
+    <string name="option_auto_split_conflict">Auto-split conflicting courses</string>
+    <string name="desc_auto_split_conflict">Automatically splits overlapping courses to align with grid (ideal for OCR); uncheck to display in parallel columns</string>
+    <string name="action_save_to_gallery">Save to Album</string>
+    <string name="dialog_title_wakeup_export_action">WakeUp Export</string>
+    <string name="dialog_desc_wakeup_export_action">The schedule file is ready. Please choose an action:</string>
+    <string name="action_open_in_wakeup">Open Directly</string>
+    <string name="action_save_as_file">Save File</string>
 </resources>

@@ -31,4 +31,22 @@
     <string name="widget_date_dayofweek_format">%1$s %2$s</string>
     <string name="widget_name_large">今日課程4x3</string>
     <string name="widget_name_moderate">今日課程4x2</string>
+
+    <!-- 課表匯出擴充功能（WakeUp 匯出與無色全課表圖片匯出） -->
+    <string name="item_export_wakeup_file">匯出到 WakeUp 課表</string>
+    <string name="desc_export_wakeup_file">產生 .wakeup_schedule 並以 WakeUp 開啟</string>
+    <string name="item_export_schedule_image">匯出課表為圖片</string>
+    <string name="desc_export_schedule_image">全部課程 · 自動包含週末 · 無色主題</string>
+    <string name="toast_wakeup_export_success">WakeUp 課表匯出成功，正在開啟…</string>
+    <string name="toast_image_export_success">課表圖片已儲存至系統相簿！</string>
+    <string name="error_image_export_failed">儲存圖片到相簿失敗</string>
+    <string name="dialog_title_image_export_settings">匯出課表為圖片設定</string>
+    <string name="option_show_dashed_divider">顯示同格多課虛線分割</string>
+    <string name="option_auto_split_conflict">自動截斷衝突課程</string>
+    <string name="desc_auto_split_conflict">勾選後時段衝突的課程自動截斷對齊（便於識別）；不勾選則在當天分列穿插表達（保持原長）</string>
+    <string name="action_save_to_gallery">儲存到相簿</string>
+    <string name="dialog_title_wakeup_export_action">WakeUp 課表匯出</string>
+    <string name="dialog_desc_wakeup_export_action">課表檔案已就緒，請選擇處理方式：</string>
+    <string name="action_open_in_wakeup">直接開啟</string>
+    <string name="action_save_as_file">儲存檔案</string>
 </resources>
