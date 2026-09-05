@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.xingheyuzhuan.shiguangschedule.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -39,7 +41,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
-
 /**
  * 学期选择对话框：
  * 采用标准 AlertDialog + LazyColumn，从根本上杜绝手势滑动误关闭，
@@ -49,8 +50,8 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 fun SemesterPickerDialog(
     options: List<WbuSyncEngine.WbuSemesterOption>,
     currentXnxq: String? = null,
-    title: String = "选择导入的学年学期",
-    confirmButtonText: String = "确定",
+    title: String = stringResource(R.string.title_select_import_semester),
+    confirmButtonText: String = stringResource(R.string.action_confirm),
     onConfirm: (String) -> Unit,
     onDismissRequest: () -> Unit
 ) {
@@ -58,7 +59,6 @@ fun SemesterPickerDialog(
     val cleanOptions = remember(options) {
         options.filter { it.value.isNotBlank() && it.text.isNotBlank() }
     }
-
     // 默认高亮并选中的学期：优先匹配传入的当前学期，否则选第一项（通常是最新学期）
     val defaultSelection = remember(cleanOptions, currentXnxq) {
         cleanOptions.find { it.value == currentXnxq }?.value
@@ -66,7 +66,6 @@ fun SemesterPickerDialog(
     }
     var selectedValue by remember(defaultSelection) { mutableStateOf(defaultSelection) }
     var isHistoryExpanded by remember { mutableStateOf(false) }
-
     // 划分近期学期与历史学期（默认展示前 6 个近期学期，约为最近 3 年）
     val recentOptions = remember(cleanOptions) {
         cleanOptions.take(6)
@@ -74,7 +73,6 @@ fun SemesterPickerDialog(
     val historyOptions = remember(cleanOptions) {
         if (cleanOptions.size > 6) cleanOptions.drop(6) else emptyList()
     }
-
     AlertDialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(
@@ -101,17 +99,15 @@ fun SemesterPickerDialog(
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "请选择要导入的学期（将同步课表及周历配置）：",
+                    text = stringResource(R.string.desc_select_import_semester),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
-
                 HorizontalDivider(
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
-
                 // 学期选择列表，限制最大高度，支持内部平滑滚动，完全无外部手势冲突
                 LazyColumn(
                     modifier = Modifier
@@ -130,7 +126,6 @@ fun SemesterPickerDialog(
                             onClick = { selectedValue = opt.value }
                         )
                     }
-
                     // 历史学期折叠入口
                     if (historyOptions.isNotEmpty()) {
                         item {
@@ -148,7 +143,7 @@ fun SemesterPickerDialog(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        text = if (isHistoryExpanded) "收起较早历史学期" else "展开更早学期 (${historyOptions.size} 个)",
+                                        text = if (isHistoryExpanded) stringResource(R.string.action_collapse_history_semesters) else stringResource(R.string.format_expand_history_semesters, historyOptions.size),
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                                         color = MaterialTheme.colorScheme.primary
                                     )
@@ -160,7 +155,6 @@ fun SemesterPickerDialog(
                                 }
                             }
                         }
-
                         if (isHistoryExpanded) {
                             items(historyOptions, key = { it.value }) { opt ->
                                 SemesterOptionItem(
@@ -189,12 +183,11 @@ fun SemesterPickerDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismissRequest) {
-                Text("取消")
+                Text(stringResource(R.string.action_cancel))
             }
         }
     )
 }
-
 /**
  * 兼容旧名称的别名函数
  */
@@ -202,8 +195,8 @@ fun SemesterPickerDialog(
 fun SemesterPickerBottomSheet(
     options: List<WbuSyncEngine.WbuSemesterOption>,
     currentXnxq: String? = null,
-    title: String = "选择导入的学年学期",
-    confirmButtonText: String = "确定",
+    title: String = stringResource(R.string.title_select_import_semester),
+    confirmButtonText: String = stringResource(R.string.action_confirm),
     onConfirm: (String) -> Unit,
     onDismissRequest: () -> Unit
 ) {
@@ -216,7 +209,6 @@ fun SemesterPickerBottomSheet(
         onDismissRequest = onDismissRequest
     )
 }
-
 @Composable
 private fun SemesterOptionItem(
     option: WbuSyncEngine.WbuSemesterOption,
@@ -261,7 +253,7 @@ private fun SemesterOptionItem(
                     modifier = Modifier.padding(start = 6.dp)
                 ) {
                     Text(
-                        text = "当前学期",
+                        text = stringResource(R.string.tag_current_semester),
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)

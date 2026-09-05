@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.schedule.components
 
+import androidx.compose.ui.res.stringResource
+import com.xingheyuzhuan.shiguangschedule.R
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,7 +27,6 @@ import com.xingheyuzhuan.shiguangschedule.ui.theme.LocalIsDarkTheme
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.hazeEffect
-
 /**
  * Liquid Glass 毛玻璃表面容器修饰器。
  * 与底部导航栏 [BottomNavigationBar] 同源样式：圆角裁剪 + 半透明表面 + 顶部打光渐变描边，
@@ -67,7 +68,6 @@ internal fun liquidGlassSurfaceModifier(
             shape = shape
         )
 }
-
 /**
  * WBU 教务一键同步按钮。
  * ClassFlow 定制：独立文件承载，以缩小 WeeklyScheduleScreen 与上游的差异面。
@@ -96,18 +96,17 @@ fun WbuSyncActionButton(
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick,
-                onLongClickLabel = "忽略已保存登录态，强制重新登录"
+                onLongClickLabel = stringResource(R.string.desc_ignore_saved_session)
             ),
         contentAlignment = Alignment.Center
     ) {
         Icon(
             imageVector = Icons.Filled.Sync,
-            contentDescription = "一键同步武商院课表",
+            contentDescription = stringResource(R.string.a11y_sync_wbu_schedule),
             tint = iconTint
         )
     }
 }
-
 @Preview(showBackground = true)
 @Composable
 private fun WbuSyncActionButtonPreview() {

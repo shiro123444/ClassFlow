@@ -166,7 +166,7 @@ fun SettingsScreen(
                     SettingTile(
                         icon = Icons.Rounded.DateRange,
                         title = stringResource(R.string.item_set_start_date),
-                        subtitle = semesterStartDate?.format(DateTimeFormatter.ofPattern(stringResource(R.string.date_format_year_month_day))) ?: "未设置开学时间",
+                        subtitle = semesterStartDate?.format(DateTimeFormatter.ofPattern(stringResource(R.string.date_format_year_month_day))) ?: stringResource(R.string.status_not_set_semester_start),
                         contentHighlightModifier = semesterStartDateItemModifier
                             .onGloballyPositioned {
                                 OnboardingTargets.semesterStartDateBoundsInWindow = it.boundsInWindow()
@@ -184,27 +184,28 @@ fun SettingsScreen(
                     SettingTile(
                         icon = Icons.Rounded.LinearScale,
                         title = stringResource(R.string.item_total_weeks),
-                        subtitle = "共 ${semesterTotalWeeks} 周",
+                        subtitle = stringResource(R.string.status_total_weeks_format, semesterTotalWeeks),
                         onClick = { showTotalWeeksDialog = true }
                     )
                     SettingDivider()
+                    val currentWeekVal = displayCurrentWeek
                     val weekStatusText = when {
-                        semesterStartDate == null -> "请先设置开学时间"
-                        displayCurrentWeek == null -> "休假中"
-                        else -> "第 ${displayCurrentWeek} 周"
+                        semesterStartDate == null -> stringResource(R.string.status_set_start_date_first)
+                        currentWeekVal == null -> stringResource(R.string.dialog_option_on_vacation)
+                        else -> stringResource(R.string.status_current_week_format, currentWeekVal)
                     }
                     SettingTile(
                         icon = Icons.Rounded.CalendarToday,
-                        title = "当前教学周",
+                        title = stringResource(R.string.item_current_week),
                         subtitle = weekStatusText,
                         onClick = { showManualWeekDialog = true }
                     )
                     SettingDivider()
-                    val dayText = if (firstDayOfWeekInt == DayOfWeek.SUNDAY.value) "周日" else "周一"
+                    val dayText = if (firstDayOfWeekInt == DayOfWeek.SUNDAY.value) stringResource(R.string.day_of_week_sunday) else stringResource(R.string.day_of_week_monday)
                     SettingTile(
                         icon = Icons.Rounded.ViewWeek,
-                        title = "每周起始日",
-                        subtitle = "一周的开始设为 $dayText",
+                        title = stringResource(R.string.item_first_day_of_week),
+                        subtitle = stringResource(R.string.desc_first_day_of_week_format, dayText),
                         onClick = { showFirstDayOfWeekDialog = true }
                     )
                     SettingDivider()
@@ -374,7 +375,7 @@ fun ProfileHeader() {
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
                 Text(
-                    text = "欢迎每一位WBUer~",
+                    text = stringResource(R.string.brand_welcome_wbuer),
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                 )
@@ -539,10 +540,10 @@ fun ManualWeekPickerDialog(
     onConfirm: (Int?) -> Unit
 ) {
     val optionOnVacationText = stringResource(R.string.dialog_option_on_vacation)
-    val weekOptions = listOf(optionOnVacationText) + (1..totalWeeks).map { "第 ${it} 周" }
+    val weekOptions = listOf(optionOnVacationText) + (1..totalWeeks).map { stringResource(R.string.status_current_week_format, it) }
     val initialSelectedValue = when (currentWeek) {
         null -> optionOnVacationText
-        else -> "第 ${currentWeek} 周"
+        else -> stringResource(R.string.status_current_week_format, currentWeek)
     }
 
     var dialogSelectedValue by remember { mutableStateOf(initialSelectedValue) }
@@ -576,11 +577,13 @@ fun DayOfWeekPickerDialog(
     onDismiss: () -> Unit,
     onConfirm: (Int) -> Unit
 ) {
+    val mondayText = stringResource(R.string.day_of_week_monday)
+    val sundayText = stringResource(R.string.day_of_week_sunday)
     val dayOptionsMap = mapOf(
-        "周一" to DayOfWeek.MONDAY.value,
-        "周日" to DayOfWeek.SUNDAY.value
+        mondayText to DayOfWeek.MONDAY.value,
+        sundayText to DayOfWeek.SUNDAY.value
     )
-    val initialSelectedDayText = dayOptionsMap.entries.firstOrNull { it.value == initialDayOfWeekInt }?.key ?: "周一"
+    val initialSelectedDayText = dayOptionsMap.entries.firstOrNull { it.value == initialDayOfWeekInt }?.key ?: mondayText
     var dialogSelectedText by remember { mutableStateOf(initialSelectedDayText) }
 
     AlertDialog(

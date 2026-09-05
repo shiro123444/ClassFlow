@@ -387,7 +387,7 @@ fun ManageCourseTablesScreen(
                             value = editedSemesterCode,
                             onValueChange = { editedSemesterCode = it },
                             label = { Text(stringResource(R.string.label_semester_code)) },
-                            placeholder = { Text("例如 2026-2027-1") },
+                            placeholder = { Text(stringResource(R.string.placeholder_semester_example)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -395,7 +395,7 @@ fun ManageCourseTablesScreen(
                             value = editedStudentId,
                             onValueChange = { editedStudentId = it },
                             label = { Text(stringResource(R.string.label_student_id)) },
-                            placeholder = { Text("例如 260593099") },
+                            placeholder = { Text(stringResource(R.string.placeholder_student_id_example)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -506,22 +506,22 @@ fun ManageCourseTablesScreen(
             val startQrFlow: (Boolean) -> Unit = { useVpn ->
                 qrJob?.cancel()
                 val engine = WbuSyncEngine(context = context, useVpn = useVpn)
-                qrImportState = QrUiState(qrContent = null, phase = QrPhase.GENERATING, statusText = "正在获取二维码...")
+                qrImportState = QrUiState(qrContent = null, phase = QrPhase.GENERATING, statusText = context.getString(R.string.status_qr_fetching))
                 coroutineScope.launch {
                     val session = engine.startQrLogin("IMPORT_QR")
                     if (session == null) {
-                        qrImportState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = "获取二维码失败，点二维码重试")
+                        qrImportState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = context.getString(R.string.status_qr_fetch_failed))
                         return@launch
                     }
-                    qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = "请扫码登录")
+                    qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = context.getString(R.string.status_scan_qr_to_login))
                     qrJob = coroutineScope.launch {
                         while (true) {
                             delay(2000)
                             when (val st = engine.pollQrStatus(session)) {
-                                QrStatus.WAIT -> qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = "请扫码登录")
-                                QrStatus.CONFIRM -> qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.SCANNED, statusText = "已扫码，请在手机上确认")
+                                QrStatus.WAIT -> qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = context.getString(R.string.status_scan_qr_to_login))
+                                QrStatus.CONFIRM -> qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.SCANNED, statusText = context.getString(R.string.status_qr_scanned))
                                 QrStatus.SUCCESS -> {
-                                    qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.CONFIRMING, statusText = "确认成功，正在登录...")
+                                    qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.CONFIRMING, statusText = context.getString(R.string.status_qr_confirming))
                                     try {
                                         val qrOk = engine.completeQrLogin(
                                             session = session,
@@ -550,11 +550,11 @@ fun ManageCourseTablesScreen(
                                     return@launch
                                 }
                                 QrStatus.EXPIRED -> {
-                                    qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.EXPIRED, statusText = "二维码已过期，点二维码刷新")
+                                    qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.EXPIRED, statusText = context.getString(R.string.status_qr_expired))
                                     return@launch
                                 }
                                 QrStatus.ERROR -> {
-                                    qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.ERROR, statusText = "查询状态失败，点二维码重试")
+                                    qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.ERROR, statusText = context.getString(R.string.status_qr_query_failed))
                                 }
                             }
                         }
@@ -671,7 +671,7 @@ fun ManageCourseTablesScreen(
             com.xingheyuzhuan.shiguangschedule.ui.components.SemesterPickerDialog(
                 options = semesterOptions,
                 currentXnxq = semesterCurrentXnxq,
-                confirmButtonText = "确定新建导入",
+                confirmButtonText = stringResource(R.string.action_create_and_import),
                 onConfirm = { chosen ->
                     deferred.complete(chosen)
                     semesterSelectDeferred = null
@@ -734,11 +734,11 @@ fun ManageCourseTablesScreen(
             }
             val titleText = when {
                 dupInfo.hasIdentical && dupInfo.hasMultiTeacher ->
-                    "重复课程处理（${dupInfo.groupCount} 组 / ${dupInfo.totalConflictCourses} 门）"
+                    stringResource(R.string.format_dup_dialog_title, dupInfo.groupCount, dupInfo.totalConflictCourses)
                 dupInfo.hasMultiTeacher ->
-                    "多教师重复课程处理（${dupInfo.groupCount} 组 / ${dupInfo.totalConflictCourses} 门）"
+                    stringResource(R.string.format_dup_dialog_title_teacher, dupInfo.groupCount, dupInfo.totalConflictCourses)
                 else ->
-                    "完全相同的重复课程处理（${dupInfo.groupCount} 组 / ${dupInfo.totalConflictCourses} 门）"
+                    stringResource(R.string.format_dup_dialog_title_identical, dupInfo.groupCount, dupInfo.totalConflictCourses)
             }
 
             AlertDialog(
@@ -754,7 +754,7 @@ fun ManageCourseTablesScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = "检测到部分课程在同一时间、地点被分为多条记录。请选择处理方式：",
+                            text = stringResource(R.string.desc_dup_course_dialog),
                             style = MaterialTheme.typography.bodyMedium
                         )
 
@@ -773,11 +773,11 @@ fun ManageCourseTablesScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Column {
                                     Text(
-                                        text = "合并教师（推荐）",
+                                        text = stringResource(R.string.action_merge_teachers_rec),
                                         style = MaterialTheme.typography.bodyLarge
                                     )
                                     Text(
-                                        text = "如：${dupInfo.sampleCourseName} -> ${dupInfo.sampleTeacherSummary}",
+                                        text = stringResource(R.string.format_dup_sample_teacher, dupInfo.sampleCourseName, dupInfo.sampleTeacherSummary),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -800,11 +800,11 @@ fun ManageCourseTablesScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Column {
                                     Text(
-                                        text = "只保留一门（去重）",
+                                        text = stringResource(R.string.action_keep_one_course),
                                         style = MaterialTheme.typography.bodyLarge
                                     )
                                     Text(
-                                        text = "如：${dupInfo.sampleCourseName} 仅保留一条",
+                                        text = stringResource(R.string.format_dup_sample_keep_one, dupInfo.sampleCourseName),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -825,7 +825,7 @@ fun ManageCourseTablesScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "全部保留（${dupInfo.totalConflictCourses} 门）",
+                                text = stringResource(R.string.format_keep_all_courses, dupInfo.totalConflictCourses),
                                 style = MaterialTheme.typography.bodyLarge
                             )
                         }

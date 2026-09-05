@@ -118,13 +118,13 @@ fun WallpaperAdjustScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("壁纸微调") },
+                title = { Text(stringResource(R.string.title_wallpaper_adjust)) },
                 navigationIcon = {
                     IconButton(onClick = {
                         persistTransform()
                         onBack()
                     }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.a11y_back))
                     }
                 },
                 actions = {
@@ -164,7 +164,7 @@ fun WallpaperAdjustScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "请先在个性化配置中选择壁纸",
+                    text = stringResource(R.string.hint_wallpaper_not_selected),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -373,7 +373,7 @@ fun WallpaperAdjustScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "支持双指缩放与拖动；退出页面时自动保存。",
+                        text = stringResource(R.string.hint_wallpaper_gesture_guide),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Start
@@ -502,7 +502,7 @@ private fun PhoneTopBar(
                 .padding(horizontal = 9.dp, vertical = 4.dp)
         ) {
             Text(
-                text = "第 1 周",
+                text = stringResource(R.string.status_current_week_format, 1),
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
                 color = textColor

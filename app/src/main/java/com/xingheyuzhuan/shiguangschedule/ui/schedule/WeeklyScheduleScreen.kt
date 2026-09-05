@@ -470,7 +470,7 @@ fun WeeklyScheduleScreen(
         withContext(Dispatchers.Main) {
             wbuSyncStatus = ""
             showWbuAuthDialog = false
-            snackbarHostState.showSuccessSnackbar("课表导入成功！")
+            snackbarHostState.showSuccessSnackbar(appContext.getString(R.string.toast_schedule_imported_success))
         }
 
         // 检查教务系统是否有新于本地全部课表的新学期
@@ -763,7 +763,7 @@ fun WeeklyScheduleScreen(
                         val offsetWeeks = (pageIndex - INFINITE_PAGER_CENTER).toInt()
                         uiState.currentWeekNumber?.plus(offsetWeeks)
                     }
-                    val weekStr = pageWeekNumber?.let { "第${it}周" }
+                    val weekStr = pageWeekNumber?.let { stringResource(R.string.status_current_week_format, it) }
 
                     val gridState = rememberScheduleGridState(gridScrollState = gridScrollState)
 
@@ -1015,22 +1015,22 @@ fun WeeklyScheduleScreen(
             val engine = WbuSyncEngine(context = appContext, useVpn = useVpn)
             activeAuthEngine = engine
             activeVpnEngine = engine
-            wbuQrState = QrUiState(qrContent = null, phase = QrPhase.GENERATING, statusText = "正在获取二维码...")
+            wbuQrState = QrUiState(qrContent = null, phase = QrPhase.GENERATING, statusText = appContext.getString(R.string.status_qr_fetching))
             coroutineScope.launch {
                 val session = engine.startQrLogin("QR")
                 if (session == null) {
-                    wbuQrState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = "获取二维码失败，点二维码重试")
+                    wbuQrState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = appContext.getString(R.string.status_qr_fetch_failed))
                     return@launch
                 }
-                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = "请扫码登录")
+                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = appContext.getString(R.string.status_scan_qr_to_login))
                 qrJob = coroutineScope.launch {
                     while (true) {
                         delay(2000)
                         when (val st = engine.pollQrStatus(session)) {
-                            QrStatus.WAIT -> wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = "请扫码登录")
-                            QrStatus.CONFIRM -> wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.SCANNED, statusText = "已扫码，请在手机上确认")
+                            QrStatus.WAIT -> wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = appContext.getString(R.string.status_scan_qr_to_login))
+                            QrStatus.CONFIRM -> wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.SCANNED, statusText = appContext.getString(R.string.status_qr_scanned))
                             QrStatus.SUCCESS -> {
-                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.CONFIRMING, statusText = "确认成功，正在登录...")
+                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.CONFIRMING, statusText = appContext.getString(R.string.status_qr_confirming))
                                 isWbuSyncing = true
                                 try {
                                     val activeTableId = viewModel.uiState.value.tableId
@@ -1065,7 +1065,7 @@ fun WeeklyScheduleScreen(
                                         performCourseImportPipeline(engine, sid)
                                     } else {
                                         wbuError = engine.lastLocalLoginError?.takeIf { it.isNotBlank() } ?: "扫码登录失败，请重试"
-                                        wbuQrState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = "登录失败，点二维码重试")
+                                        wbuQrState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = appContext.getString(R.string.status_qr_login_failed_retry))
                                     }
                                 } finally {
                                     isWbuSyncing = false
@@ -1073,11 +1073,11 @@ fun WeeklyScheduleScreen(
                                 return@launch
                             }
                             QrStatus.EXPIRED -> {
-                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.EXPIRED, statusText = "二维码已过期，点二维码刷新")
+                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.EXPIRED, statusText = appContext.getString(R.string.status_qr_expired))
                                 return@launch
                             }
                             QrStatus.ERROR -> {
-                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.ERROR, statusText = "查询状态失败，点二维码重试")
+                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.ERROR, statusText = appContext.getString(R.string.status_qr_query_failed))
                             }
                         }
                     }
@@ -1406,15 +1406,15 @@ fun WeeklyScheduleScreen(
                 deferred.complete(false)
                 campusConfirmDeferred = null
             },
-            title = { Text("未检测到校园网") },
-            text = { Text("当前好像不在校园网环境，校园网直连可能无法成功。是否仍要继续尝试？") },
+            title = { Text(stringResource(R.string.title_no_campus_network)) },
+            text = { Text(stringResource(R.string.msg_no_campus_network)) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         deferred.complete(true)
                         campusConfirmDeferred = null
                     }
-                ) { Text("继续") }
+                ) { Text(stringResource(R.string.action_continue)) }
             },
             dismissButton = {
                 TextButton(
@@ -1431,8 +1431,8 @@ fun WeeklyScheduleScreen(
     if (showManualLoginPrompt) {
         AlertDialog(
             onDismissRequest = { showManualLoginPrompt = false },
-            title = { Text("自动登录失败") },
-            text = { Text("教务系统可能要求人工验证，是否跳转浏览器页面手动登录？") },
+            title = { Text(stringResource(R.string.title_auto_login_failed)) },
+            text = { Text(stringResource(R.string.msg_auto_login_failed)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -1444,7 +1444,7 @@ fun WeeklyScheduleScreen(
                         }
                         navBridge.navigate(target)
                     }
-                ) { Text("去登录") }
+                ) { Text(stringResource(R.string.action_go_to_login)) }
             },
             dismissButton = {
                 TextButton(onClick = { showManualLoginPrompt = false }) { Text("取消") }
@@ -1477,11 +1477,11 @@ fun WeeklyScheduleScreen(
                 deferred.complete(null)
                 vpnPasswordDeferred = null
             },
-            title = { Text("连接 WebVPN") },
+            title = { Text(stringResource(R.string.title_connect_webvpn)) },
             text = {
                 Column {
                     Text(
-                        text = "校外访问教务系统需先通过 WebVPN 门禁。请输入您的【统一认证/WebVPN 密码】以连接网络：",
+                        text = stringResource(R.string.desc_connect_webvpn),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1504,7 +1504,7 @@ fun WeeklyScheduleScreen(
                                 inputPassword = newValue
                             }
                         },
-                        label = { Text("统一认证 (WebVPN) 密码") },
+                        label = { Text(stringResource(R.string.label_webvpn_password)) },
                         singleLine = true,
                         visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -1519,7 +1519,7 @@ fun WeeklyScheduleScreen(
                                 ) {
                                     Icon(
                                         imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                        contentDescription = if (passwordVisible) "隐藏密码" else "显示密码",
+                                        contentDescription = if (passwordVisible) stringResource(R.string.a11y_hide_password) else stringResource(R.string.a11y_show_password),
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -1551,7 +1551,7 @@ fun WeeklyScheduleScreen(
                                         .padding(horizontal = 4.dp, vertical = 4.dp)
                                 ) {
                                     Text(
-                                        text = "记住密码",
+                                        text = stringResource(R.string.label_remember_password),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -1610,7 +1610,7 @@ fun WeeklyScheduleScreen(
                     },
                     enabled = canSubmit
                 ) {
-                    Text("继续连接")
+                    Text(stringResource(R.string.action_continue_connect))
                 }
             },
             dismissButton = {
@@ -1633,15 +1633,15 @@ fun WeeklyScheduleScreen(
                 deferred.complete(false)
                 sslIssueDeferred = null
             },
-            title = { Text("证书校验异常") },
-            text = { Text("检测到 WebVPN 证书校验失败（$sslIssueMessage）。是否继续信任并重试？") },
+            title = { Text(stringResource(R.string.title_ssl_exception)) },
+            text = { Text(stringResource(R.string.msg_ssl_exception, sslIssueMessage)) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         deferred.complete(true)
                         sslIssueDeferred = null
                     }
-                ) { Text("继续信任") }
+                ) { Text(stringResource(R.string.action_trust_and_continue)) }
             },
             dismissButton = {
                 TextButton(
@@ -1678,11 +1678,11 @@ fun WeeklyScheduleScreen(
                 conflictDialogData = null
                 conflictDeferred = null
             },
-            title = { Text("学期不一致提醒") },
+            title = { Text(stringResource(R.string.title_semester_mismatch)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "您选择导入的学期是【${selectedSemester}】，而当前课表绑定的学期是【${currentTable.semesterCode}】。\n\n如选择覆盖，当前课表内的课程将被清空重写。"
+                        text = stringResource(R.string.msg_semester_mismatch, selectedSemester, currentTable.semesterCode ?: "")
                     )
                     Row(
                         modifier = Modifier
@@ -1697,7 +1697,7 @@ fun WeeklyScheduleScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "自动修改该课表名称",
+                            text = stringResource(R.string.label_auto_rename_table),
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
@@ -1711,7 +1711,7 @@ fun WeeklyScheduleScreen(
                         conflictDeferred = null
                     }
                 ) {
-                    Text("新建课表")
+                    Text(stringResource(R.string.action_create_new_table))
                 }
             },
             dismissButton = {
@@ -1733,7 +1733,7 @@ fun WeeklyScheduleScreen(
                             conflictDeferred = null
                         }
                     ) {
-                        Text("覆盖课表")
+                        Text(stringResource(R.string.action_overwrite_table))
                     }
                 }
             }
@@ -1750,11 +1750,11 @@ fun WeeklyScheduleScreen(
         }
         val titleText = when {
             dupInfo.hasIdentical && dupInfo.hasMultiTeacher ->
-                "重复课程处理（${dupInfo.groupCount} 组 / ${dupInfo.totalConflictCourses} 门）"
+                stringResource(R.string.format_dup_dialog_title, dupInfo.groupCount, dupInfo.totalConflictCourses)
             dupInfo.hasMultiTeacher ->
-                "多教师重复课程处理（${dupInfo.groupCount} 组 / ${dupInfo.totalConflictCourses} 门）"
+                stringResource(R.string.format_dup_dialog_title_teacher, dupInfo.groupCount, dupInfo.totalConflictCourses)
             else ->
-                "完全相同的重复课程处理（${dupInfo.groupCount} 组 / ${dupInfo.totalConflictCourses} 门）"
+                stringResource(R.string.format_dup_dialog_title_identical, dupInfo.groupCount, dupInfo.totalConflictCourses)
         }
 
         AlertDialog(
@@ -1770,7 +1770,7 @@ fun WeeklyScheduleScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "检测到部分课程在同一时间、地点被分为多条记录。请选择处理方式：",
+                        text = stringResource(R.string.desc_dup_course_dialog),
                         style = MaterialTheme.typography.bodyMedium
                     )
 
@@ -1789,11 +1789,11 @@ fun WeeklyScheduleScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Column {
                                 Text(
-                                    text = "合并教师（推荐）",
+                                    text = stringResource(R.string.action_merge_teachers_rec),
                                     style = MaterialTheme.typography.bodyLarge
                                 )
                                 Text(
-                                    text = "如：${dupInfo.sampleCourseName} -> ${dupInfo.sampleTeacherSummary}",
+                                    text = stringResource(R.string.format_dup_sample_teacher, dupInfo.sampleCourseName, dupInfo.sampleTeacherSummary),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -1816,11 +1816,11 @@ fun WeeklyScheduleScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Column {
                                 Text(
-                                    text = "只保留一门（去重）",
+                                    text = stringResource(R.string.action_keep_one_course),
                                     style = MaterialTheme.typography.bodyLarge
                                 )
                                 Text(
-                                    text = "如：${dupInfo.sampleCourseName} 仅保留一条",
+                                    text = stringResource(R.string.format_dup_sample_keep_one, dupInfo.sampleCourseName),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -1841,7 +1841,7 @@ fun WeeklyScheduleScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "全部保留（${dupInfo.totalConflictCourses} 门）",
+                            text = stringResource(R.string.format_keep_all_courses, dupInfo.totalConflictCourses),
                             style = MaterialTheme.typography.bodyLarge
                         )
                     }
@@ -1930,9 +1930,9 @@ fun WeeklyScheduleScreen(
                 newSemesterPromptXnxq = null
                 newSemesterPromptEngine = null
             },
-            title = { Text("发现新学期课表") },
+            title = { Text(stringResource(R.string.title_new_semester_found)) },
             text = {
-                Text("教务系统当前已有新学期【$newXnxq】的课表。是否立即导入并新建该学期课表？")
+                Text(stringResource(R.string.msg_new_semester_found, newXnxq))
             },
             confirmButton = {
                 TextButton(
@@ -1957,7 +1957,7 @@ fun WeeklyScheduleScreen(
                                         viewModel.importCourses(courses, targetTableId = newTable.id)
                                         val cfg = engine.fetchSemesterConfig(xnxq = xnxqToImport, xqdm = engine.lastResolvedXqdm)
                                         viewModel.applySemesterConfig(cfg, targetTableId = newTable.id)
-                                        snackbarHostState.showSuccessSnackbar("新学期课表已导入！")
+                                        snackbarHostState.showSuccessSnackbar(appContext.getString(R.string.toast_new_semester_imported_success))
                                     } else {
                                         snackbarHostState.showSnackbar("新学期暂无课程数据")
                                     }
@@ -1968,7 +1968,7 @@ fun WeeklyScheduleScreen(
                         }
                     }
                 ) {
-                    Text("立即导入新建")
+                    Text(stringResource(R.string.action_import_and_create_now))
                 }
             },
             dismissButton = {
@@ -1978,7 +1978,7 @@ fun WeeklyScheduleScreen(
                         newSemesterPromptEngine = null
                     }
                 ) {
-                    Text("稍后再说")
+                    Text(stringResource(R.string.action_later))
                 }
             }
         )

@@ -786,9 +786,9 @@ private fun IntroShowcaseScope.OnboardingCard(
     onComplete: () -> Unit
 ) {
     val continueHint = when {
-        isLastStep -> "✓ 点击任意处完成"
-        advanceByTapAnywhere -> "点击任意处继续 →"
-        else -> "请点击右上角同步按钮继续 →"
+        isLastStep -> stringResource(R.string.onboarding_tap_anywhere_finish)
+        advanceByTapAnywhere -> stringResource(R.string.onboarding_tap_anywhere_continue)
+        else -> stringResource(R.string.onboarding_tap_sync_continue)
     }
 
     Box(
@@ -917,7 +917,7 @@ private fun CourseDragGestureAnimation() {
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = if (isNearEdge) "跨周\n释放" else "屏幕\n边缘",
+                text = if (isNearEdge) stringResource(R.string.onboarding_cross_week_release) else stringResource(R.string.onboarding_screen_edge),
                 color = if (isNearEdge) Color.White else Color.White.copy(alpha = 0.5f),
                 fontSize = 9.sp,
                 lineHeight = 11.sp,
@@ -945,7 +945,7 @@ private fun CourseDragGestureAnimation() {
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = if (isNearEdge) "跨周挂起中" else "示例课程",
+                    text = if (isNearEdge) stringResource(R.string.onboarding_cross_week_suspended) else stringResource(R.string.onboarding_demo_course),
                     color = Color.White,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
@@ -962,7 +962,7 @@ private fun CourseDragGestureAnimation() {
                         modifier = Modifier.size(10.dp)
                     )
                     Text(
-                        text = if (isNearEdge) "移动至下周" else "长按拖动",
+                        text = if (isNearEdge) stringResource(R.string.onboarding_move_to_next_week) else stringResource(R.string.onboarding_long_press_drag),
                         color = Color.White.copy(alpha = 0.85f),
                         fontSize = 9.sp
                     )

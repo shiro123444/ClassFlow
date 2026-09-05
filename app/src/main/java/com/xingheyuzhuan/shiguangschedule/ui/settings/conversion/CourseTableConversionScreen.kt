@@ -340,8 +340,8 @@ fun CourseTableConversionScreen(
             SettingsCard(title = stringResource(R.string.section_school_import)) {
                 SettingTile(
                     icon = Icons.Rounded.School,
-                    title = "WBU教务一键同步",
-                    subtitle = "自动登录后抓取课表并回写到当前课表 (WebView)",
+                    title = stringResource(R.string.title_wbu_sync_schedule),
+                    subtitle = stringResource(R.string.desc_wbu_sync_schedule),
                     onClick = {
                         navBridge.navigate(Destination.WebView(initialUrl = "https://jwxt.wbu.edu.cn", assetJsPath = "WBU/wbu_chaoxing.js"))
                     }

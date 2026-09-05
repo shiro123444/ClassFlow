@@ -160,7 +160,7 @@ fun MoreOptionsScreen(
     LaunchedEffect(updateStatus) {
         when (updateStatus) {
             is UpdateStatus.Latest -> {
-                snackbarHostState.showSnackbar("你已经是最新版本")
+                snackbarHostState.showSnackbar(context.getString(R.string.dialog_current_version_latest))
                 updateStatus = UpdateStatus.Idle
             }
 
@@ -177,12 +177,12 @@ fun MoreOptionsScreen(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text(text = "更多选项") },
+                title = { Text(text = stringResource(R.string.title_more_options)) },
                 navigationIcon = {
                     IconButton(onClick = { navBridge.popBackStack() }) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "返回"
+                            contentDescription = stringResource(R.string.a11y_back)
                         )
                     }
                 }
@@ -293,14 +293,14 @@ fun MoreOptionsScreen(
                 InfoCard(
                     modifier = Modifier.weight(1f),
                     icon = Icons.Default.Stars,
-                    title = "产品愿景",
-                    subtitle = "为每一位WBUer打造的优雅轻量课表~"
+                    title = stringResource(R.string.title_product_vision),
+                    subtitle = stringResource(R.string.desc_product_vision)
                 )
                 InfoCard(
                     modifier = Modifier.weight(1f),
                     icon = Icons.Default.RocketLaunch,
-                    title = "后续计划",
-                    subtitle = "持续对接教务系统，优化课表导入体验"
+                    title = stringResource(R.string.title_future_plan),
+                    subtitle = stringResource(R.string.desc_future_plan)
                 )
             }
 
@@ -317,7 +317,7 @@ fun MoreOptionsScreen(
                         navBridge.navigate(Destination.ContributionList)
                     },
                     headlineContent = { Text(stringResource(R.string.item_contributors)) },
-                    supportingContent = { Text("查看为项目做出贡献的开发者") },
+                    supportingContent = { Text(stringResource(R.string.desc_contributors)) },
                     leadingContent = {
                         Icon(
                             imageVector = Icons.Default.PeopleAlt,
@@ -336,8 +336,8 @@ fun MoreOptionsScreen(
                     modifier = Modifier.clickable {
                         navBridge.navigate(Destination.OpenSourceLicenses)
                     },
-                    headlineContent = { Text("开源协议") },
-                    supportingContent = { Text("查看许可证与合规信息") },
+                    headlineContent = { Text(stringResource(R.string.title_open_source_licenses)) },
+                    supportingContent = { Text(stringResource(R.string.desc_open_source_licenses)) },
                     leadingContent = {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ListAlt,
@@ -388,8 +388,8 @@ fun MoreOptionsScreen(
                             }
                         }
                     },
-                    headlineContent = { Text("智汇AI协会交流群") },
-                    supportingContent = { Text("加入QQ群与同学交流") },
+                    headlineContent = { Text(stringResource(R.string.title_ai_association_group)) },
+                    supportingContent = { Text(stringResource(R.string.desc_ai_association_group)) },
                     leadingContent = {
                         Icon(
                             imageVector = Icons.Default.Groups,
@@ -409,8 +409,8 @@ fun MoreOptionsScreen(
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/shiro123444/ClassFlow/issues"))
                         context.startActivity(intent)
                     },
-                    headlineContent = { Text("意见反馈") },
-                    supportingContent = { Text("前往 GitHub 提交 Issue") },
+                    headlineContent = { Text(stringResource(R.string.item_feedback)) },
+                    supportingContent = { Text(stringResource(R.string.desc_feedback_github)) },
                     leadingContent = {
                         Icon(
                             imageVector = Icons.Default.BugReport,
@@ -449,8 +449,8 @@ fun MoreOptionsScreen(
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
 
                 ListItem(
-                    headlineContent = { Text("自动检查更新") },
-                    supportingContent = { Text("启动应用时静默检查是否有新版本") },
+                    headlineContent = { Text(stringResource(R.string.item_auto_check_update)) },
+                    supportingContent = { Text(stringResource(R.string.desc_auto_check_update)) },
                     leadingContent = {
                         Icon(
                             imageVector = Icons.Default.Sync,
@@ -470,8 +470,8 @@ fun MoreOptionsScreen(
 
                 ListItem(
                     modifier = Modifier.clickable { showChannelDialog = true },
-                    headlineContent = { Text("更新渠道") },
-                    supportingContent = { Text(UpdateChannelType.fromId(updateChannel).title) },
+                    headlineContent = { Text(stringResource(R.string.item_update_channel)) },
+                    supportingContent = { Text(stringResource(UpdateChannelType.fromId(updateChannel).titleRes)) },
                     leadingContent = {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.AltRoute,
@@ -496,9 +496,9 @@ fun MoreOptionsScreen(
                     supportingContent = {
                         Text(
                             text = when {
-                                ignoredUpdateVersion.isNotBlank() -> "已跳过版本 $ignoredUpdateVersion（点击可检查）"
-                                customUpdateApiUrl.isNotBlank() -> "已设置自定义更新源"
-                                else -> "获取最新版本支持"
+                                ignoredUpdateVersion.isNotBlank() -> stringResource(R.string.format_skipped_update_version, ignoredUpdateVersion)
+                                customUpdateApiUrl.isNotBlank() -> stringResource(R.string.status_custom_update_source_set)
+                                else -> stringResource(R.string.status_get_latest_support)
                             },
                             maxLines = 1
                         )
@@ -519,7 +519,7 @@ fun MoreOptionsScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Settings,
-                                contentDescription = "配置更新服务器地址"
+                                contentDescription = stringResource(R.string.action_configure_update_server)
                             )
                         }
                     }
@@ -567,7 +567,7 @@ fun MoreOptionsScreen(
                         showResultDialog = false
                         updateStatus = UpdateStatus.Idle
                         coroutineScope.launch {
-                            snackbarHostState.showSnackbar("已跳过版本 ${status.info.latestVersionName}")
+                            snackbarHostState.showSnackbar(context.getString(R.string.toast_skipped_version, status.info.latestVersionName))
                         }
                     },
                     onUpdateConfirm = {
@@ -591,11 +591,11 @@ fun MoreOptionsScreen(
                                 if (!updateChecker.canRequestPackageInstalls()) {
                                     showInstallPermissionDialog = true
                                 } else {
-                                    snackbarHostState.showSnackbar("已调起安装程序")
+                                    snackbarHostState.showSnackbar(context.getString(R.string.toast_installer_launched))
                                 }
                             } else {
                                 updateStatus = UpdateStatus.Error(
-                                    "下载或安装失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
+                                    context.getString(R.string.toast_download_or_install_failed, result.exceptionOrNull()?.message ?: "")
                                 )
                                 showResultDialog = true
                             }
@@ -633,7 +633,7 @@ fun MoreOptionsScreen(
                             inputServerUrl = customUpdateApiUrl
                             showServerUrlDialog = true
                         }) {
-                            Text("配置地址")
+                            Text(stringResource(R.string.action_configure_address))
                         }
                     }
                 )
@@ -646,17 +646,17 @@ fun MoreOptionsScreen(
     if (showServerUrlDialog) {
         AlertDialog(
             onDismissRequest = { showServerUrlDialog = false },
-            title = { Text("自定义更新服务器") },
+            title = { Text(stringResource(R.string.title_custom_update_server)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "如需使用自建更新服务，可输入自定义 API 接口地址。留空则默认使用官方接口。",
+                        text = stringResource(R.string.desc_custom_update_server),
                         style = MaterialTheme.typography.bodyMedium
                     )
                     OutlinedTextField(
                         value = inputServerUrl,
                         onValueChange = { inputServerUrl = it },
-                        placeholder = { Text("输入自定义 API 地址（留空使用默认）") },
+                        placeholder = { Text(stringResource(R.string.hint_custom_update_server_input)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -667,7 +667,7 @@ fun MoreOptionsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "已忽略版本：$ignoredUpdateVersion",
+                                text = stringResource(R.string.label_ignored_version, ignoredUpdateVersion),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -675,11 +675,11 @@ fun MoreOptionsScreen(
                                 onClick = {
                                     viewModel.clearIgnoredUpdateVersion()
                                     coroutineScope.launch {
-                                        snackbarHostState.showSnackbar("已恢复该版本的自动提醒")
+                                        snackbarHostState.showSnackbar(context.getString(R.string.toast_restored_version_reminder))
                                     }
                                 }
                             ) {
-                                Text("恢复提醒")
+                                Text(stringResource(R.string.action_restore_reminder))
                             }
                         }
                     }
@@ -691,12 +691,12 @@ fun MoreOptionsScreen(
                     showServerUrlDialog = false
                     coroutineScope.launch {
                         snackbarHostState.showSnackbar(
-                            if (inputServerUrl.isBlank()) "已恢复为默认更新接口"
-                            else "自定义更新地址已保存"
+                            if (inputServerUrl.isBlank()) context.getString(R.string.toast_server_reset_to_default)
+                            else context.getString(R.string.toast_server_saved)
                         )
                     }
                 }) {
-                    Text("保存")
+                    Text(stringResource(R.string.action_save))
                 }
             },
             dismissButton = {
@@ -726,7 +726,7 @@ fun MoreOptionsScreen(
         onSelectChannel = { newChannel ->
             viewModel.onUpdateChannelChanged(newChannel)
             coroutineScope.launch {
-                snackbarHostState.showSnackbar("已切换为${UpdateChannelType.fromId(newChannel).title}")
+                snackbarHostState.showSnackbar(context.getString(R.string.toast_channel_switched, context.getString(UpdateChannelType.fromId(newChannel).titleRes)))
             }
         }
     )
@@ -792,7 +792,7 @@ private fun HeroCard(versionName: String) {
                         letterSpacing = 0.sp
                     )
                     Text(
-                        text = "欢迎每一位WBUer~",
+                        text = stringResource(R.string.brand_welcome_wbuer),
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
@@ -801,7 +801,7 @@ private fun HeroCard(versionName: String) {
             Spacer(modifier = Modifier.height(14.dp))
 
             Text(
-                text = "当前版本  $versionName",
+                text = stringResource(R.string.format_current_version, versionName),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
