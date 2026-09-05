@@ -440,7 +440,13 @@ internal fun ScheduleGridContent(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(ThemeGradients.weeklyScheduleGradient())
+                .then(
+                    if (drawBackground) {
+                        Modifier.background(ThemeGradients.weeklyScheduleGradient())
+                    } else {
+                        Modifier
+                    }
+                )
                 .hazeSource(previewHaze)
         ) {
             if (drawBackground && style.backgroundImagePath.isNotEmpty()) {
