@@ -30,13 +30,18 @@ fun normalizeImportedTimeSlots(
     }
 
     val normalized = mutableListOf<TimeSlot>()
-    var cursor = parsed.first().first
+    var lastEnd: LocalTime? = null
     parsed.forEachIndexed { index, pair ->
         val rawStart = pair.first
         val rawEnd = pair.second
 
-        // Preserve real world long breaks (e.g. lunch) and only fix overlaps.
-        val start = if (rawStart.isAfter(cursor) || rawStart == cursor) rawStart else cursor
+        // 仅在发生逆序/重叠时（当前节次开始时间早于上一节结束时间），才以上一节结束时间 + breakDuration 做避让推迟。
+        // 若没有重叠（例如 5 分钟、10 分钟或午休长课间），100% 尊重并保留学校教务的真实开始时间。
+        val start = if (lastEnd != null && rawStart.isBefore(lastEnd)) {
+            lastEnd!!.plusMinutes(validBreakDuration.toLong())
+        } else {
+            rawStart
+        }
         val minimumEnd = start.plusMinutes(validClassDuration.toLong())
         val end = if (rawEnd.isAfter(start)) rawEnd else minimumEnd
 
@@ -49,7 +54,7 @@ fun normalizeImportedTimeSlots(
             )
         )
 
-        cursor = end.plusMinutes(validBreakDuration.toLong())
+        lastEnd = end
     }
 
     return normalized

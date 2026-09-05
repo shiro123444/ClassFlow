@@ -670,6 +670,13 @@ internal class WbuAuthTransport(
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .getString(KEY_LAST_STUDENT_ID, "").orEmpty()
 
+        fun setSavedStudentId(context: Context, studentId: String) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_LAST_STUDENT_ID, studentId)
+                .apply()
+        }
+
         fun shouldUseManualWebViewForVpn(context: Context): Boolean =
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .getBoolean(KEY_USE_WEBVIEW_VPN_MANUAL_MODE, false)

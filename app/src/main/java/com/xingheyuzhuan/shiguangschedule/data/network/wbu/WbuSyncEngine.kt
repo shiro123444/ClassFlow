@@ -1525,8 +1525,29 @@ class WbuSyncEngine(
         fun getSavedUseVpn(context: Context): Boolean? = WbuAuthTransport.getSavedUseVpn(context)
         fun setSavedUseVpn(context: Context, enabled: Boolean) = WbuAuthTransport.setSavedUseVpn(context, enabled)
         fun getSavedStudentId(context: Context): String = WbuAuthTransport.getSavedStudentId(context)
+        fun setSavedStudentId(context: Context, studentId: String) = WbuAuthTransport.setSavedStudentId(context, studentId)
 
         fun isSimplifiedChinese(context: Context): Boolean = WbuAuthTransport.isSimplifiedChinese(context)
+
+        /**
+         * 计算不冲突的课表名称。
+         * 如果本地已有同名课表，且绑定的学号非当前学号，追加学号后缀避免混淆。
+         */
+        fun computeNonConflictingTableName(
+            baseSemester: String,
+            sid: String,
+            allTables: List<com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTable>
+        ): String {
+            val candidate = baseSemester.ifBlank { "未命名课表" }
+            val hasConflictWithOtherSid = allTables.any {
+                it.name == candidate && it.studentId != null && it.studentId != sid
+            }
+            return if (hasConflictWithOtherSid && sid.isNotBlank()) {
+                "$candidate ($sid)"
+            } else {
+                candidate
+            }
+        }
 
         /** 「IDS addr not from Jwxt」：为 true 时不从教务登录页发现 CAS 链接，直接用 ids 基址构造。默认关闭。 */
         fun getIdsAddrNotFromJwxt(context: Context): Boolean = WbuAuthTransport.getIdsAddrNotFromJwxt(context)

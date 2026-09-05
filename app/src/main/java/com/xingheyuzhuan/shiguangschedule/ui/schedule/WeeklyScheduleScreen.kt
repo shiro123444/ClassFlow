@@ -279,23 +279,6 @@ fun WeeklyScheduleScreen(
         return (match.groupValues[1].toLongOrNull() ?: 0L) * 10 + (match.groupValues[2].toLongOrNull() ?: 0L)
     }
 
-    fun computeNonConflictingTableName(
-        baseSemester: String,
-        sid: String,
-        allTables: List<CourseTable>
-    ): String {
-        val candidate = baseSemester.ifBlank { "未命名课表" }
-        // 方案 B：如果本地已有同名课表，且该课表绑定的学号不是当前登录学号，则追加学号后缀避免混淆
-        val hasConflictWithOtherSid = allTables.any {
-            it.name == candidate && it.studentId != null && it.studentId != sid
-        }
-        return if (hasConflictWithOtherSid && sid.isNotBlank()) {
-            "$candidate ($sid)"
-        } else {
-            candidate
-        }
-    }
-
     suspend fun performCourseImportPipeline(
         engine: WbuSyncEngine,
         loginSid: String
@@ -410,7 +393,7 @@ fun WeeklyScheduleScreen(
 
         if (forceCreateNewBySidConflict) {
             // 因学号冲突，用户选择为新学号新建课表（应用方案 B 命名）
-            val newName = computeNonConflictingTableName(effectiveXnxq, effectiveSid, allTablesBeforeSave)
+            val newName = WbuSyncEngine.computeNonConflictingTableName(effectiveXnxq, effectiveSid, allTablesBeforeSave)
             val newTable = viewModel.createAndSwitchTable(
                 name = newName,
                 studentId = effectiveSid,
@@ -436,7 +419,7 @@ fun WeeklyScheduleScreen(
                     return false
                 }
                 2 -> {
-                    val newName = computeNonConflictingTableName(effectiveXnxq, effectiveSid, allTablesBeforeSave)
+                    val newName = WbuSyncEngine.computeNonConflictingTableName(effectiveXnxq, effectiveSid, allTablesBeforeSave)
                     val newTable = viewModel.createAndSwitchTable(
                         name = newName,
                         studentId = effectiveSid,
@@ -472,7 +455,7 @@ fun WeeklyScheduleScreen(
         viewModel.applySemesterConfig(semConfig, targetTableId = destTableId)
 
         // 更新目标课表的学期与学号元数据
-        val finalName = if (shouldRenameDest) computeNonConflictingTableName(effectiveXnxq, effectiveSid, allTablesBeforeSave) else null
+        val finalName = if (shouldRenameDest) WbuSyncEngine.computeNonConflictingTableName(effectiveXnxq, effectiveSid, allTablesBeforeSave) else null
         viewModel.updateTableMeta(
             tableId = destTableId,
             name = finalName,
@@ -1451,9 +1434,9 @@ fun WeeklyScheduleScreen(
                     onClick = {
                         showManualLoginPrompt = false
                         val target = if (manualLoginUseVpn) {
-                            Destination.WebView(initialUrl = "https://webvpn.wbu.edu.cn/portal/#!/login", assetJsPath = "WBU/wbu_chaoxing.js")
+                            Destination.WebView(initialUrl = "https://webvpn.wbu.edu.cn/portal/?redirect_uri=http%3A%2F%2Fjwxt-wbu-edu-cn-s.webvpn.wbu.edu.cn%3A8118%2F#!/login", assetJsPath = "WBU/wbu_chaoxing.js")
                         } else {
-                            Destination.WebView(initialUrl = "https://jwxt.wbu.edu.cn/admin/login", assetJsPath = "WBU/wbu_chaoxing.js")
+                            Destination.WebView(initialUrl = "https://jwxt.wbu.edu.cn", assetJsPath = "WBU/wbu_chaoxing.js")
                         }
                         navBridge.navigate(target)
                     }
@@ -1894,7 +1877,7 @@ fun WeeklyScheduleScreen(
                                 try {
                                     val sid = engine.lastResolvedStudentId ?: WbuSyncEngine.getSavedStudentId(appContext)
                                     val currentAllTables = viewModel.getAllCourseTables()
-                                    val newName = computeNonConflictingTableName(xnxqToImport, sid, currentAllTables)
+                                    val newName = WbuSyncEngine.computeNonConflictingTableName(xnxqToImport, sid, currentAllTables)
                                     val newTable = viewModel.createAndSwitchTable(
                                         name = newName,
                                         studentId = sid,

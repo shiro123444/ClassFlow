@@ -9,8 +9,7 @@
 
 (() => {
     const DEFAULT_HEADERS = {
-        "X-Requested-With": "XMLHttpRequest",
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+        "X-Requested-With": "XMLHttpRequest"
     };
 
     const WBU_TIME_SLOTS_FALLBACK = [
@@ -459,19 +458,20 @@
         const first = configs[0]?.cfg;
         const allSame = configs.every((x) => sameConfig(x.cfg, first, maxSection));
         if (allSame) return defaultId;
-        if (typeof window.AndroidBridgePromise.showSingleSelection !== "function") return defaultId;
+        const bridge = window.AndroidBridgePromise || window.shiguangBridgePromise;
+        if (!bridge || typeof bridge.showSingleSelection !== "function") return defaultId;
         const labels = campuses.map((c) => c.name);
         const defaultIndex = Math.max(0, campuses.findIndex((c) => c.id === defaultId));
         let sel;
         try {
-            sel = await window.AndroidBridgePromise.showSingleSelection(
+            sel = await bridge.showSingleSelection(
                 "检测到多个校区且作息不同，请选择要导出的校区",
                 JSON.stringify(labels),
                 defaultIndex
             );
         } catch (e) { return defaultId; }
         if (sel === null) return CANCELED;
-        const chosen = campuses[sel];
+        const chosen = campuses[Number(sel)];
         return chosen ? chosen.id : defaultId;
     }
 
@@ -495,8 +495,8 @@
 
     function padTime(value) {
         const t = cleanText(value);
-        const m = t.match(/^(\d{1,2}):(\d{1,2})$/);
-        if (!m) return "";
+        const m = t.match(/^(\d{1,2}):(\d{1,2})/);
+        if (!m) return t;
         return `${String(Number(m[1])).padStart(2, "0")}:${String(Number(m[2])).padStart(2, "0")}`;
     }
 
@@ -553,36 +553,79 @@
         }
     }
 
+    // 获取真实的纯数字学号（绝非系统后台内部的流水号 xhid）
+    function getActualStudentId(doc, rows) {
+        // 1. 优先读取 Cookie 中的 username（超星教务登录后必定写入真实的学号）
+        try {
+            const cookieMatch = document.cookie
+                .split(";")
+                .map((s) => s.trim())
+                .find((c) => c.startsWith("username="));
+            if (cookieMatch) {
+                const val = decodeURIComponent(cookieMatch.split("=")[1] || "").trim();
+                if (val && /^\d{5,}$/.test(val)) return val;
+            }
+        } catch (e) {}
+
+        // 2. 从页面顶栏或者信息展示区获取（<span class="admin_name">250594036</span>）
+        try {
+            const root = doc || document;
+            const el = root.querySelector(".admin_name, #admin_name, span[class*='admin_name']");
+            if (el) {
+                const text = (el.textContent || "").trim();
+                const m = text.match(/\b(\d{5,})\b/);
+                if (m) return m[1];
+            }
+        } catch (e) {}
+
+        // 3. 从接口返回行中提取（部分超星版本返回带 xh 字段）
+        if (Array.isArray(rows) && rows.length > 0) {
+            for (const r of rows) {
+                const xh = String(r.xh || "").trim();
+                if (xh && /^\d{5,}$/.test(xh)) return xh;
+            }
+        }
+
+        return "";
+    }
+
     async function main() {
-        if (!window.AndroidBridgePromise) throw new Error("AndroidBridgePromise is missing in this WebView");
+        const bridgePromise = window.AndroidBridgePromise || window.shiguangBridgePromise;
+        if (!bridgePromise) throw new Error("BridgePromise is missing in this WebView");
         showToast("WBU 导入已开始");
 
-        let session = null;
-        let doc = window.location.href.includes("queryKbForXsd") ? document : null;
-        if (!doc) {
-            const iframe = document.querySelector("iframe[src*='queryKbForXsd']");
-            if (iframe) {
-                for (let i = 0; i < 20; i += 1) {
-                    try {
-                        const d = iframe.contentDocument || iframe.contentWindow?.document;
-                        if (d && d.readyState && d.readyState !== "loading") { doc = d; break; }
-                    } catch (e) { /* ignore */ }
-                    await sleep(500);
+        // 1. API 优先：直接从后台请求课表页参数（获取权威的 xhid、xqdm、xnxq 及可选学期列表）
+        let session = await fetchSchedulePageSession();
+        let doc = null;
+
+        // 若 API 请求失败或缺少关键字段，fallback 到从网页 DOM/iframe 获取
+        if (!session || !session.xhid || !session.xqdm) {
+            if (window.location.href.includes("queryKbForXsd")) {
+                doc = document;
+            } else {
+                const iframe = document.querySelector("iframe[src*='queryKbForXsd']");
+                if (iframe) {
+                    for (let i = 0; i < 20; i += 1) {
+                        try {
+                            const d = iframe.contentDocument || iframe.contentWindow?.document;
+                            if (d && d.readyState && d.readyState !== "loading") { doc = d; break; }
+                        } catch (e) { /* ignore */ }
+                        await sleep(500);
+                    }
                 }
             }
         }
 
-        // 无课表 DOM：抓课表页参数
         const semDoc = doc;
-        if (!semDoc || !readSemesterOptions(semDoc).length) {
-            session = await fetchSchedulePageSession();
-            if (!session) { showToast("未找到课表页面，请手动打开“我的课表”后重试"); return; }
+        const subjectDoc = session || semDoc;
+        if (!subjectDoc) {
+            showToast("未找到课表页面，请手动打开“我的课表”后重试");
+            return;
         }
 
-        const subjectDoc = semDoc || session;
         const chosenXnxq = await askChooseSemester(subjectDoc);
         if (chosenXnxq === CANCELED) { showToast("已取消，终止导入"); return; }
-        const currentXnxq = semDoc ? getCurrentXnxq(semDoc) : (session?.xnxq || "");
+        const currentXnxq = session?.xnxq || (semDoc ? getCurrentXnxq(semDoc) : "");
         const exportXnxq = chosenXnxq || currentXnxq;
         if (!exportXnxq) { showToast("无法识别当前学期参数"); return; }
 
@@ -618,18 +661,38 @@
         const startSection = courses[0]?.startSection;
         void startSection;
 
-        await window.AndroidBridgePromise.saveImportedCourses(JSON.stringify(courses));
-        if (timeSlots.length) await window.AndroidBridgePromise.savePresetTimeSlots(JSON.stringify(timeSlots));
+        await bridgePromise.saveImportedCourses(JSON.stringify(courses));
+        if (timeSlots.length) await bridgePromise.savePresetTimeSlots(JSON.stringify(timeSlots));
         if (semesterConfig.semesterStartDate || semesterConfig.semesterTotalWeeks) {
-            await window.AndroidBridgePromise.saveCourseConfig(JSON.stringify({
+            await bridgePromise.saveCourseConfig(JSON.stringify({
                 semesterStartDate: semesterConfig.semesterStartDate || "",
                 semesterTotalWeeks: semesterConfig.semesterTotalWeeks || 20,
                 firstDayOfWeek: 1
             }));
         }
 
+        // 回写元数据（学号与学期），打通后续主界面右上角一键自动同步与“我的课表”自动规范重命名
+        try {
+            const actualStudentId = getActualStudentId(semDoc, rows);
+            if (actualStudentId) {
+                console.log("解析到学生真实学号:", actualStudentId);
+            }
+            const metaPayload = JSON.stringify({
+                studentId: actualStudentId || "",
+                semesterCode: exportXnxq
+            });
+            if (typeof bridgePromise.saveTableMeta === "function") {
+                await bridgePromise.saveTableMeta(metaPayload);
+            } else if (window.AndroidBridge && typeof window.AndroidBridge.saveTableMeta === "function") {
+                const promiseId = "meta_" + Date.now();
+                window.AndroidBridge.saveTableMeta(metaPayload, promiseId);
+            }
+        } catch (e) {
+            console.warn("保存课表元数据失败", e);
+        }
+
         showToast(`导入完成：${courses.length} 门课程`);
-        window.AndroidBridge.notifyTaskCompletion();
+        (window.AndroidBridge || window.shiguangBridge)?.notifyTaskCompletion();
     }
 
     main().catch((error) => {

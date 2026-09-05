@@ -118,6 +118,7 @@ import com.xingheyuzhuan.shiguangschedule.data.model.AppThemeMode
 import com.xingheyuzhuan.shiguangschedule.data.model.StartScreen
 import com.xingheyuzhuan.shiguangschedule.data.repository.AppSettingsRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.CourseConversionRepository
+import com.xingheyuzhuan.shiguangschedule.data.repository.CourseTableRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.TimeSlotRepository
 import com.xingheyuzhuan.shiguangschedule.ui.components.BottomNavigationBar
 import com.xingheyuzhuan.shiguangschedule.ui.components.LeftNavigationRail
@@ -161,6 +162,9 @@ class MainActivity : ComponentActivity() {
     lateinit var courseConversionRepository: CourseConversionRepository
 
     @Inject
+    lateinit var courseTableRepository: CourseTableRepository
+
+    @Inject
     lateinit var timeSlotRepository: TimeSlotRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -201,6 +205,7 @@ class MainActivity : ComponentActivity() {
                         StartScreen.TODAY_SCHEDULE -> Destination.TodaySchedule
                     },
                     courseConversionRepository = courseConversionRepository,
+                    courseTableRepository = courseTableRepository,
                     timeSlotRepository = timeSlotRepository,
                     appSettingsRepository = appSettingsRepository
                 )
@@ -229,6 +234,7 @@ class MainActivity : ComponentActivity() {
 fun AppNavigation(
     startDestination: Destination,
     courseConversionRepository: CourseConversionRepository,
+    courseTableRepository: CourseTableRepository,
     timeSlotRepository: TimeSlotRepository,
     appSettingsRepository: AppSettingsRepository
 ) {
@@ -615,6 +621,7 @@ fun AppNavigation(
                                 initialUrl = destination.initialUrl,
                                 assetJsPath = destination.assetJsPath,
                                 courseConversionRepository = courseConversionRepository,
+                                courseTableRepository = courseTableRepository,
                                 timeSlotRepository = timeSlotRepository,
                                 appSettingsRepository = appSettingsRepository
                             )

@@ -276,9 +276,9 @@ fun CourseTableConversionScreen(
                 SettingTile(
                     icon = Icons.Rounded.School,
                     title = "WBU教务一键同步",
-                    subtitle = "自动登录后抓取课表并回写到当前课表",
+                    subtitle = "自动登录后抓取课表并回写到当前课表 (WebView)",
                     onClick = {
-                        navBridge.navigate(Destination.WebView(initialUrl = "https://jwxt.wbu.edu.cn/admin/?loginType=1", assetJsPath = ""))
+                        navBridge.navigate(Destination.WebView(initialUrl = "https://jwxt.wbu.edu.cn", assetJsPath = "WBU/wbu_chaoxing.js"))
                     }
                 )
             }
