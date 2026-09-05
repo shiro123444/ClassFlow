@@ -129,6 +129,7 @@ fun ManageCourseTablesScreen(
     var dynamicPrep by remember { mutableStateOf<AuthForm?>(null) }
 
     var semesterOptions by remember { mutableStateOf<List<WbuSyncEngine.WbuSemesterOption>>(emptyList()) }
+    var semesterCurrentXnxq by remember { mutableStateOf<String?>(null) }
     var semesterSelectDeferred by remember { mutableStateOf<CompletableDeferred<String?>?>(null) }
 
     var duplicateDialogData by remember { mutableStateOf<WbuSyncEngine.DuplicateGroupInfo?>(null) }
@@ -162,6 +163,7 @@ fun ManageCourseTablesScreen(
         val chosenSemester = if (options.isNotEmpty()) {
             val deferred = CompletableDeferred<String?>()
             semesterOptions = options
+            semesterCurrentXnxq = engine.systemCurrentXnxq ?: engine.lastResolvedXnxq
             semesterSelectDeferred = deferred
             val chosen = deferred.await()
             if (chosen == null) {
@@ -666,63 +668,17 @@ fun ManageCourseTablesScreen(
 
         // 学期选择弹窗（管理界面导入流程）
         semesterSelectDeferred?.let { deferred ->
-            var selectedValue by remember(semesterOptions) {
-                mutableStateOf(semesterOptions.firstOrNull()?.value.orEmpty())
-            }
-            AlertDialog(
+            com.xingheyuzhuan.shiguangschedule.ui.components.SemesterPickerDialog(
+                options = semesterOptions,
+                currentXnxq = semesterCurrentXnxq,
+                confirmButtonText = "确定新建导入",
+                onConfirm = { chosen ->
+                    deferred.complete(chosen)
+                    semesterSelectDeferred = null
+                },
                 onDismissRequest = {
                     deferred.complete(null)
                     semesterSelectDeferred = null
-                },
-                title = { Text("选择导入的学年学期") },
-                text = {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        semesterOptions.forEach { opt ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { selectedValue = opt.value }
-                                    .padding(vertical = 8.dp, horizontal = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                RadioButton(
-                                    selected = selectedValue == opt.value,
-                                    onClick = { selectedValue = opt.value }
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = opt.text,
-                                    style = MaterialTheme.typography.bodyLarge
-                                )
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            deferred.complete(selectedValue)
-                            semesterSelectDeferred = null
-                        },
-                        enabled = selectedValue.isNotBlank()
-                    ) {
-                        Text("确定新建导入")
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = {
-                            deferred.complete(null)
-                            semesterSelectDeferred = null
-                        }
-                    ) {
-                        Text("取消")
-                    }
                 }
             )
         }
