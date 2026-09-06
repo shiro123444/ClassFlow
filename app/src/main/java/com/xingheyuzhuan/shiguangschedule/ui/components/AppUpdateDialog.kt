@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.xingheyuzhuan.shiguangschedule.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -25,7 +27,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.xingheyuzhuan.shiguangschedule.tool.ReleaseUpdateInfo
 import com.xingheyuzhuan.shiguangschedule.tool.UpdateStatus
-
 /**
  * 发现新版本更新弹窗
  */
@@ -38,23 +39,22 @@ fun AppUpdateFoundDialog(
     onUpdateConfirm: () -> Unit
 ) {
     val scrollState = rememberScrollState()
-
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "发现新版本 ${info.latestVersionName}",
+                text = stringResource(R.string.title_update_found, info.latestVersionName),
                 style = MaterialTheme.typography.titleLarge
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "当前版本：$currentVersionName\n最新版本：${info.latestVersionName}",
+                    text = stringResource(R.string.format_update_dialog_versions, currentVersionName, info.latestVersionName),
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
-                    text = "更新内容",
+                    text = stringResource(R.string.label_update_content),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -69,13 +69,13 @@ fun AppUpdateFoundDialog(
                         )
                         .padding(12.dp)
                 ) {
-                    MarkdownReleaseNotes(info.summary.ifBlank { "本次版本未提供详细说明。" })
+                    MarkdownReleaseNotes(info.summary.ifBlank { stringResource(R.string.desc_update_no_notes) })
                 }
             }
         },
         confirmButton = {
             Button(onClick = onUpdateConfirm) {
-                Text("立即更新")
+                Text(stringResource(R.string.action_update_now))
             }
         },
         dismissButton = {
@@ -84,16 +84,15 @@ fun AppUpdateFoundDialog(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 TextButton(onClick = onSkipVersion) {
-                    Text("跳过此版本")
+                    Text(stringResource(R.string.action_skip_this_version))
                 }
                 TextButton(onClick = onDismiss) {
-                    Text("稍后")
+                    Text(stringResource(R.string.action_later))
                 }
             }
         }
     )
 }
-
 /**
  * 更新包下载进度弹窗
  */
@@ -104,7 +103,7 @@ fun AppDownloadProgressDialog(
 ) {
     AlertDialog(
         onDismissRequest = {},
-        title = { Text("正在下载更新") },
+        title = { Text(stringResource(R.string.title_downloading_update)) },
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -143,14 +142,13 @@ fun AppDownloadProgressDialog(
                             .height(8.dp)
                     )
                     Text(
-                        text = "正在连接更新服务器...",
+                        text = stringResource(R.string.status_connecting_update_server),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-
                 Text(
-                    text = "下载完成后将自动唤起安装包安装程序",
+                    text = stringResource(R.string.desc_download_auto_install),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -159,13 +157,12 @@ fun AppDownloadProgressDialog(
         confirmButton = {
             if (onCancel != null) {
                 TextButton(onClick = onCancel) {
-                    Text("取消下载")
+                    Text(stringResource(R.string.action_cancel_download))
                 }
             }
         }
     )
 }
-
 /**
  * 权限引导弹窗（允许安装未知应用）
  */
@@ -176,26 +173,25 @@ fun InstallPermissionPromptDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("需要安装权限") },
+        title = { Text(stringResource(R.string.title_need_install_permission)) },
         text = {
             Text(
-                text = "新版本已下载完成，需要授予“允许安装未知应用”权限才能继续完成安装。",
+                text = stringResource(R.string.desc_need_install_permission),
                 style = MaterialTheme.typography.bodyMedium
             )
         },
         confirmButton = {
             Button(onClick = onConfirm) {
-                Text("前往设置")
+                Text(stringResource(R.string.action_go_to_settings))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("稍后安装")
+                Text(stringResource(R.string.action_install_later))
             }
         }
     )
 }
-
 @Composable
 fun MarkdownReleaseNotes(markdown: String) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

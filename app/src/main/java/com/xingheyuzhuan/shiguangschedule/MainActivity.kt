@@ -118,6 +118,7 @@ import com.xingheyuzhuan.shiguangschedule.data.model.AppThemeMode
 import com.xingheyuzhuan.shiguangschedule.data.model.StartScreen
 import com.xingheyuzhuan.shiguangschedule.data.repository.AppSettingsRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.CourseConversionRepository
+import com.xingheyuzhuan.shiguangschedule.data.repository.CourseTableRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.TimeSlotRepository
 import com.xingheyuzhuan.shiguangschedule.ui.components.BottomNavigationBar
 import com.xingheyuzhuan.shiguangschedule.ui.components.LeftNavigationRail
@@ -126,6 +127,9 @@ import com.xingheyuzhuan.shiguangschedule.ui.components.isOnboardingCompleted
 import com.xingheyuzhuan.shiguangschedule.ui.components.markOnboardingCompleted
 import com.xingheyuzhuan.shiguangschedule.ui.schedule.WeeklyScheduleScreen
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.list.AdapterSelectionScreen
+import com.xingheyuzhuan.shiguangschedule.ui.campus.academic.AcademicProgressScreen
+import com.xingheyuzhuan.shiguangschedule.ui.campus.classroom.FreeClassroomScreen
+import com.xingheyuzhuan.shiguangschedule.ui.campus.grade.GradeQueryScreen
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.list.SchoolSelectionListScreen
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.web.WebViewScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.SettingsScreen
@@ -159,6 +163,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var courseConversionRepository: CourseConversionRepository
+
+    @Inject
+    lateinit var courseTableRepository: CourseTableRepository
 
     @Inject
     lateinit var timeSlotRepository: TimeSlotRepository
@@ -201,6 +208,7 @@ class MainActivity : ComponentActivity() {
                         StartScreen.TODAY_SCHEDULE -> Destination.TodaySchedule
                     },
                     courseConversionRepository = courseConversionRepository,
+                    courseTableRepository = courseTableRepository,
                     timeSlotRepository = timeSlotRepository,
                     appSettingsRepository = appSettingsRepository
                 )
@@ -229,6 +237,7 @@ class MainActivity : ComponentActivity() {
 fun AppNavigation(
     startDestination: Destination,
     courseConversionRepository: CourseConversionRepository,
+    courseTableRepository: CourseTableRepository,
     timeSlotRepository: TimeSlotRepository,
     appSettingsRepository: AppSettingsRepository
 ) {
@@ -596,6 +605,10 @@ fun AppNavigation(
                             Destination.StyleSettings -> StyleSettingsScreen(navBridge = navBridge)
                             Destination.WallpaperAdjust -> WallpaperAdjustScreen(onBack = navBridge::popBackStack)
                             Destination.QuickDelete -> QuickDeleteScreen(navBridge = navBridge)
+                            Destination.GradeQuery -> GradeQueryScreen(navBridge = navBridge)
+                            Destination.FreeClassroomQuery -> FreeClassroomScreen(navBridge = navBridge)
+                            Destination.AcademicProgress -> AcademicProgressScreen(navBridge = navBridge)
+                            Destination.LibraryBorrow -> com.xingheyuzhuan.shiguangschedule.ui.campus.library.LibraryScreen(navBridge = navBridge)
                             Destination.UpdateRepo -> UpdateRepoScreen(navBridge = navBridge)
                             Destination.NotificationSettings -> NotificationSettingsScreen(onBack = navBridge::popBackStack)
                             Destination.ThemeSettings -> ThemeSettingsScreen(onBack = navBridge::popBackStack)
@@ -615,6 +628,7 @@ fun AppNavigation(
                                 initialUrl = destination.initialUrl,
                                 assetJsPath = destination.assetJsPath,
                                 courseConversionRepository = courseConversionRepository,
+                                courseTableRepository = courseTableRepository,
                                 timeSlotRepository = timeSlotRepository,
                                 appSettingsRepository = appSettingsRepository
                             )
@@ -779,9 +793,9 @@ private fun IntroShowcaseScope.OnboardingCard(
     onComplete: () -> Unit
 ) {
     val continueHint = when {
-        isLastStep -> "✓ 点击任意处完成"
-        advanceByTapAnywhere -> "点击任意处继续 →"
-        else -> "请点击右上角同步按钮继续 →"
+        isLastStep -> stringResource(R.string.onboarding_tap_anywhere_finish)
+        advanceByTapAnywhere -> stringResource(R.string.onboarding_tap_anywhere_continue)
+        else -> stringResource(R.string.onboarding_tap_sync_continue)
     }
 
     Box(
@@ -910,7 +924,7 @@ private fun CourseDragGestureAnimation() {
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = if (isNearEdge) "跨周\n释放" else "屏幕\n边缘",
+                text = if (isNearEdge) stringResource(R.string.onboarding_cross_week_release) else stringResource(R.string.onboarding_screen_edge),
                 color = if (isNearEdge) Color.White else Color.White.copy(alpha = 0.5f),
                 fontSize = 9.sp,
                 lineHeight = 11.sp,
@@ -938,7 +952,7 @@ private fun CourseDragGestureAnimation() {
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = if (isNearEdge) "跨周挂起中" else "示例课程",
+                    text = if (isNearEdge) stringResource(R.string.onboarding_cross_week_suspended) else stringResource(R.string.onboarding_demo_course),
                     color = Color.White,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
@@ -955,7 +969,7 @@ private fun CourseDragGestureAnimation() {
                         modifier = Modifier.size(10.dp)
                     )
                     Text(
-                        text = if (isNearEdge) "移动至下周" else "长按拖动",
+                        text = if (isNearEdge) stringResource(R.string.onboarding_move_to_next_week) else stringResource(R.string.onboarding_long_press_drag),
                         color = Color.White.copy(alpha = 0.85f),
                         fontSize = 9.sp
                     )

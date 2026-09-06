@@ -51,15 +51,19 @@ enum class StartScreen(val value: String, val labelRes: Int) {
 /**
  * 更新渠道枚举
  */
-enum class UpdateChannelType(val channelId: String, val title: String, val description: String) {
+enum class UpdateChannelType(
+    val channelId: String,
+    val titleRes: Int,
+    val descriptionRes: Int
+) {
     /** 稳定版（默认） */
-    STABLE("stable", "正式版 (stable)", "推荐所有用户使用，版本稳定可靠"),
+    STABLE("stable", R.string.channel_stable_title, R.string.channel_stable_desc),
 
     /** 公测版 */
-    BETA("beta", "公测版 (beta)", "优先体验新功能，包含少量灰度特性"),
+    BETA("beta", R.string.channel_beta_title, R.string.channel_beta_desc),
 
     /** 开发尝鲜版 */
-    DEV("dev", "开发版 (dev)", "包含最新开发中的预览特性，更新频次最高");
+    DEV("dev", R.string.channel_dev_title, R.string.channel_dev_desc);
 
     companion object {
         fun fromId(id: String?): UpdateChannelType {

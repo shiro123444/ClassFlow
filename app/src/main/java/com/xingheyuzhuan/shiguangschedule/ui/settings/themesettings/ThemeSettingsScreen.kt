@@ -1,5 +1,8 @@
 package com.xingheyuzhuan.shiguangschedule.ui.settings.themesettings
 
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -222,7 +225,14 @@ private fun ThemeModeSelector(
                 onClick = { onModeSelected(mode) },
                 shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size)
             ) {
-                Text(label, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }

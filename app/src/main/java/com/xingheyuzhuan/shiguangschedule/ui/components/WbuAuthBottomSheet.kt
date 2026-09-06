@@ -1,4 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.components
+
+import androidx.compose.ui.res.stringResource
+import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthMode
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuLoginMethod
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
@@ -8,7 +11,6 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WebVpnClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.DynamicCodeSendResult
 import com.xingheyuzhuan.shiguangschedule.ui.theme.LocalIsDarkTheme
-
 import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
@@ -52,6 +54,8 @@ import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -69,6 +73,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -82,6 +87,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -95,7 +101,6 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.MultiFormatWriter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-
 /**
  * 二维码登录阶段。
  */
@@ -108,7 +113,6 @@ enum class QrPhase {
     EXPIRED,     // 已过期（遮罩 + 刷新图标）
     ERROR        // 出错（遮罩 + 刷新图标）
 }
-
 /**
  * 二维码登录的 UI 状态：qrContent 用于本地渲染二维码，phase 决定遮罩/图标，statusText 为提示。
  */
@@ -117,9 +121,7 @@ data class QrUiState(
     val phase: QrPhase = QrPhase.WAIT,
     val statusText: String = ""
 )
-
 private const val QR_PLACEHOLDER_CONTENT = " "
-
 private fun generateQrBitmap(content: String, size: Int = 512): ImageBitmap? {
     return runCatching {
         val matrix = MultiFormatWriter().encode(content, BarcodeFormat.QR_CODE, size, size)
@@ -132,7 +134,6 @@ private fun generateQrBitmap(content: String, size: Int = 512): ImageBitmap? {
         Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888).asImageBitmap()
     }.getOrNull()
 }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WbuAuthBottomSheet(
@@ -151,7 +152,11 @@ fun WbuAuthBottomSheet(
     errorMessage: String = "",
     initialStudentId: String = "",
     initialUseVpn: Boolean = false,
-    hideSelectSemesterSwitch: Boolean = false
+    hideSelectSemesterSwitch: Boolean = false,
+    hideImportPreferences: Boolean = false,
+    primaryButtonText: String? = null,
+    loadingButtonText: String? = null,
+    customLoadingTips: List<String>? = null
 ) {
     val isDark = LocalIsDarkTheme.current
     val context = LocalContext.current
@@ -163,7 +168,7 @@ fun WbuAuthBottomSheet(
         mutableStateOf(if (WbuAuthTransport.hasSavedPassword(context)) "••••••••" else "")
     }
     var useVpn by remember(initialUseVpn) { mutableStateOf(initialUseVpn) }
-    var authMode by remember { mutableStateOf(WbuAuthMode.UNIFIED_CAS) }
+    var authMode by remember { mutableStateOf(WbuAuthTransport.getSavedAuthMode(context)) }
     var authMenuExpanded by remember { mutableStateOf(false) }
     var panelExpanded by remember { mutableStateOf(false) }
     var idsVpnEnabled by remember { mutableStateOf(IdsCasClient.getIdsViaWebVpn(context)) }
@@ -188,17 +193,14 @@ fun WbuAuthBottomSheet(
     var cooldownRun by remember(method) { mutableIntStateOf(0) }
     var dynamicSendError by remember(method) { mutableStateOf("") }
     val scope = rememberCoroutineScope()
-
     val campus by WbuNetworkProbe.campusState.collectAsState()
-    val loadingTips = remember {
-        listOf(
-            "正在和教务系统打招呼...",
-            "课表小精灵正在搬运数据...",
-            "马上就好，正在整理你的课程~"
-        )
+    val tip1 = stringResource(R.string.tip_syncing_hello_jwxt)
+    val tip2 = stringResource(R.string.tip_syncing_fairy_moving)
+    val tip3 = stringResource(R.string.tip_syncing_finishing_up)
+    val loadingTips = remember(tip1, tip2, tip3, customLoadingTips) {
+        if (!customLoadingTips.isNullOrEmpty()) customLoadingTips else listOf(tip1, tip2, tip3)
     }
     var loadingTipIndex by remember { mutableIntStateOf(0) }
-
     LaunchedEffect(isLoading) {
         if (!isLoading) {
             loadingTipIndex = 0
@@ -209,13 +211,11 @@ fun WbuAuthBottomSheet(
             loadingTipIndex = (loadingTipIndex + 1) % loadingTips.size
         }
     }
-
     // 选择校园网直连（非 VPN）时实时探测校园网环境；结果经 campusState 更新提示。
     // 开启「不检测校园网环境」则跳过探测。
     LaunchedEffect(useVpn, skipCampusCheck) {
         if (!useVpn && !skipCampusCheck) WbuNetworkProbe.refresh()
     }
-
     // 动态码发送后倒计时；每次开始冷却（cooldownRun 变化）都会重跑（按钮显示重新发送 (Ns)）
     LaunchedEffect(cooldownRun) {
         if (cooldownRun > 0) {
@@ -225,22 +225,20 @@ fun WbuAuthBottomSheet(
             }
         }
     }
-
-    // 「发送过于频繁」红字在几秒后自动消失（其余错误保留持久）
-    LaunchedEffect(dynamicSendError) {
-        if (dynamicSendError.startsWith("发送过于频繁")) {
-            delay(3000)
-            dynamicSendError = ""
-        }
-    }
-
+            // 「发送过于频繁」红字在几秒后自动消失（其余错误保留持久）
+            LaunchedEffect(dynamicSendError) {
+                if (dynamicSendError.startsWith("发送过于频繁") || dynamicSendError.startsWith("Sending too frequent") || dynamicSendError.startsWith("發送過於頻繁")) {
+                    delay(3000)
+                    dynamicSendError = ""
+                }
+            }
     fun sendCode() {
         if (studentId.isBlank() || sendingCode || resendCooldown > 0) return
         scope.launch {
             dynamicSendError = ""
             sendingCode = true
             val result = runCatching { onSendDynamicCode(studentId.trim(), useVpn) }
-                .getOrElse { DynamicCodeSendResult.Failure("发送失败，请重试") }
+                .getOrElse { DynamicCodeSendResult.Failure(context.getString(R.string.err_sms_send_failed)) }
             sendingCode = false
             when (result) {
                 is DynamicCodeSendResult.Success -> {
@@ -253,7 +251,7 @@ fun WbuAuthBottomSheet(
                     codeSent = true
                     if (result.waitSeconds > 0) {
                         resendCooldown = result.waitSeconds
-                        dynamicSendError = "发送过于频繁，请等待 ${result.waitSeconds} 秒后重试"
+                        dynamicSendError = context.getString(R.string.format_err_sms_frequent, result.waitSeconds)
                         cooldownRun++
                     } else {
                         resendCooldown = 0
@@ -263,7 +261,16 @@ fun WbuAuthBottomSheet(
             }
         }
     }
-
+    // 延迟清空密码（防抖机制）：如果用户取消勾选了“记住密码”，在退出 BottomSheet 时统一清空持久化密码，
+    // 避免操作时误触导致数据立刻抹除
+    DisposableEffect(rememberPassword) {
+        onDispose {
+            if (!rememberPassword) {
+                WbuAuthTransport.setRememberPasswordEnabled(context, false)
+                WbuAuthTransport.clearSavedPassword(context)
+            }
+        }
+    }
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -291,18 +298,17 @@ fun WbuAuthBottomSheet(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "WBU 教务系统登录",
+                text = stringResource(R.string.title_wbu_login),
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(bottom = 20.dp)
             )
-
             // 账号输入（二维码登录无需账号）
             if (method != WbuLoginMethod.QR) {
                 OutlinedTextField(
                     value = studentId,
                     onValueChange = { studentId = it },
-                    label = { Text("账号") },
+                    label = { Text(stringResource(R.string.label_account_student_id)) },
                     leadingIcon = { Icon(Icons.Default.AccountCircle, contentDescription = null) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -315,43 +321,69 @@ fun WbuAuthBottomSheet(
                     ),
                     enabled = !isLoading
                 )
-
                 Spacer(modifier = Modifier.height(16.dp))
             }
-
             // 按登录方式切换的输入区
             when (method) {
-                WbuLoginMethod.PASSWORD -> PasswordInput(
-                    value = password,
-                    onValueChange = { newValue ->
-                        if (hasSavedPassword && !isPasswordModified) {
-                            // 第一次在占位符状态下输入：若按退格删除或直接打字，均视为重新开始输入新密码
-                            isPasswordModified = true
-                            password = if (newValue.startsWith("••••••••")) {
-                                newValue.removePrefix("••••••••")
-                            } else if (newValue.endsWith("••••••••")) {
-                                newValue.removeSuffix("••••••••")
-                            } else if (newValue.contains("••••••••")) {
-                                newValue.replace("••••••••", "")
+                WbuLoginMethod.PASSWORD -> {
+                    PasswordInput(
+                        value = password,
+                        onValueChange = { newValue ->
+                            if (hasSavedPassword && !isPasswordModified) {
+                                // 第一次在占位符状态下输入：若按退格删除或直接打字，均视为重新开始输入新密码
+                                isPasswordModified = true
+                                password = if (newValue.startsWith("••••••••")) {
+                                    newValue.removePrefix("••••••••")
+                                } else if (newValue.endsWith("••••••••")) {
+                                    newValue.removeSuffix("••••••••")
+                                } else if (newValue.contains("••••••••")) {
+                                    newValue.replace("••••••••", "")
+                                } else {
+                                    newValue
+                                }
                             } else {
-                                newValue
+                                password = newValue
                             }
-                        } else {
-                            password = newValue
-                        }
-                    },
-                    authMode = authMode,
-                    onAuthModeChange = { authMode = it },
-                    menuExpanded = authMenuExpanded,
-                    onMenuExpandedChange = { authMenuExpanded = it },
-                    enabled = !isLoading
-                )
-
+                        },
+                        authMode = authMode,
+                        onAuthModeChange = { newMode ->
+                            authMode = newMode
+                            if (rememberPassword) {
+                                WbuAuthTransport.setSavedAuthMode(context, newMode)
+                            }
+                        },
+                        menuExpanded = authMenuExpanded,
+                        onMenuExpandedChange = { authMenuExpanded = it },
+                        rememberPassword = rememberPassword,
+                        onRememberPasswordChange = { checked ->
+                            rememberPassword = checked
+                            if (!checked) {
+                                hasSavedPassword = false
+                                if (!isPasswordModified && password == "••••••••") {
+                                    password = ""
+                                }
+                            } else {
+                                WbuAuthTransport.setRememberPasswordEnabled(context, true)
+                                WbuAuthTransport.setSavedAuthMode(context, authMode)
+                                val effective = if (hasSavedPassword && !isPasswordModified) {
+                                    WbuAuthTransport.getSavedPassword(context) ?: ""
+                                } else {
+                                    password
+                                }
+                                if (effective.isNotBlank()) {
+                                    WbuAuthTransport.savePassword(context, effective)
+                                    hasSavedPassword = true
+                                }
+                            }
+                        },
+                        enabled = !isLoading
+                    )
+                }
                 WbuLoginMethod.DYNAMIC_CODE -> {
                     OutlinedTextField(
                         value = dynamicCode,
                         onValueChange = { if (it.length <= 6) dynamicCode = it.filter { c -> c.isDigit() } },
-                        label = { Text("动态验证码") },
+                        label = { Text(stringResource(R.string.label_sms_otp)) },
                         leadingIcon = { Icon(Icons.Default.Sms, contentDescription = null) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
@@ -370,7 +402,7 @@ fun WbuAuthBottomSheet(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "验证码将发送至绑定手机/学号",
+                            text = stringResource(R.string.hint_sms_sent_to_phone),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -380,10 +412,10 @@ fun WbuAuthBottomSheet(
                         ) {
                             Text(
                                 when {
-                                    sendingCode -> "发送中..."
-                                    resendCooldown > 0 -> "重新发送 (${resendCooldown}s)"
-                                    codeSent -> "重新发送"
-                                    else -> "获取验证码"
+                                    sendingCode -> stringResource(R.string.status_sending_sms)
+                                    resendCooldown > 0 -> stringResource(R.string.format_resend_cooldown, resendCooldown)
+                                    codeSent -> stringResource(R.string.action_resend_code)
+                                    else -> stringResource(R.string.action_get_code)
                                 }
                             )
                         }
@@ -399,15 +431,12 @@ fun WbuAuthBottomSheet(
                         )
                     }
                 }
-
                 WbuLoginMethod.QR -> QrInput(
                     qrState = qrState,
                     onRefreshQr = { onRefreshQr(useVpn) }
                 )
             }
-
             Spacer(modifier = Modifier.height(24.dp))
-
             // 校园网/VPN 切换
             Surface(
                 shape = RoundedCornerShape(16.dp),
@@ -437,7 +466,7 @@ fun WbuAuthBottomSheet(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (useVpn) "使用 WebVPN (校外)" else "校园网直连 (校内)",
+                            text = if (useVpn) stringResource(R.string.label_webvpn_access) else stringResource(R.string.label_campus_network_direct),
                             style = MaterialTheme.typography.titleMedium,
                             color = if (useVpn) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimaryContainer
                         )
@@ -455,13 +484,12 @@ fun WbuAuthBottomSheet(
                     )
                 }
             }
-
             // 校园网环境提示（仅直连模式显示）：检测中 / 未检测到；检测到校园网则不显示。
             // 开启「不检测校园网环境」时不探测、也不显示该提示。
             if (!useVpn && !skipCampusCheck && campus != true) {
                 val (hintText, hintColor) = when (campus) {
-                    null -> "正在检测校园网..." to MaterialTheme.colorScheme.onSurfaceVariant
-                    else -> "未检测到校园网，建议使用 WebVPN" to MaterialTheme.colorScheme.error
+                    null -> stringResource(R.string.status_detecting_campus_network) to MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> stringResource(R.string.warn_no_campus_suggest_webvpn) to MaterialTheme.colorScheme.error
                 }
                 Text(
                     text = hintText,
@@ -473,15 +501,13 @@ fun WbuAuthBottomSheet(
                         .padding(top = 8.dp)
                 )
             }
-
             Spacer(modifier = Modifier.height(24.dp))
-
             // 登录按钮
             val (label, enabled, action) = when (method) {
                 WbuLoginMethod.PASSWORD -> {
                     val canSubmit = studentId.isNotBlank() && (password.isNotBlank() || hasSavedPassword)
                     Triple(
-                        "一键全自动同步",
+                        primaryButtonText ?: stringResource(R.string.action_one_tap_sync),
                         canSubmit,
                         {
                             val effectivePassword = if (hasSavedPassword && !isPasswordModified) {
@@ -490,22 +516,28 @@ fun WbuAuthBottomSheet(
                                 password
                             }
                             if (rememberPassword && effectivePassword.isNotBlank()) {
+                                WbuAuthTransport.setRememberPasswordEnabled(context, true)
                                 WbuAuthTransport.savePassword(context, effectivePassword)
+                                WbuAuthTransport.setSavedAuthMode(context, authMode)
                                 hasSavedPassword = true
+                            } else if (!rememberPassword) {
+                                WbuAuthTransport.setRememberPasswordEnabled(context, false)
+                                WbuAuthTransport.clearSavedPassword(context)
+                                hasSavedPassword = false
                             }
                             onPasswordLogin(studentId, effectivePassword, useVpn, authMode)
                         }
                     )
                 }
-                WbuLoginMethod.DYNAMIC_CODE -> Triple("登录", studentId.isNotBlank() && dynamicCode.length == 6, { onDynamicCodeLogin(studentId, dynamicCode, useVpn) })
+                WbuLoginMethod.DYNAMIC_CODE -> Triple(primaryButtonText ?: stringResource(R.string.action_login), studentId.isNotBlank() && dynamicCode.length == 6, { onDynamicCodeLogin(studentId, dynamicCode, useVpn) })
                 WbuLoginMethod.QR -> {
                     val phase = qrState?.phase ?: QrPhase.PLACEHOLDER
                     val busy = phase == QrPhase.GENERATING || phase == QrPhase.SCANNED || phase == QrPhase.CONFIRMING
                     val label = when (phase) {
-                        QrPhase.EXPIRED, QrPhase.ERROR -> "重新生成"
-                        QrPhase.WAIT -> "刷新二维码"
-                        QrPhase.PLACEHOLDER -> "生成二维码"
-                        else -> "处理中..."
+                        QrPhase.EXPIRED, QrPhase.ERROR -> stringResource(R.string.action_regenerate)
+                        QrPhase.WAIT -> stringResource(R.string.action_refresh_qr)
+                        QrPhase.PLACEHOLDER -> stringResource(R.string.action_generate_qr)
+                        else -> stringResource(R.string.status_processing)
                     }
                     Triple(label, !busy, { onStartQr(useVpn) })
                 }
@@ -528,12 +560,11 @@ fun WbuAuthBottomSheet(
                         strokeWidth = 2.dp
                     )
                     Spacer(modifier = Modifier.padding(horizontal = 8.dp))
-                    Text("正在获取课表...", style = MaterialTheme.typography.titleMedium)
+                    Text(loadingButtonText ?: stringResource(R.string.status_fetching_schedule), style = MaterialTheme.typography.titleMedium)
                 } else {
                     Text(label, style = MaterialTheme.typography.titleMedium)
                 }
             }
-
             AnimatedVisibility(visible = isLoading) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -570,7 +601,6 @@ fun WbuAuthBottomSheet(
                     )
                 }
             }
-
             if (errorMessage.isNotBlank()) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
@@ -597,7 +627,6 @@ fun WbuAuthBottomSheet(
             } else {
                 Spacer(modifier = Modifier.height(16.dp))
             }
-
             // 同步按钮底部的“更多”（展开：登录方式 + 网络设置 + 导入偏好）
             Row(
                 modifier = Modifier
@@ -614,10 +643,9 @@ fun WbuAuthBottomSheet(
                             .rotate(if (panelExpanded) 180f else 0f)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(if (panelExpanded) "收起更多" else "更多")
+                    Text(if (panelExpanded) stringResource(R.string.action_collapse_more) else stringResource(R.string.action_expand_more))
                 }
             }
-
             if (panelExpanded) {
                 Column(
                     modifier = Modifier
@@ -625,77 +653,52 @@ fun WbuAuthBottomSheet(
                         .padding(top = 6.dp, bottom = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    Text("登录方式", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    MethodRow("密码登录", WbuLoginMethod.PASSWORD, method, onMethodChange)
-                    MethodRow("二维码登录", WbuLoginMethod.QR, method, onMethodChange)
-                    MethodRow("手机动态码", WbuLoginMethod.DYNAMIC_CODE, method, onMethodChange)
-
-                    Text(
-                        text = "导入偏好",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    ToggleRow(
-                        label = "记住密码",
-                        checked = rememberPassword,
-                        onCheckedChange = {
-                            rememberPassword = it
-                            WbuAuthTransport.setRememberPasswordEnabled(context, it)
-                            if (!it) {
-                                WbuAuthTransport.clearSavedPassword(context)
-                                hasSavedPassword = false
-                                if (!isPasswordModified && password == "••••••••") {
-                                    password = ""
+                    Text(stringResource(R.string.label_login_method), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    MethodRow(stringResource(R.string.method_password), WbuLoginMethod.PASSWORD, method, onMethodChange)
+                    MethodRow(stringResource(R.string.method_qr), WbuLoginMethod.QR, method, onMethodChange)
+                    MethodRow(stringResource(R.string.method_otp), WbuLoginMethod.DYNAMIC_CODE, method, onMethodChange)
+                    if (!hideImportPreferences) {
+                        Text(
+                            text = stringResource(R.string.category_import_preferences),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        if (!hideSelectSemesterSwitch) {
+                            ToggleRow(
+                                label = stringResource(R.string.title_select_import_semester),
+                                checked = selectSemesterOnImport,
+                                onCheckedChange = {
+                                    selectSemesterOnImport = it
+                                    WbuSyncEngine.setSelectSemesterOnImport(context, it)
                                 }
-                            } else {
-                                val effective = if (hasSavedPassword && !isPasswordModified) {
-                                    WbuAuthTransport.getSavedPassword(context) ?: ""
-                                } else {
-                                    password
-                                }
-                                if (effective.isNotBlank()) {
-                                    WbuAuthTransport.savePassword(context, effective)
-                                    hasSavedPassword = true
-                                }
-                            }
+                            )
                         }
-                    )
-                    if (!hideSelectSemesterSwitch) {
                         ToggleRow(
-                            label = "选择导入的学期",
-                            checked = selectSemesterOnImport,
+                            label = stringResource(R.string.pref_keep_teacher_id),
+                            checked = keepTeacherId,
                             onCheckedChange = {
-                                selectSemesterOnImport = it
-                                WbuSyncEngine.setSelectSemesterOnImport(context, it)
+                                keepTeacherId = it
+                                WbuSyncEngine.setKeepTeacherId(context, it)
+                            }
+                        )
+                        ToggleRow(
+                            label = stringResource(R.string.pref_keep_building_name),
+                            checked = keepBuilding,
+                            onCheckedChange = {
+                                keepBuilding = it
+                                WbuSyncEngine.setKeepBuilding(context, it)
                             }
                         )
                     }
-                    ToggleRow(
-                        label = "保留教师工号",
-                        checked = keepTeacherId,
-                        onCheckedChange = {
-                            keepTeacherId = it
-                            WbuSyncEngine.setKeepTeacherId(context, it)
-                        }
-                    )
-                    ToggleRow(
-                        label = "保留建筑名称",
-                        checked = keepBuilding,
-                        onCheckedChange = {
-                            keepBuilding = it
-                            WbuSyncEngine.setKeepBuilding(context, it)
-                        }
-                    )
-
                     Text(
-                        text = "网络设置",
+                        text = stringResource(R.string.category_network_settings),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp)
                     )
                     ToggleRow(
-                        label = "桌面版UA",
+                        label = stringResource(R.string.pref_desktop_ua),
                         checked = pcUaEnabled,
                         onCheckedChange = {
                             pcUaEnabled = it
@@ -703,7 +706,7 @@ fun WbuAuthBottomSheet(
                         }
                     )
                     ToggleRow(
-                        label = "不检测校园网环境",
+                        label = stringResource(R.string.pref_skip_campus_network_check),
                         checked = skipCampusCheck,
                         onCheckedChange = {
                             skipCampusCheck = it
@@ -711,7 +714,7 @@ fun WbuAuthBottomSheet(
                         }
                     )
                     ToggleRow(
-                        label = "统一认证经过WebVPN",
+                        label = stringResource(R.string.pref_ids_via_webvpn),
                         checked = idsVpnEnabled,
                         onCheckedChange = {
                             idsVpnEnabled = it
@@ -719,7 +722,7 @@ fun WbuAuthBottomSheet(
                         }
                     )
                     ToggleRow(
-                        label = "二维码内容包含WebVPN链接",
+                        label = stringResource(R.string.pref_qr_with_webvpn),
                         checked = qrVpnEnabled,
                         onCheckedChange = {
                             qrVpnEnabled = it
@@ -727,7 +730,7 @@ fun WbuAuthBottomSheet(
                         }
                     )
                     ToggleRow(
-                        label = "使用 https 访问 WebVPN (443)",
+                        label = stringResource(R.string.pref_use_https_webvpn),
                         checked = useHttpsWebVpn,
                         onCheckedChange = {
                             useHttpsWebVpn = it
@@ -742,13 +745,13 @@ fun WbuAuthBottomSheet(
                         },
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                         label = { Text("WebVPN TWFID") },
-                        placeholder = { Text("填写后跳过 WebVPN 登录，直接使用该会话") },
+                        placeholder = { Text(stringResource(R.string.placeholder_webvpn_twfid)) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
                     )
                     if (!isZhCN) {
                         ToggleRow(
-                            label = "发送英语验证码（可能更慢）",
+                            label = stringResource(R.string.pref_send_english_sms),
                             checked = engSmsEnabled,
                             onCheckedChange = {
                                 engSmsEnabled = it
@@ -773,7 +776,7 @@ fun WbuAuthBottomSheet(
                         }
                     )
                     ToggleRow(
-                        label = "登录WebVPN前必须获取学号",
+                        label = stringResource(R.string.pref_fetch_id_before_vpn),
                         checked = forceFetchStudentIdBeforeVpn,
                         onCheckedChange = {
                             forceFetchStudentIdBeforeVpn = it
@@ -781,7 +784,7 @@ fun WbuAuthBottomSheet(
                         }
                     )
                     ToggleRow(
-                        label = "使用固定service获取ticket",
+                        label = stringResource(R.string.pref_fixed_ticket_service),
                         checked = useFixedServiceForTicket,
                         onCheckedChange = {
                             useFixedServiceForTicket = it
@@ -794,7 +797,6 @@ fun WbuAuthBottomSheet(
         }
     }
 }
-
 @Composable
 private fun PasswordInput(
     value: String,
@@ -803,12 +805,14 @@ private fun PasswordInput(
     onAuthModeChange: (WbuAuthMode) -> Unit,
     menuExpanded: Boolean,
     onMenuExpandedChange: (Boolean) -> Unit,
+    rememberPassword: Boolean,
+    onRememberPasswordChange: (Boolean) -> Unit,
     enabled: Boolean
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text(if (authMode == WbuAuthMode.JYXT_LEGACY) "教务系统密码" else "统一认证密码") },
+        label = { Text(if (authMode == WbuAuthMode.JYXT_LEGACY) stringResource(R.string.label_jwxt_password) else stringResource(R.string.label_cas_password)) },
         leadingIcon = {
             Box(
                 modifier = Modifier.size(48.dp),
@@ -820,7 +824,7 @@ private fun PasswordInput(
                 ) {
                     Icon(
                         imageVector = if (authMode == WbuAuthMode.JYXT_LEGACY) Icons.Default.Key else Icons.Default.Lock,
-                        contentDescription = "选择登录认证方式"
+                        contentDescription = stringResource(R.string.title_choose_auth_type)
                     )
                 }
                 Icon(
@@ -835,7 +839,7 @@ private fun PasswordInput(
                     onDismissRequest = { onMenuExpandedChange(false) }
                 ) {
                     DropdownMenuItem(
-                        text = { Text("统一认证密码") },
+                        text = { Text(stringResource(R.string.label_cas_password)) },
                         leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
                         onClick = {
                             onAuthModeChange(WbuAuthMode.UNIFIED_CAS)
@@ -843,7 +847,7 @@ private fun PasswordInput(
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("教务系统密码") },
+                        text = { Text(stringResource(R.string.label_jwxt_password)) },
                         leadingIcon = { Icon(Icons.Default.Key, contentDescription = null) },
                         onClick = {
                             onAuthModeChange(WbuAuthMode.JYXT_LEGACY)
@@ -851,6 +855,33 @@ private fun PasswordInput(
                         }
                     )
                 }
+            }
+        },
+        trailingIcon = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(enabled = enabled) {
+                        onRememberPasswordChange(!rememberPassword)
+                    }
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.label_remember_password),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Checkbox(
+                    checked = rememberPassword,
+                    onCheckedChange = { onRememberPasswordChange(it) },
+                    enabled = enabled,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .scale(0.85f)
+                )
             }
         },
         singleLine = true,
@@ -866,7 +897,6 @@ private fun PasswordInput(
         enabled = enabled
     )
 }
-
 @Composable
 private fun QrInput(
     qrState: QrUiState?,
@@ -885,7 +915,6 @@ private fun QrInput(
             QrPhase.GENERATING, QrPhase.SCANNED, QrPhase.CONFIRMING, QrPhase.EXPIRED, QrPhase.ERROR -> 18.dp
             else -> 0.dp
         }
-
         Box(
             modifier = Modifier
                 .size(220.dp)
@@ -896,14 +925,13 @@ private fun QrInput(
             if (bmp != null) {
                 Image(
                     bitmap = bmp,
-                    contentDescription = "登录二维码",
+                    contentDescription = stringResource(R.string.a11y_login_qr_code),
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(6.dp)
                         .blur(blurRadius)
                 )
             }
-
             when (phase) {
                 QrPhase.GENERATING -> {
                     Scrim()
@@ -914,7 +942,7 @@ private fun QrInput(
                 }
                 QrPhase.PLACEHOLDER -> {
                     Text(
-                        text = "正在生成二维码...",
+                        text = stringResource(R.string.status_generating_qr),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -924,7 +952,7 @@ private fun QrInput(
                     Scrim()
                     Icon(
                         imageVector = Icons.Default.Check,
-                        contentDescription = "已扫码",
+                        contentDescription = stringResource(R.string.a11y_qr_scanned),
                         tint = Color.White,
                         modifier = Modifier.size(56.dp)
                     )
@@ -940,7 +968,7 @@ private fun QrInput(
                     )
                     Icon(
                         imageVector = Icons.Default.Check,
-                        contentDescription = "正在登录",
+                        contentDescription = stringResource(R.string.a11y_logging_in),
                         tint = Color.White,
                         modifier = Modifier
                             .rotate(rotation)
@@ -952,7 +980,7 @@ private fun QrInput(
                     IconButton(onClick = onRefreshQr) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
-                            contentDescription = "刷新二维码",
+                            contentDescription = stringResource(R.string.action_refresh_qr),
                             tint = Color.White,
                             modifier = Modifier.size(56.dp)
                         )
@@ -961,7 +989,6 @@ private fun QrInput(
                 else -> Unit // WAIT：无遮罩
             }
         }
-
         if (qrState != null && qrState.statusText.isNotBlank()) {
             Text(
                 text = qrState.statusText,
@@ -973,7 +1000,7 @@ private fun QrInput(
         }
         if (phase == QrPhase.EXPIRED || phase == QrPhase.ERROR) {
             Text(
-                text = "点二维码可刷新",
+                text = stringResource(R.string.hint_tap_qr_to_refresh),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
                 textAlign = TextAlign.Center,
@@ -982,7 +1009,6 @@ private fun QrInput(
         }
     }
 }
-
 @Composable
 private fun Scrim() {
     Box(
@@ -991,7 +1017,6 @@ private fun Scrim() {
             .background(Color.Black.copy(alpha = 0.35f))
     )
 }
-
 @Composable
 private fun MethodRow(
     label: String,
@@ -1029,7 +1054,6 @@ private fun MethodRow(
         }
     }
 }
-
 @Composable
 private fun ToggleRow(
     label: String,
@@ -1046,7 +1070,6 @@ private fun ToggleRow(
         Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
-
 /**
  * WebVPN 短信验证码输入对话框
  */
@@ -1064,14 +1087,12 @@ fun VpnSmsCodeDialog(
 ) {
     var smsCode by remember { mutableStateOf("") }
     var resendCooldown by remember { mutableIntStateOf(if (isStillValid) 0 else sendInterval) }
-
     LaunchedEffect(resendCooldown) {
         if (resendCooldown > 0) {
             delay(1000)
             resendCooldown--
         }
     }
-
     AlertDialog(
         onDismissRequest = { if (!isVerifying) onDismiss() },
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1086,7 +1107,7 @@ fun VpnSmsCodeDialog(
         },
         title = {
             Text(
-                text = "WebVPN 短信验证",
+                text = stringResource(R.string.title_webvpn_sms_verification),
                 style = MaterialTheme.typography.titleLarge
             )
         },
@@ -1095,11 +1116,12 @@ fun VpnSmsCodeDialog(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                val unknownNumStr = stringResource(R.string.label_unknown_number)
                 val displayMsg = when {
-                    isStillValid -> "您的验证码仍在有效期内"
+                    isStillValid -> stringResource(R.string.hint_otp_still_valid)
                     !promptText.isNullOrBlank() -> promptText
-                    maskedPhone.isNotBlank() && maskedPhone != "未知号码" -> "验证码已发送至 $maskedPhone，请查收"
-                    else -> "短信验证码已发送至绑定手机，请查收"
+                    maskedPhone.isNotBlank() && maskedPhone != "未知号码" && maskedPhone != unknownNumStr -> stringResource(R.string.format_otp_sent_to_phone, maskedPhone)
+                    else -> stringResource(R.string.hint_otp_sent_to_bound_phone)
                 }
                 Text(
                     text = displayMsg,
@@ -1108,11 +1130,10 @@ fun VpnSmsCodeDialog(
                     textAlign = TextAlign.Center
                 )
                 Spacer(modifier = Modifier.height(16.dp))
-
                 OutlinedTextField(
                     value = smsCode,
                     onValueChange = { if (it.length <= 6) smsCode = it.filter { c -> c.isDigit() } },
-                    label = { Text("6 位验证码") },
+                    label = { Text(stringResource(R.string.label_sms_otp)) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
@@ -1124,7 +1145,6 @@ fun VpnSmsCodeDialog(
                         unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = if (LocalIsDarkTheme.current) 0.10f else 0.18f)
                     )
                 )
-
                 if (errorMessage != null) {
                     Text(
                         text = errorMessage,
@@ -1133,9 +1153,7 @@ fun VpnSmsCodeDialog(
                         modifier = Modifier.padding(top = 4.dp)
                     )
                 }
-
                 Spacer(modifier = Modifier.height(8.dp))
-
                 TextButton(
                     onClick = {
                         resendCooldown = 60
@@ -1144,8 +1162,8 @@ fun VpnSmsCodeDialog(
                     enabled = resendCooldown <= 0 && !isVerifying
                 ) {
                     Text(
-                        if (resendCooldown > 0) "重新发送 (${resendCooldown}s)"
-                        else "获取 / 重新发送验证码"
+                        if (resendCooldown > 0) stringResource(R.string.format_resend_cooldown, resendCooldown)
+                        else stringResource(R.string.action_get_or_resend_code)
                     )
                 }
             }
@@ -1163,7 +1181,7 @@ fun VpnSmsCodeDialog(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                 }
-                Text("验证")
+                Text(stringResource(R.string.action_verify))
             }
         },
         dismissButton = {
@@ -1171,7 +1189,7 @@ fun VpnSmsCodeDialog(
                 onClick = onDismiss,
                 enabled = !isVerifying
             ) {
-                Text("取消")
+                Text(stringResource(R.string.action_cancel))
             }
         }
     )

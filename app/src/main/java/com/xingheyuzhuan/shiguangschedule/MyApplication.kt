@@ -55,14 +55,24 @@ class MyApplication : Application(), Configuration.Provider {
     }
 
     private suspend fun migrateLegacyDefaultTimeSlotsIfNeeded() = withContext(Dispatchers.IO) {
+        val prefs = getSharedPreferences("app_migration", MODE_PRIVATE)
+        if (prefs.getBoolean("legacy_time_slots_migrated", false)) {
+            return@withContext
+        }
+
         val tableId = appSettingsRepository.getAppSettingsOnce()?.currentCourseTableId ?: return@withContext
         val current = timeSlotRepository.getTimeSlotsByCourseTableId(tableId).first().sortedBy { it.number }
-        if (!looksLikeLegacyDefaultTemplate(current)) return@withContext
+        if (!looksLikeLegacyDefaultTemplate(current)) {
+            // 已不是旧版完全一致的初始占位模板，标记为已完成，避免后续误覆盖用户导入的校区时间
+            prefs.edit().putBoolean("legacy_time_slots_migrated", true).apply()
+            return@withContext
+        }
 
         val migrated = UPDATED_WBU_DEFAULT_TIME_SLOTS.map { (number, start, end) ->
             TimeSlot(number = number, startTime = start, endTime = end, courseTableId = tableId)
         }
         timeSlotRepository.replaceAllForCourseTable(tableId, migrated)
+        prefs.edit().putBoolean("legacy_time_slots_migrated", true).apply()
     }
 
     private fun looksLikeLegacyDefaultTemplate(slots: List<TimeSlot>): Boolean {

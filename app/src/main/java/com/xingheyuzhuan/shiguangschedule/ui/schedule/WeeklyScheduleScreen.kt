@@ -78,6 +78,8 @@ import com.xingheyuzhuan.shiguangschedule.ui.components.QrPhase
 import com.xingheyuzhuan.shiguangschedule.data.model.schedule_style.ScheduleModeProto
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTable
 import java.util.Locale
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -224,6 +226,7 @@ fun WeeklyScheduleScreen(
 
     // 学期选择弹窗状态
     var semesterSelectOptions by remember { mutableStateOf<List<WbuSyncEngine.WbuSemesterOption>>(emptyList()) }
+    var semesterSelectCurrentXnxq by remember { mutableStateOf<String?>(null) }
     var semesterSelectDeferred by remember { mutableStateOf<CompletableDeferred<String?>?>(null) }
 
     // 学期冲突询问对话框状态
@@ -279,23 +282,6 @@ fun WeeklyScheduleScreen(
         return (match.groupValues[1].toLongOrNull() ?: 0L) * 10 + (match.groupValues[2].toLongOrNull() ?: 0L)
     }
 
-    fun computeNonConflictingTableName(
-        baseSemester: String,
-        sid: String,
-        allTables: List<CourseTable>
-    ): String {
-        val candidate = baseSemester.ifBlank { "未命名课表" }
-        // 方案 B：如果本地已有同名课表，且该课表绑定的学号不是当前登录学号，则追加学号后缀避免混淆
-        val hasConflictWithOtherSid = allTables.any {
-            it.name == candidate && it.studentId != null && it.studentId != sid
-        }
-        return if (hasConflictWithOtherSid && sid.isNotBlank()) {
-            "$candidate ($sid)"
-        } else {
-            candidate
-        }
-    }
-
     suspend fun performCourseImportPipeline(
         engine: WbuSyncEngine,
         loginSid: String
@@ -305,7 +291,7 @@ fun WeeklyScheduleScreen(
 
         if (currentTable.isArchived) {
             withContext(Dispatchers.Main) {
-                wbuError = "当前课表已归档锁定，无法直接同步覆盖。请新建课表或前往管理课表解除归档。"
+                wbuError = appContext.getString(R.string.err_table_archived_locked)
             }
             return false
         }
@@ -343,13 +329,14 @@ fun WeeklyScheduleScreen(
 
         if (selectSemester) {
             withContext(Dispatchers.Main) {
-                wbuSyncStatus = "正在获取可选学期..."
+                wbuSyncStatus = appContext.getString(R.string.status_fetching_semesters)
             }
             val options = engine.fetchSemesterOptions()
             if (options.isNotEmpty()) {
                 val deferred = CompletableDeferred<String?>()
                 withContext(Dispatchers.Main) {
                     semesterSelectOptions = options
+                    semesterSelectCurrentXnxq = currentTable.semesterCode
                     semesterSelectDeferred = deferred
                 }
                 val chosen = deferred.await()
@@ -370,12 +357,12 @@ fun WeeklyScheduleScreen(
         }
 
         withContext(Dispatchers.Main) {
-            wbuSyncStatus = "正在拉取课表数据..."
+            wbuSyncStatus = appContext.getString(R.string.status_pulling_course_data)
         }
         val coursesRaw = engine.fetchCourseData(currentTableId, targetXnxq)
         if (coursesRaw.isNullOrEmpty()) {
             withContext(Dispatchers.Main) {
-                wbuError = "未获取到课表数据（可能该学期未排课）"
+                wbuError = appContext.getString(R.string.err_no_course_data_semester)
             }
             return false
         }
@@ -410,7 +397,7 @@ fun WeeklyScheduleScreen(
 
         if (forceCreateNewBySidConflict) {
             // 因学号冲突，用户选择为新学号新建课表（应用方案 B 命名）
-            val newName = computeNonConflictingTableName(effectiveXnxq, effectiveSid, allTablesBeforeSave)
+            val newName = WbuSyncEngine.computeNonConflictingTableName(effectiveXnxq, effectiveSid, allTablesBeforeSave)
             val newTable = viewModel.createAndSwitchTable(
                 name = newName,
                 studentId = effectiveSid,
@@ -436,7 +423,7 @@ fun WeeklyScheduleScreen(
                     return false
                 }
                 2 -> {
-                    val newName = computeNonConflictingTableName(effectiveXnxq, effectiveSid, allTablesBeforeSave)
+                    val newName = WbuSyncEngine.computeNonConflictingTableName(effectiveXnxq, effectiveSid, allTablesBeforeSave)
                     val newTable = viewModel.createAndSwitchTable(
                         name = newName,
                         studentId = effectiveSid,
@@ -461,7 +448,7 @@ fun WeeklyScheduleScreen(
         }
 
         withContext(Dispatchers.Main) {
-            wbuSyncStatus = "正在写入课表..."
+            wbuSyncStatus = appContext.getString(R.string.status_writing_schedule)
         }
 
         viewModel.importCourses(courses, targetTableId = destTableId)
@@ -472,7 +459,7 @@ fun WeeklyScheduleScreen(
         viewModel.applySemesterConfig(semConfig, targetTableId = destTableId)
 
         // 更新目标课表的学期与学号元数据
-        val finalName = if (shouldRenameDest) computeNonConflictingTableName(effectiveXnxq, effectiveSid, allTablesBeforeSave) else null
+        val finalName = if (shouldRenameDest) WbuSyncEngine.computeNonConflictingTableName(effectiveXnxq, effectiveSid, allTablesBeforeSave) else null
         viewModel.updateTableMeta(
             tableId = destTableId,
             name = finalName,
@@ -483,7 +470,7 @@ fun WeeklyScheduleScreen(
         withContext(Dispatchers.Main) {
             wbuSyncStatus = ""
             showWbuAuthDialog = false
-            snackbarHostState.showSuccessSnackbar("课表导入成功！")
+            snackbarHostState.showSuccessSnackbar(appContext.getString(R.string.toast_schedule_imported_success))
         }
 
         // 检查教务系统是否有新于本地全部课表的新学期
@@ -505,15 +492,15 @@ fun WeeklyScheduleScreen(
 
     fun vpnStatusText(authMode: WbuAuthMode): (VpnFullLoginStatus) -> Unit = { status ->
         wbuSyncStatus = when (status) {
-            VpnFullLoginStatus.SMS_REQUIRED -> "需要短信验证码，请输入后继续~"
-            VpnFullLoginStatus.SMS_VERIFIED -> "验证码通过，正在完成教务认证..."
-            VpnFullLoginStatus.VPN_AUTHENTICATED -> "WebVPN 已进入，无需短信验证码"
-            VpnFullLoginStatus.VPN_READY_SKIP_CAS -> "VPN 会话已生效，正在获取课表..."
+            VpnFullLoginStatus.SMS_REQUIRED -> appContext.getString(R.string.status_vpn_sms_required)
+            VpnFullLoginStatus.SMS_VERIFIED -> appContext.getString(R.string.status_vpn_sms_verified)
+            VpnFullLoginStatus.VPN_AUTHENTICATED -> appContext.getString(R.string.status_vpn_entered_no_sms)
+            VpnFullLoginStatus.VPN_READY_SKIP_CAS -> appContext.getString(R.string.status_vpn_ready_fetching)
             VpnFullLoginStatus.VPN_READY_NEED_CAS ->
-                if (authMode == WbuAuthMode.JYXT_LEGACY) "VPN 已进入，正在使用教务系统密码登录..." else "VPN 已进入，正在完成统一认证..."
+                if (authMode == WbuAuthMode.JYXT_LEGACY) appContext.getString(R.string.status_vpn_logging_jwxt) else appContext.getString(R.string.status_vpn_logging_cas)
             VpnFullLoginStatus.CAS_COMPLETED ->
-                if (authMode == WbuAuthMode.JYXT_LEGACY) "教务密码验证完成，正在抓取课表..." else "统一认证完成，正在抓取课表..."
-            VpnFullLoginStatus.CAS_FAILED -> "认证未完成，可能需要额外验证码"
+                if (authMode == WbuAuthMode.JYXT_LEGACY) appContext.getString(R.string.status_vpn_jwxt_verified_fetching) else appContext.getString(R.string.status_vpn_cas_verified_fetching)
+            VpnFullLoginStatus.CAS_FAILED -> appContext.getString(R.string.status_vpn_cas_failed)
         }
     }
 
@@ -654,7 +641,7 @@ fun WeeklyScheduleScreen(
                             coroutineScope.launch {
                                 val activeTableId = viewModel.uiState.value.tableId
                                 if (activeTableId == null) {
-                                    snackbarHostState.showSnackbar("当前没有可同步的课表")
+                                    snackbarHostState.showSnackbar(appContext.getString(R.string.snackbar_no_syncable_table))
                                     return@launch
                                 }
 
@@ -677,14 +664,14 @@ fun WeeklyScheduleScreen(
                                 coroutineScope.launch {
                                     val activeTableId = viewModel.uiState.value.tableId
                                     if (activeTableId == null) {
-                                        snackbarHostState.showSnackbar("当前没有可同步的课表")
+                                        snackbarHostState.showSnackbar(appContext.getString(R.string.snackbar_no_syncable_table))
                                         return@launch
                                     }
 
                                     val savedUseVpn = WbuSyncEngine.getSavedUseVpn(appContext) ?: false
                                     WbuSyncEngine(context = appContext, useVpn = savedUseVpn)
                                         .clearPersistedSession()
-                                    snackbarHostState.showSnackbar("已忽略已保存登录态，请重新登录")
+                                    snackbarHostState.showSnackbar(appContext.getString(R.string.snackbar_ignored_saved_session))
 
                                     wbuInitialUseVpn = savedUseVpn
                                     wbuInitialStudentId = WbuSyncEngine.getSavedStudentId(appContext)
@@ -776,7 +763,7 @@ fun WeeklyScheduleScreen(
                         val offsetWeeks = (pageIndex - INFINITE_PAGER_CENTER).toInt()
                         uiState.currentWeekNumber?.plus(offsetWeeks)
                     }
-                    val weekStr = pageWeekNumber?.let { "第${it}周" }
+                    val weekStr = pageWeekNumber?.let { stringResource(R.string.status_current_week_format, it) }
 
                     val gridState = rememberScheduleGridState(gridScrollState = gridScrollState)
 
@@ -1028,26 +1015,26 @@ fun WeeklyScheduleScreen(
             val engine = WbuSyncEngine(context = appContext, useVpn = useVpn)
             activeAuthEngine = engine
             activeVpnEngine = engine
-            wbuQrState = QrUiState(qrContent = null, phase = QrPhase.GENERATING, statusText = "正在获取二维码...")
+            wbuQrState = QrUiState(qrContent = null, phase = QrPhase.GENERATING, statusText = appContext.getString(R.string.status_qr_fetching))
             coroutineScope.launch {
                 val session = engine.startQrLogin("QR")
                 if (session == null) {
-                    wbuQrState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = "获取二维码失败，点二维码重试")
+                    wbuQrState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = appContext.getString(R.string.status_qr_fetch_failed))
                     return@launch
                 }
-                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = "请扫码登录")
+                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = appContext.getString(R.string.status_scan_qr_to_login))
                 qrJob = coroutineScope.launch {
                     while (true) {
                         delay(2000)
                         when (val st = engine.pollQrStatus(session)) {
-                            QrStatus.WAIT -> wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = "请扫码登录")
-                            QrStatus.CONFIRM -> wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.SCANNED, statusText = "已扫码，请在手机上确认")
+                            QrStatus.WAIT -> wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = appContext.getString(R.string.status_scan_qr_to_login))
+                            QrStatus.CONFIRM -> wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.SCANNED, statusText = appContext.getString(R.string.status_qr_scanned))
                             QrStatus.SUCCESS -> {
-                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.CONFIRMING, statusText = "确认成功，正在登录...")
+                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.CONFIRMING, statusText = appContext.getString(R.string.status_qr_confirming))
                                 isWbuSyncing = true
                                 try {
                                     val activeTableId = viewModel.uiState.value.tableId
-                                    wbuSyncStatus = "登录成功，正在获取课表..."
+                                    wbuSyncStatus = appContext.getString(R.string.status_login_success_fetching_schedule)
                                     val qrOk = engine.completeQrLogin(
                                         session = session,
                                         flowTag = "QR",
@@ -1077,8 +1064,8 @@ fun WeeklyScheduleScreen(
                                         val sid = WbuSyncEngine.getSavedStudentId(appContext)
                                         performCourseImportPipeline(engine, sid)
                                     } else {
-                                        wbuError = engine.lastLocalLoginError?.takeIf { it.isNotBlank() } ?: "扫码登录失败，请重试"
-                                        wbuQrState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = "登录失败，点二维码重试")
+                                        wbuError = engine.lastLocalLoginError?.takeIf { it.isNotBlank() } ?: appContext.getString(R.string.err_qr_login_failed)
+                                        wbuQrState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = appContext.getString(R.string.status_qr_login_failed_retry))
                                     }
                                 } finally {
                                     isWbuSyncing = false
@@ -1086,11 +1073,11 @@ fun WeeklyScheduleScreen(
                                 return@launch
                             }
                             QrStatus.EXPIRED -> {
-                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.EXPIRED, statusText = "二维码已过期，点二维码刷新")
+                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.EXPIRED, statusText = appContext.getString(R.string.status_qr_expired))
                                 return@launch
                             }
                             QrStatus.ERROR -> {
-                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.ERROR, statusText = "查询状态失败，点二维码重试")
+                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.ERROR, statusText = appContext.getString(R.string.status_qr_query_failed))
                             }
                         }
                     }
@@ -1166,7 +1153,7 @@ fun WeeklyScheduleScreen(
                                 }
                             }
 
-                            wbuSyncStatus = "正在登录 WebVPN..."
+                            wbuSyncStatus = appContext.getString(R.string.status_logging_in_webvpn)
                             val fullLoginOk = vpnEngine.loginVpnFull(
                                 studentId, password,
                                 authMode = authMode,
@@ -1210,13 +1197,13 @@ fun WeeklyScheduleScreen(
                                         showManualLoginPrompt = true
                                     }
                                     vpnEngine.lastLocalLoginNetworkError -> {
-                                        wbuError = "WebVPN 连接失败，请检查网络后重试"
+                                        wbuError = appContext.getString(R.string.err_webvpn_connect_failed)
                                     }
                                     realErr != null -> {
                                         wbuError = realErr
                                     }
                                     else -> {
-                                        wbuError = "自动登录失败，请检查账号或密码"
+                                        wbuError = appContext.getString(R.string.err_auto_login_failed_check_creds)
                                     }
                                 }
                             }
@@ -1225,7 +1212,7 @@ fun WeeklyScheduleScreen(
 
                         // 校园网直连
                         if (!confirmCampusIfDirect(false)) return@launch
-                        wbuSyncStatus = "正在连接校园网..."
+                        wbuSyncStatus = appContext.getString(R.string.status_connecting_campus)
                         val engine = WbuSyncEngine(context = appContext, useVpn = false)
                         val loginSuccess = engine.login(
                             studentId, password,
@@ -1251,13 +1238,13 @@ fun WeeklyScheduleScreen(
                                     showManualLoginPrompt = true
                                 }
                                 engine.lastLocalLoginNetworkError -> {
-                                    wbuError = "校园网直连失败，请确认已连接校园网"
+                                    wbuError = appContext.getString(R.string.err_campus_direct_failed)
                                 }
                                 realErr != null -> {
                                     wbuError = realErr
                                 }
                                 else -> {
-                                    wbuError = "登录失败，请检查学号或密码后重试"
+                                    wbuError = appContext.getString(R.string.err_login_failed_check_creds)
                                 }
                             }
                             return@launch
@@ -1266,7 +1253,7 @@ fun WeeklyScheduleScreen(
                         performCourseImportPipeline(engine, studentId)
                     } catch (e: Exception) {
                         Log.e("WbuSync", "同步发生错误", e)
-                        wbuError = "同步发生错误: ${e.message}"
+                        wbuError = appContext.getString(R.string.format_err_sync_error, e.message ?: "")
                     } finally {
                         isWbuSyncing = false
                     }
@@ -1308,10 +1295,10 @@ fun WeeklyScheduleScreen(
                         // 没有现成 prep 时（用户直接填已有验证码）临时取表单参数
                         val prep = dynamicPrep ?: engine.obtainDynamicCodeForm("DYNAMIC")
                         if (prep == null) {
-                            wbuError = "无法获取登录参数，请重试"
+                            wbuError = appContext.getString(R.string.err_get_login_params_failed)
                             return@launch
                         }
-                        wbuSyncStatus = "正在登录..."
+                        wbuSyncStatus = appContext.getString(R.string.status_logging_in)
                         val result = engine.dynamicCodeLogin(
                             sid.trim(), code, prep, "DYNAMIC",
                             vpnPasswordProvider = {
@@ -1339,11 +1326,11 @@ fun WeeklyScheduleScreen(
                         if (result.success) {
                             performCourseImportPipeline(engine, sid)
                         } else {
-                            wbuError = result.message.ifBlank { "动态码登录失败，请检查验证码" }
+                            wbuError = result.message.ifBlank { appContext.getString(R.string.err_otp_login_failed) }
                         }
                     } catch (e: Exception) {
                         Log.e("WbuSync", "动态码同步错误", e)
-                        wbuError = "同步发生错误: ${e.message}"
+                        wbuError = appContext.getString(R.string.format_err_sync_error, e.message ?: "")
                     } finally {
                         isWbuSyncing = false
                     }
@@ -1366,7 +1353,7 @@ fun WeeklyScheduleScreen(
             onSubmit = { code ->
                 smsError = null
                 coroutineScope.launch {
-                    snackbarHostState.showSnackbar("验证码已提交，后台脚本正在继续同步，请稍候~")
+                    snackbarHostState.showSnackbar(appContext.getString(R.string.snackbar_otp_submitted_syncing))
                 }
                 smsDeferred?.complete(code)
                 // 对话框保持打开直到验证完成；验证结果由协程流程控制关闭
@@ -1379,9 +1366,9 @@ fun WeeklyScheduleScreen(
                     val result = activeVpnEngine?.resendVpnSmsCode()
                     if (result?.success == true) {
                         smsDialogSendInterval = result.cooldownSeconds
-                        snackbarHostState.showSnackbar("验证码已重新发送")
+                        snackbarHostState.showSnackbar(appContext.getString(R.string.snackbar_otp_resent))
                     } else {
-                        snackbarHostState.showSnackbar("重新发送失败，请稍后重试")
+                        snackbarHostState.showSnackbar(appContext.getString(R.string.snackbar_otp_resend_failed))
                     }
                 }
             },
@@ -1419,15 +1406,15 @@ fun WeeklyScheduleScreen(
                 deferred.complete(false)
                 campusConfirmDeferred = null
             },
-            title = { Text("未检测到校园网") },
-            text = { Text("当前好像不在校园网环境，校园网直连可能无法成功。是否仍要继续尝试？") },
+            title = { Text(stringResource(R.string.title_no_campus_network)) },
+            text = { Text(stringResource(R.string.msg_no_campus_network)) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         deferred.complete(true)
                         campusConfirmDeferred = null
                     }
-                ) { Text("继续") }
+                ) { Text(stringResource(R.string.action_continue)) }
             },
             dismissButton = {
                 TextButton(
@@ -1435,7 +1422,7 @@ fun WeeklyScheduleScreen(
                         deferred.complete(false)
                         campusConfirmDeferred = null
                     }
-                ) { Text("取消") }
+                ) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }
@@ -1444,59 +1431,158 @@ fun WeeklyScheduleScreen(
     if (showManualLoginPrompt) {
         AlertDialog(
             onDismissRequest = { showManualLoginPrompt = false },
-            title = { Text("自动登录失败") },
-            text = { Text("教务系统可能要求人工验证，是否跳转浏览器页面手动登录？") },
+            title = { Text(stringResource(R.string.title_auto_login_failed)) },
+            text = { Text(stringResource(R.string.msg_auto_login_failed)) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         showManualLoginPrompt = false
                         val target = if (manualLoginUseVpn) {
-                            Destination.WebView(initialUrl = "https://webvpn.wbu.edu.cn/portal/#!/login", assetJsPath = "WBU/wbu_chaoxing.js")
+                            Destination.WebView(initialUrl = "https://webvpn.wbu.edu.cn/portal/?redirect_uri=http%3A%2F%2Fjwxt-wbu-edu-cn-s.webvpn.wbu.edu.cn%3A8118%2F#!/login", assetJsPath = "WBU/wbu_chaoxing.js")
                         } else {
-                            Destination.WebView(initialUrl = "https://jwxt.wbu.edu.cn/admin/login", assetJsPath = "WBU/wbu_chaoxing.js")
+                            Destination.WebView(initialUrl = "https://jwxt.wbu.edu.cn", assetJsPath = "WBU/wbu_chaoxing.js")
                         }
                         navBridge.navigate(target)
                     }
-                ) { Text("去登录") }
+                ) { Text(stringResource(R.string.action_go_to_login)) }
             },
             dismissButton = {
-                TextButton(onClick = { showManualLoginPrompt = false }) { Text("取消") }
+                TextButton(onClick = { showManualLoginPrompt = false }) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }
 
     // WebVPN 统一认证密码询问弹窗（教务密码模式且未配置 TWFID 时触发）
     vpnPasswordDeferred?.let { deferred ->
-        var inputPassword by remember { mutableStateOf("") }
+        var rememberVpnPassword by remember { mutableStateOf(WbuSyncEngine.isRememberVpnPasswordEnabled(appContext)) }
+        var hasSavedVpnPassword by remember { mutableStateOf(WbuSyncEngine.hasSavedVpnPassword(appContext)) }
+        var isVpnPasswordModified by remember { mutableStateOf(false) }
+        var inputPassword by remember {
+            mutableStateOf(if (WbuSyncEngine.hasSavedVpnPassword(appContext)) "••••••••" else "")
+        }
         var passwordVisible by remember { mutableStateOf(false) }
+
+        // 延迟清空防抖：关闭弹窗时若用户取消了记住密码，统一清空持久化数据
+        DisposableEffect(rememberVpnPassword) {
+            onDispose {
+                if (!rememberVpnPassword) {
+                    WbuSyncEngine.setRememberVpnPasswordEnabled(appContext, false)
+                    WbuSyncEngine.clearSavedVpnPassword(appContext)
+                }
+            }
+        }
 
         AlertDialog(
             onDismissRequest = {
                 deferred.complete(null)
                 vpnPasswordDeferred = null
             },
-            title = { Text("连接 WebVPN") },
+            title = { Text(stringResource(R.string.title_connect_webvpn)) },
             text = {
                 Column {
                     Text(
-                        text = "校外访问教务系统需先通过 WebVPN 门禁。请输入您的【统一认证/WebVPN 密码】以连接网络：",
+                        text = stringResource(R.string.desc_connect_webvpn),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedTextField(
                         value = inputPassword,
-                        onValueChange = { inputPassword = it },
-                        label = { Text("统一认证 (WebVPN) 密码") },
+                        onValueChange = { newValue ->
+                            if (hasSavedVpnPassword && !isVpnPasswordModified) {
+                                isVpnPasswordModified = true
+                                inputPassword = if (newValue.startsWith("••••••••")) {
+                                    newValue.removePrefix("••••••••")
+                                } else if (newValue.endsWith("••••••••")) {
+                                    newValue.removeSuffix("••••••••")
+                                } else if (newValue.contains("••••••••")) {
+                                    newValue.replace("••••••••", "")
+                                } else {
+                                    newValue
+                                }
+                            } else {
+                                inputPassword = newValue
+                            }
+                        },
+                        label = { Text(stringResource(R.string.label_webvpn_password)) },
                         singleLine = true,
                         visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                         trailingIcon = {
-                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                Icon(
-                                    imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                    contentDescription = if (passwordVisible) "隐藏密码" else "显示密码"
-                                )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(end = 6.dp)
+                            ) {
+                                IconButton(
+                                    onClick = { passwordVisible = !passwordVisible },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = if (passwordVisible) stringResource(R.string.a11y_hide_password) else stringResource(R.string.a11y_show_password),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            val next = !rememberVpnPassword
+                                            rememberVpnPassword = next
+                                            if (!next) {
+                                                hasSavedVpnPassword = false
+                                                if (!isVpnPasswordModified && inputPassword == "••••••••") {
+                                                    inputPassword = ""
+                                                }
+                                            } else {
+                                                WbuSyncEngine.setRememberVpnPasswordEnabled(appContext, true)
+                                                val effective = if (hasSavedVpnPassword && !isVpnPasswordModified) {
+                                                    WbuSyncEngine.getSavedVpnPassword(appContext) ?: ""
+                                                } else {
+                                                    inputPassword
+                                                }
+                                                if (effective.isNotBlank()) {
+                                                    WbuSyncEngine.saveVpnPassword(appContext, effective)
+                                                    hasSavedVpnPassword = true
+                                                }
+                                            }
+                                        }
+                                        .padding(horizontal = 4.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.label_remember_password),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Checkbox(
+                                        checked = rememberVpnPassword,
+                                        onCheckedChange = { checked ->
+                                            rememberVpnPassword = checked
+                                            if (!checked) {
+                                                hasSavedVpnPassword = false
+                                                if (!isVpnPasswordModified && inputPassword == "••••••••") {
+                                                    inputPassword = ""
+                                                }
+                                            } else {
+                                                WbuSyncEngine.setRememberVpnPasswordEnabled(appContext, true)
+                                                val effective = if (hasSavedVpnPassword && !isVpnPasswordModified) {
+                                                    WbuSyncEngine.getSavedVpnPassword(appContext) ?: ""
+                                                } else {
+                                                    inputPassword
+                                                }
+                                                if (effective.isNotBlank()) {
+                                                    WbuSyncEngine.saveVpnPassword(appContext, effective)
+                                                    hasSavedVpnPassword = true
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .scale(0.85f)
+                                    )
+                                }
                             }
                         },
                         modifier = Modifier.fillMaxWidth()
@@ -1504,14 +1590,27 @@ fun WeeklyScheduleScreen(
                 }
             },
             confirmButton = {
+                val canSubmit = inputPassword.isNotBlank() || hasSavedVpnPassword
                 TextButton(
                     onClick = {
-                        deferred.complete(inputPassword)
+                        val effectiveVpn = if (hasSavedVpnPassword && !isVpnPasswordModified) {
+                            WbuSyncEngine.getSavedVpnPassword(appContext) ?: inputPassword
+                        } else {
+                            inputPassword
+                        }
+                        if (rememberVpnPassword && effectiveVpn.isNotBlank()) {
+                            WbuSyncEngine.setRememberVpnPasswordEnabled(appContext, true)
+                            WbuSyncEngine.saveVpnPassword(appContext, effectiveVpn)
+                        } else if (!rememberVpnPassword) {
+                            WbuSyncEngine.setRememberVpnPasswordEnabled(appContext, false)
+                            WbuSyncEngine.clearSavedVpnPassword(appContext)
+                        }
+                        deferred.complete(effectiveVpn)
                         vpnPasswordDeferred = null
                     },
-                    enabled = inputPassword.isNotBlank()
+                    enabled = canSubmit
                 ) {
-                    Text("继续连接")
+                    Text(stringResource(R.string.action_continue_connect))
                 }
             },
             dismissButton = {
@@ -1521,7 +1620,7 @@ fun WeeklyScheduleScreen(
                         vpnPasswordDeferred = null
                     }
                 ) {
-                    Text("取消")
+                    Text(stringResource(R.string.action_cancel))
                 }
             }
         )
@@ -1534,15 +1633,15 @@ fun WeeklyScheduleScreen(
                 deferred.complete(false)
                 sslIssueDeferred = null
             },
-            title = { Text("证书校验异常") },
-            text = { Text("检测到 WebVPN 证书校验失败（$sslIssueMessage）。是否继续信任并重试？") },
+            title = { Text(stringResource(R.string.title_ssl_exception)) },
+            text = { Text(stringResource(R.string.msg_ssl_exception, sslIssueMessage)) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         deferred.complete(true)
                         sslIssueDeferred = null
                     }
-                ) { Text("继续信任") }
+                ) { Text(stringResource(R.string.action_trust_and_continue)) }
             },
             dismissButton = {
                 TextButton(
@@ -1550,70 +1649,23 @@ fun WeeklyScheduleScreen(
                         deferred.complete(false)
                         sslIssueDeferred = null
                     }
-                ) { Text("取消") }
+                ) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }
 
     // 1. 学期选择对话框
     semesterSelectDeferred?.let { deferred ->
-        var selectedValue by remember(semesterSelectOptions) {
-            mutableStateOf(semesterSelectOptions.firstOrNull()?.value.orEmpty())
-        }
-        AlertDialog(
+        com.xingheyuzhuan.shiguangschedule.ui.components.SemesterPickerDialog(
+            options = semesterSelectOptions,
+            currentXnxq = semesterSelectCurrentXnxq,
+            onConfirm = { chosen ->
+                deferred.complete(chosen)
+                semesterSelectDeferred = null
+            },
             onDismissRequest = {
                 deferred.complete(null)
                 semesterSelectDeferred = null
-            },
-            title = { Text("选择导入的学年学期") },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    semesterSelectOptions.forEach { opt ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { selectedValue = opt.value }
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = selectedValue == opt.value,
-                                onClick = { selectedValue = opt.value }
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = opt.text,
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        deferred.complete(selectedValue)
-                        semesterSelectDeferred = null
-                    },
-                    enabled = selectedValue.isNotBlank()
-                ) {
-                    Text("确定")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        deferred.complete(null)
-                        semesterSelectDeferred = null
-                    }
-                ) {
-                    Text("取消")
-                }
             }
         )
     }
@@ -1626,11 +1678,11 @@ fun WeeklyScheduleScreen(
                 conflictDialogData = null
                 conflictDeferred = null
             },
-            title = { Text("学期不一致提醒") },
+            title = { Text(stringResource(R.string.title_semester_mismatch)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "您选择导入的学期是【${selectedSemester}】，而当前课表绑定的学期是【${currentTable.semesterCode}】。\n\n如选择覆盖，当前课表内的课程将被清空重写。"
+                        text = stringResource(R.string.msg_semester_mismatch, selectedSemester, currentTable.semesterCode ?: "")
                     )
                     Row(
                         modifier = Modifier
@@ -1645,7 +1697,7 @@ fun WeeklyScheduleScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "自动修改该课表名称",
+                            text = stringResource(R.string.label_auto_rename_table),
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
@@ -1659,7 +1711,7 @@ fun WeeklyScheduleScreen(
                         conflictDeferred = null
                     }
                 ) {
-                    Text("新建课表")
+                    Text(stringResource(R.string.action_create_new_table))
                 }
             },
             dismissButton = {
@@ -1671,7 +1723,7 @@ fun WeeklyScheduleScreen(
                             conflictDeferred = null
                         }
                     ) {
-                        Text("取消")
+                        Text(stringResource(R.string.action_cancel))
                     }
                     TextButton(
                         onClick = {
@@ -1681,7 +1733,7 @@ fun WeeklyScheduleScreen(
                             conflictDeferred = null
                         }
                     ) {
-                        Text("覆盖课表")
+                        Text(stringResource(R.string.action_overwrite_table))
                     }
                 }
             }
@@ -1698,11 +1750,11 @@ fun WeeklyScheduleScreen(
         }
         val titleText = when {
             dupInfo.hasIdentical && dupInfo.hasMultiTeacher ->
-                "重复课程处理（${dupInfo.groupCount} 组 / ${dupInfo.totalConflictCourses} 门）"
+                stringResource(R.string.format_dup_dialog_title, dupInfo.groupCount, dupInfo.totalConflictCourses)
             dupInfo.hasMultiTeacher ->
-                "多教师重复课程处理（${dupInfo.groupCount} 组 / ${dupInfo.totalConflictCourses} 门）"
+                stringResource(R.string.format_dup_dialog_title_teacher, dupInfo.groupCount, dupInfo.totalConflictCourses)
             else ->
-                "完全相同的重复课程处理（${dupInfo.groupCount} 组 / ${dupInfo.totalConflictCourses} 门）"
+                stringResource(R.string.format_dup_dialog_title_identical, dupInfo.groupCount, dupInfo.totalConflictCourses)
         }
 
         AlertDialog(
@@ -1718,7 +1770,7 @@ fun WeeklyScheduleScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "检测到部分课程在同一时间、地点被分为多条记录。请选择处理方式：",
+                        text = stringResource(R.string.desc_dup_course_dialog),
                         style = MaterialTheme.typography.bodyMedium
                     )
 
@@ -1737,11 +1789,11 @@ fun WeeklyScheduleScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Column {
                                 Text(
-                                    text = "合并教师（推荐）",
+                                    text = stringResource(R.string.action_merge_teachers_rec),
                                     style = MaterialTheme.typography.bodyLarge
                                 )
                                 Text(
-                                    text = "如：${dupInfo.sampleCourseName} -> ${dupInfo.sampleTeacherSummary}",
+                                    text = stringResource(R.string.format_dup_sample_teacher, dupInfo.sampleCourseName, dupInfo.sampleTeacherSummary),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -1764,11 +1816,11 @@ fun WeeklyScheduleScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Column {
                                 Text(
-                                    text = "只保留一门（去重）",
+                                    text = stringResource(R.string.action_keep_one_course),
                                     style = MaterialTheme.typography.bodyLarge
                                 )
                                 Text(
-                                    text = "如：${dupInfo.sampleCourseName} 仅保留一条",
+                                    text = stringResource(R.string.format_dup_sample_keep_one, dupInfo.sampleCourseName),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -1789,7 +1841,7 @@ fun WeeklyScheduleScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "全部保留（${dupInfo.totalConflictCourses} 门）",
+                            text = stringResource(R.string.format_keep_all_courses, dupInfo.totalConflictCourses),
                             style = MaterialTheme.typography.bodyLarge
                         )
                     }
@@ -1803,7 +1855,7 @@ fun WeeklyScheduleScreen(
                         duplicateCoursesDeferred = null
                     }
                 ) {
-                    Text("确定")
+                    Text(stringResource(R.string.action_confirm))
                 }
             },
             dismissButton = {
@@ -1814,7 +1866,7 @@ fun WeeklyScheduleScreen(
                         duplicateCoursesDeferred = null
                     }
                 ) {
-                    Text("取消")
+                    Text(stringResource(R.string.action_cancel))
                 }
             }
         )
@@ -1878,9 +1930,9 @@ fun WeeklyScheduleScreen(
                 newSemesterPromptXnxq = null
                 newSemesterPromptEngine = null
             },
-            title = { Text("发现新学期课表") },
+            title = { Text(stringResource(R.string.title_new_semester_found)) },
             text = {
-                Text("教务系统当前已有新学期【$newXnxq】的课表。是否立即导入并新建该学期课表？")
+                Text(stringResource(R.string.msg_new_semester_found, newXnxq))
             },
             confirmButton = {
                 TextButton(
@@ -1894,7 +1946,7 @@ fun WeeklyScheduleScreen(
                                 try {
                                     val sid = engine.lastResolvedStudentId ?: WbuSyncEngine.getSavedStudentId(appContext)
                                     val currentAllTables = viewModel.getAllCourseTables()
-                                    val newName = computeNonConflictingTableName(xnxqToImport, sid, currentAllTables)
+                                    val newName = WbuSyncEngine.computeNonConflictingTableName(xnxqToImport, sid, currentAllTables)
                                     val newTable = viewModel.createAndSwitchTable(
                                         name = newName,
                                         studentId = sid,
@@ -1905,18 +1957,18 @@ fun WeeklyScheduleScreen(
                                         viewModel.importCourses(courses, targetTableId = newTable.id)
                                         val cfg = engine.fetchSemesterConfig(xnxq = xnxqToImport, xqdm = engine.lastResolvedXqdm)
                                         viewModel.applySemesterConfig(cfg, targetTableId = newTable.id)
-                                        snackbarHostState.showSuccessSnackbar("新学期课表已导入！")
+                                        snackbarHostState.showSuccessSnackbar(appContext.getString(R.string.toast_new_semester_imported_success))
                                     } else {
-                                        snackbarHostState.showSnackbar("新学期暂无课程数据")
+                                        snackbarHostState.showSnackbar(appContext.getString(R.string.snackbar_new_semester_no_courses))
                                     }
                                 } catch (e: Exception) {
-                                    snackbarHostState.showSnackbar("新学期导入失败: ${e.message}")
+                                    snackbarHostState.showSnackbar(appContext.getString(R.string.format_snackbar_new_semester_failed, e.message ?: ""))
                                 }
                             }
                         }
                     }
                 ) {
-                    Text("立即导入新建")
+                    Text(stringResource(R.string.action_import_and_create_now))
                 }
             },
             dismissButton = {
@@ -1926,7 +1978,7 @@ fun WeeklyScheduleScreen(
                         newSemesterPromptEngine = null
                     }
                 ) {
-                    Text("稍后再说")
+                    Text(stringResource(R.string.action_later))
                 }
             }
         )

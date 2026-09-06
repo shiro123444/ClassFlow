@@ -40,6 +40,7 @@ import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -166,8 +167,9 @@ fun DayHeader(
     subTextColor: Color,
     strokeWidthPx: Float
 ) {
+    val fontScale = style.fontScale
     BoxWithConstraints(Modifier.fillMaxWidth().height(style.dayHeaderHeight)) {
-        val shouldShowDate = !style.hideDateUnderDay && maxHeight >= 42.dp
+        val shouldShowDate = !style.hideDateUnderDay && (maxHeight >= 42.dp || fontScale < 0.85f)
 
         Row(Modifier.fillMaxSize()) {
             Box(
@@ -188,7 +190,7 @@ fun DayHeader(
                 ) {
                     Text(
                         text = currentYear,
-                        fontSize = 12.sp,
+                        fontSize = (12 * fontScale).sp,
                         fontWeight = FontWeight.Bold,
                         color = subTextColor,
                         style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
@@ -198,7 +200,7 @@ fun DayHeader(
                         Spacer(modifier = Modifier.height(1.dp))
                         Text(
                             text = currentWeek,
-                            fontSize = 10.sp,
+                            fontSize = (10 * fontScale).sp,
                             fontWeight = FontWeight.Normal,
                             color = subTextColor,
                             style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
@@ -241,26 +243,26 @@ fun DayHeader(
                         ) {
                             Text(
                                 text = day,
-                                fontSize = 14.sp,
+                                fontSize = (14 * fontScale).sp,
                                 fontWeight = FontWeight.Bold,
                                 color = textColor,
                                 maxLines = 1,
                                 style = TextStyle(
                                     platformStyle = PlatformTextStyle(includeFontPadding = false),
-                                    lineHeight = 16.sp
+                                    lineHeight = (16 * fontScale).sp
                                 )
                             )
 
                             if (shouldShowDate && dates.size > index) {
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Spacer(modifier = Modifier.height((2 * fontScale).dp.coerceAtLeast(1.dp)))
                                 Text(
                                     text = dates[index],
-                                    fontSize = 10.sp,
+                                    fontSize = (10 * fontScale).sp,
                                     color = subTextColor,
                                     maxLines = 1,
                                     style = TextStyle(
                                         platformStyle = PlatformTextStyle(includeFontPadding = false),
-                                        lineHeight = 12.sp
+                                        lineHeight = (12 * fontScale).sp
                                     )
                                 )
                             }
@@ -291,6 +293,7 @@ fun TimeColumn(
     activeDragHour: Int? = null,
     activeDragMinuteStr: String? = null
 ) {
+    val fontScale = style.fontScale
     Column(modifier.width(style.timeColumnWidth)) {
         for (index in 0 until maxGridSections) {
             val isCurrentHourActive = if (is24HourMode) {
@@ -323,7 +326,7 @@ fun TimeColumn(
                     ) {
                         Text(
                             text = ":$activeDragMinuteStr",
-                            fontSize = if (h < 32.dp) 11.sp else 12.sp,
+                            fontSize = (if (h < 32.dp) 11 else 12).times(fontScale).sp,
                             fontWeight = FontWeight.Bold,
                             color = textColor
                         )
@@ -335,13 +338,13 @@ fun TimeColumn(
                     verticalArrangement = if (is24HourMode) Arrangement.Top else Arrangement.Center,
                     modifier = Modifier
                         .padding(horizontal = 1.dp)
-                        .then(if (is24HourMode) Modifier.offset(y = (-7).dp) else Modifier)
+                        .then(if (is24HourMode) Modifier.offset(y = (-7 * fontScale).dp) else Modifier)
                 ) {
                     if (is24HourMode) {
                         val formatHourStr = String.format(Locale.US,"%02d:00", index)
                         Text(
                             text = formatHourStr,
-                            fontSize = if (h < 32.dp) 11.sp else 12.sp,
+                            fontSize = (if (h < 32.dp) 11 else 12).times(fontScale).sp,
                             fontWeight = FontWeight.Medium,
                             color = if (isCurrentHourActive) MaterialTheme.colorScheme.primary else textColor
                         )
@@ -350,20 +353,25 @@ fun TimeColumn(
                         if (slot != null) {
                             Text(
                                 text = slot.alias ?: slot.number.toString(),
-                                fontSize = if (h < 32.dp) 11.sp else 14.sp,
+                                fontSize = (if (h < 32.dp) 11 else 14).times(fontScale).sp,
                                 fontWeight = FontWeight.Bold,
                                 color = textColor,
                                 overflow = TextOverflow.Ellipsis
                             )
                             if (!style.hideSectionTime) {
                                 when {
-                                    h >= 52.dp -> {
-                                        Spacer(Modifier.height(2.dp))
-                                        TimeText(slot.startTime, subTextColor)
-                                        TimeText(slot.endTime, subTextColor)
+                                    h >= 52.dp || (fontScale < 0.85f && h >= 26.dp) -> {
+                                        Spacer(Modifier.height((2 * fontScale).dp.coerceAtLeast(1.dp)))
+                                        TimeText(slot.startTime, subTextColor, (10 * fontScale).sp)
+                                        TimeText(slot.endTime, subTextColor, (10 * fontScale).sp)
                                     }
-                                    h >= 38.dp -> {
-                                        Text(text = "${slot.startTime}-${slot.endTime}", fontSize = 8.sp, color = subTextColor, maxLines = 1)
+                                    h >= 38.dp || (fontScale < 0.85f && h >= 19.dp) -> {
+                                        Text(
+                                            text = "${slot.startTime}-${slot.endTime}",
+                                            fontSize = (8 * fontScale).sp,
+                                            color = subTextColor,
+                                            maxLines = 1
+                                        )
                                     }
                                 }
                             }
@@ -437,8 +445,8 @@ private fun EditHandleDot() {
 }
 
 @Composable
-fun TimeText(text: String, color: Color) {
-    Text(text = text, fontSize = 10.sp, color = color, style = TextStyle(lineHeight = 1.em))
+fun TimeText(text: String, color: Color, fontSize: TextUnit = 10.sp) {
+    Text(text = text, fontSize = fontSize, color = color, style = TextStyle(lineHeight = 1.em))
 }
 
 /**

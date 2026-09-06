@@ -52,6 +52,17 @@ class CreateIcsDocumentContract : ActivityResultContract<String, Uri?>() {
         if (resultCode == Activity.RESULT_OK) intent?.data else null
 }
 
+class CreateWakeupDocumentContract : ActivityResultContract<String, Uri?>() {
+    override fun createIntent(context: Context, input: String): Intent =
+        Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_TITLE, input)
+        }
+    override fun parseResult(resultCode: Int, intent: Intent?): Uri? =
+        if (resultCode == Activity.RESULT_OK) intent?.data else null
+}
+
 // --- 内部数据模型 ---
 private data class LocalizedAlarmOption(val value: Int?, private val displayString: String) {
     override fun toString(): String = displayString
@@ -155,6 +166,113 @@ fun IcsExportDialog(
             onTableSelected = { selectedTable ->
                 // 在回调中，同时传递课表ID和之前选择的提醒时间
                 onConfirm(selectedTable.id, alarmMinutes)
+            }
+        )
+    }
+}
+
+/**
+ * 课表图片导出配置对话框：支持复选框选择是否显示分割虚线、是否自动截断冲突课程（默认开启）
+ */
+@Composable
+fun ImageExportDialog(
+    onDismissRequest: () -> Unit,
+    onConfirm: (String, Boolean, Boolean) -> Unit
+) {
+    var showDashedDivider by remember { mutableStateOf(false) }
+    var autoSplitConflict by remember { mutableStateOf(true) } // 默认勾选截断
+    var showTablePicker by remember { mutableStateOf(false) }
+
+    val dialogTitle = stringResource(R.string.dialog_title_image_export_settings)
+    val optionDashed = stringResource(R.string.option_show_dashed_divider)
+    val optionAutoSplit = stringResource(R.string.option_auto_split_conflict)
+    val descAutoSplit = stringResource(R.string.desc_auto_split_conflict)
+    val actionCancel = stringResource(R.string.action_cancel)
+    val actionNextStep = stringResource(R.string.action_next_step)
+    val dialogTitleSelectExportTable = stringResource(R.string.dialog_title_select_export_table)
+
+    if (!showTablePicker) {
+        Dialog(onDismissRequest = onDismissRequest) {
+            Card {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.Start
+                ) {
+                    Text(
+                        text = dialogTitle,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 选项 1：虚线分割（默认关闭）
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = showDashedDivider,
+                            onCheckedChange = { showDashedDivider = it }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = optionDashed,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+
+                    // 选项 2：自动截断冲突课程（默认开启）
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = autoSplitConflict,
+                            onCheckedChange = { autoSplitConflict = it }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = optionAutoSplit,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                text = descAutoSplit,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = onDismissRequest) {
+                            Text(actionCancel)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(onClick = { showTablePicker = true }) {
+                            Text(actionNextStep)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showTablePicker) {
+        CourseTablePickerDialog(
+            title = dialogTitleSelectExportTable,
+            onDismissRequest = onDismissRequest,
+            onTableSelected = { selectedTable ->
+                onConfirm(selectedTable.id, showDashedDivider, autoSplitConflict)
             }
         )
     }

@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.settings.additional
 
+import androidx.compose.ui.res.stringResource
+import com.xingheyuzhuan.shiguangschedule.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -40,21 +42,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xingheyuzhuan.shiguangschedule.NavBridge
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OpenSourceLicensesScreen(navBridge: NavBridge) {
     val scrollState = rememberScrollState()
-
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(text = "开源协议") },
+                title = { Text(text = stringResource(R.string.title_open_source_licenses)) },
                 navigationIcon = {
                     IconButton(onClick = { navBridge.popBackStack() }) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "返回"
+                            contentDescription = stringResource(R.string.a11y_back)
                         )
                     }
                 }
@@ -104,20 +104,19 @@ fun OpenSourceLicensesScreen(navBridge: NavBridge) {
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "ClassFlow 是一个开源的 Android 课表应用，致力于为高校学生提供轻量、优雅的课程管理体验。",
+                        text = stringResource(R.string.open_source_intro),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "项目基于 GPL-3.0 协议开源发布。",
+                        text = stringResource(R.string.open_source_license_gpl),
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
-
             // 仓库与许可证类型
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -136,7 +135,7 @@ fun OpenSourceLicensesScreen(navBridge: NavBridge) {
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "源码仓库",
+                            text = stringResource(R.string.title_source_repo),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -147,12 +146,10 @@ fun OpenSourceLicensesScreen(navBridge: NavBridge) {
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
-
                     HorizontalDivider(
                         modifier = Modifier.padding(vertical = 12.dp),
                         thickness = 0.5.dp
                     )
-
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.Gavel,
@@ -162,7 +159,7 @@ fun OpenSourceLicensesScreen(navBridge: NavBridge) {
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "项目许可证",
+                            text = stringResource(R.string.title_project_license),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -175,21 +172,19 @@ fun OpenSourceLicensesScreen(navBridge: NavBridge) {
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "允许自由使用、修改和分发，但分发的衍生作品必须使用相同的开源协议。",
+                        text = stringResource(R.string.desc_project_license_gpl),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
-
             // 第三方依赖许可证概览
             Text(
-                text = "第三方依赖许可证",
+                text = stringResource(R.string.title_third_party_licenses),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(start = 4.dp)
             )
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -198,16 +193,15 @@ fun OpenSourceLicensesScreen(navBridge: NavBridge) {
                     modifier = Modifier.weight(1f),
                     icon = Icons.Default.Description,
                     title = "Apache 2.0",
-                    desc = "AndroidX、Compose、Retrofit 等核心框架"
+                    desc = stringResource(R.string.desc_third_party_core)
                 )
                 LicenseTypeCard(
                     modifier = Modifier.weight(1f),
                     icon = Icons.Default.Policy,
                     title = "MIT / BSD",
-                    desc = "OkHttp、Coil、JGit 等工具库与组件"
+                    desc = stringResource(R.string.desc_third_party_utils)
                 )
             }
-
             // 合规声明
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -218,25 +212,23 @@ fun OpenSourceLicensesScreen(navBridge: NavBridge) {
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "合规声明",
+                        text = stringResource(R.string.title_compliance_statement),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "本应用集成的所有第三方库均按其原始许可证条款使用和分发。完整的许可证原文随应用构建产物 (assets/open_source_licenses.html) 一并提供。如有许可证相关疑问，可通过仓库 Issue 联系维护者。",
+                        text = stringResource(R.string.desc_compliance_statement),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = MaterialTheme.typography.bodyMedium.lineHeight
                     )
                 }
             }
-
             Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }
-
 @Composable
 private fun LicenseTypeCard(
     modifier: Modifier = Modifier,
@@ -271,4 +263,3 @@ private fun LicenseTypeCard(
         }
     }
 }
-

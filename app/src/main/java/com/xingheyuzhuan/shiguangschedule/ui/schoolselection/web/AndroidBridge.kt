@@ -12,9 +12,13 @@ import android.webkit.ValueCallback
 import android.webkit.WebView
 import android.widget.Toast
 import com.xingheyuzhuan.shiguangschedule.data.db.main.TimeSlot
+import com.xingheyuzhuan.shiguangschedule.data.repository.AppSettingsRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.CourseConversionRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.CourseImportExport
+import com.xingheyuzhuan.shiguangschedule.data.repository.CourseTableRepository
+import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -46,6 +50,8 @@ class AndroidBridge(
     private val uiEventChannel: Channel<WebUiEvent>,
     private val courseConversionRepository: CourseConversionRepository,
     private val timeSlotRepository: TimeSlotRepository,
+    private val courseTableRepository: CourseTableRepository,
+    private val appSettingsRepository: AppSettingsRepository,
     private val onTaskCompleted: () -> Unit
 ) {
     private val json = Json {
@@ -311,6 +317,57 @@ class AndroidBridge(
                 e.printStackTrace()
                 Toast.makeText(context, "预设时间段导入失败: ${e.message}", Toast.LENGTH_LONG).show()
                 rejectJsPromise(promiseId, "预设时间段导入失败: ${e.message}")
+            }
+        }
+    }
+
+    /** JS 调用：将学号、学期代码等元数据传回 Android 端保存到课表及全局会话中。 */
+    @JavascriptInterface
+    fun saveTableMeta(metaJsonString: String, promiseId: String) {
+        Log.d(TAG, "接收到课表元数据: $metaJsonString")
+        coroutineScope.launch(Dispatchers.Main) {
+            try {
+                // 优先使用当前导入上下文中的 importTableId；若已置空则回退取当前活跃课表
+                val tableId = importTableId ?: appSettingsRepository.getAppSettingsOnce()?.currentCourseTableId
+                if (tableId == null) {
+                    rejectJsPromise(promiseId, "未选择目标课表。")
+                    return@launch
+                }
+                val obj = runCatching { JSONObject(metaJsonString) }.getOrNull()
+                val studentId = obj?.optString("studentId", "")?.trim()?.takeIf { it.isNotBlank() }
+                val semesterCode = obj?.optString("semesterCode", "")?.trim()?.takeIf { it.isNotBlank() }
+                val tableName = obj?.optString("tableName", "")?.trim()?.takeIf { it.isNotBlank() }
+
+                val table = courseTableRepository.getCourseTableById(tableId)
+                if (table != null) {
+                    val allTables = courseTableRepository.getAllCourseTables().first()
+                    val effectiveSid = studentId ?: table.studentId.orEmpty()
+                    val effectiveSemester = semesterCode ?: table.semesterCode.orEmpty()
+
+                    // 若传入了指定名称优先使用；若当前课表为默认的“我的课表”且有学期信息，则自动重命名为规范学期名称
+                    val targetName = when {
+                        tableName != null -> tableName
+                        table.name == "我的课表" && effectiveSemester.isNotBlank() ->
+                            WbuSyncEngine.computeNonConflictingTableName(effectiveSemester, effectiveSid, allTables)
+                        else -> table.name
+                    }
+
+                    Log.d(TAG, "更新课表 $tableId 元数据: 原名=${table.name} -> 目标名=$targetName, 学号=$studentId, 学期=$semesterCode")
+
+                    val updated = table.copy(
+                        name = targetName,
+                        studentId = studentId ?: table.studentId,
+                        semesterCode = semesterCode ?: table.semesterCode
+                    )
+                    courseTableRepository.updateCourseTable(updated)
+                    if (studentId != null) {
+                        WbuSyncEngine.setSavedStudentId(context, studentId)
+                    }
+                }
+                resolveJsPromise(promiseId, "true")
+            } catch (e: Exception) {
+                Log.e(TAG, "保存课表元数据失败: ${e.message}", e)
+                rejectJsPromise(promiseId, "保存课表元数据失败: ${e.message}")
             }
         }
     }

@@ -47,6 +47,10 @@ sealed interface Destination : NavKey {
     // ── ClassFlow 独有页面 ──
 
     @Serializable data object WallpaperAdjust : Destination
+    @Serializable data object GradeQuery : Destination
+    @Serializable data object FreeClassroomQuery : Destination
+    @Serializable data object AcademicProgress : Destination
+    @Serializable data object LibraryBorrow : Destination
 
     // --- 动态传参页面 ---
 

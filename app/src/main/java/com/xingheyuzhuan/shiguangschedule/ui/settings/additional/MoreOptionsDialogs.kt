@@ -95,8 +95,8 @@ fun UpdateChannelDialog(
                                 onSelectChannel(type.channelId)
                                 onDismiss()
                             },
-                        headlineContent = { Text(text = type.title) },
-                        supportingContent = { Text(text = type.description) },
+                        headlineContent = { Text(text = stringResource(type.titleRes)) },
+                        supportingContent = { Text(text = stringResource(type.descriptionRes)) },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         leadingContent = {
                             RadioButton(selected = isSelected, onClick = null)

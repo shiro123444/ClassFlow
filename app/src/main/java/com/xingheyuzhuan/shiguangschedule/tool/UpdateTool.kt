@@ -5,7 +5,9 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.FileProvider
+import androidx.core.os.ConfigurationCompat
 import com.xingheyuzhuan.shiguangschedule.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -18,6 +20,7 @@ import okhttp3.Request
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /** 更新渠道（保留上游 API 兼容） */
@@ -138,6 +141,20 @@ class UpdateChecker(private val context: Context) {
     }
 
     /**
+     * 获取当前语言标签 (如 zh-CN, zh-TW, en)
+     */
+    fun getCurrentLanguageTag(): String {
+        val appLocales = AppCompatDelegate.getApplicationLocales()
+        if (!appLocales.isEmpty) {
+            val tag = appLocales[0]?.toLanguageTag()
+            if (!tag.isNullOrBlank()) return tag
+        }
+        val systemLocale = ConfigurationCompat.getLocales(context.resources.configuration)[0]
+            ?: Locale.getDefault()
+        return systemLocale.toLanguageTag()
+    }
+
+    /**
      * 检查更新
      * @param customApiUrl 自定义接口地址（若为空则使用 BuildConfig.UPDATE_API_URL）
      * @param channel 更新渠道（如 stable, beta, dev，默认 stable）
@@ -153,22 +170,25 @@ class UpdateChecker(private val context: Context) {
 
         try {
             val arch = getDeviceArch()
+            val lang = getCurrentLanguageTag()
             val parsedUrl = apiUrl.toHttpUrlOrNull()
             val finalUrl = if (parsedUrl != null) {
                 parsedUrl.newBuilder()
                     .setQueryParameter("version_code", BuildConfig.VERSION_CODE.toString())
                     .setQueryParameter("channel", channel)
                     .setQueryParameter("arch", arch)
+                    .setQueryParameter("lang", lang)
                     .build()
                     .toString()
             } else {
                 val separator = if (apiUrl.contains("?")) "&" else "?"
-                "$apiUrl${separator}version_code=${BuildConfig.VERSION_CODE}&channel=$channel&arch=$arch"
+                "$apiUrl${separator}version_code=${BuildConfig.VERSION_CODE}&channel=$channel&arch=$arch&lang=$lang"
             }
 
             val request = Request.Builder()
                 .url(finalUrl)
                 .addHeader("Accept", "application/json")
+                .addHeader("Accept-Language", lang)
                 .addHeader("User-Agent", "ClassFlow-Android/${BuildConfig.VERSION_NAME}")
                 .build()
 

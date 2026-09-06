@@ -6,6 +6,7 @@ import androidx.room.Transaction
 import com.xingheyuzhuan.shiguangschedule.data.db.main.Course
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseDao
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTableConfig
+import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTableDao
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWeek
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWeekDao
 import com.xingheyuzhuan.shiguangschedule.data.db.main.TimeSlot
@@ -19,10 +20,13 @@ import com.xingheyuzhuan.shiguangschedule.data.repository.CourseImportExport.Imp
 import com.xingheyuzhuan.shiguangschedule.data.repository.CourseImportExport.TimeSlotJsonModel
 import com.xingheyuzhuan.shiguangschedule.tool.CalendarAccountManager
 import com.xingheyuzhuan.shiguangschedule.tool.IcsExportTool
+import com.xingheyuzhuan.shiguangschedule.tool.ScheduleImageExporter
+import com.xingheyuzhuan.shiguangschedule.tool.WakeupExportTool
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.time.LocalDate
 import java.util.UUID
 
@@ -31,7 +35,8 @@ class CourseConversionRepository @Inject constructor(
     private val courseWeekDao: CourseWeekDao,
     private val timeSlotDao: TimeSlotDao,
     private val appSettingsRepository: AppSettingsRepository,
-    private val styleSettingsRepository: StyleSettingsRepository
+    private val styleSettingsRepository: StyleSettingsRepository,
+    private val courseTableDao: CourseTableDao
 ) {
     /**
      * @param importColor 导入的颜色值（Int 或 null）。
@@ -131,7 +136,10 @@ class CourseConversionRepository @Inject constructor(
         val usageCounter = mutableMapOf<Int, Int>()
 
         courseDao.deleteCoursesByTableId(tableId)
-        timeSlotDao.deleteAllTimeSlotsByCourseTableId(tableId)
+        val shouldUpdateSlots = !courseTableJsonModel.timeSlots.isNullOrEmpty()
+        if (shouldUpdateSlots) {
+            timeSlotDao.deleteAllTimeSlotsByCourseTableId(tableId)
+        }
 
         val courseEntities = ArrayList<Course>(courseTableJsonModel.courses.size)
         val courseWeekEntities = mutableListOf<CourseWeek>()
@@ -197,7 +205,7 @@ class CourseConversionRepository @Inject constructor(
 
         if (courseEntities.isNotEmpty()) courseDao.insertAll(courseEntities)
         if (courseWeekEntities.isNotEmpty()) courseWeekDao.insertAll(courseWeekEntities)
-        if (normalizedTimeSlots.isNotEmpty()) timeSlotDao.insertAll(normalizedTimeSlots)
+        if (shouldUpdateSlots && normalizedTimeSlots.isNotEmpty()) timeSlotDao.insertAll(normalizedTimeSlots)
 
         // 配置导入逻辑保持不变...
         val configJson = courseTableJsonModel.config
@@ -413,5 +421,49 @@ class CourseConversionRepository @Inject constructor(
                 false
             }
         }
+    }
+
+    /**
+     * 导出指定课表为 WakeUp 课表文件 (.wakeup_schedule)。
+     */
+    suspend fun exportCourseTableToWakeupFile(tableId: String, context: Context): File? = withContext(Dispatchers.IO) {
+        val table = courseTableDao.getCourseTableById(tableId) ?: return@withContext null
+        val courses = courseDao.getCoursesWithWeeksByTableId(tableId).first()
+        val timeSlots = timeSlotDao.getTimeSlotsByCourseTableId(tableId).first()
+        val courseConfig = appSettingsRepository.getCourseConfigOnce(tableId)
+
+        val content = WakeupExportTool.generateWakeupContent(
+            tableName = table.name,
+            courses = courses,
+            timeSlots = timeSlots,
+            config = courseConfig
+        )
+        WakeupExportTool.createWakeupFile(context, table.name, content)
+    }
+
+    /**
+     * 导出指定课表为全课表图片（无色主题、自动包含周末），并直接保存到系统相册。
+     */
+    suspend fun exportCourseTableToImageFile(
+        tableId: String,
+        context: Context,
+        showDashedDivider: Boolean = false,
+        autoSplitConflict: Boolean = true
+    ): Boolean = withContext(Dispatchers.IO) {
+        val table = courseTableDao.getCourseTableById(tableId) ?: return@withContext false
+        val courses = courseDao.getCoursesWithWeeksByTableId(tableId).first()
+        val timeSlots = timeSlotDao.getTimeSlotsByCourseTableId(tableId).first()
+        val courseConfig = appSettingsRepository.getCourseConfigOnce(tableId)
+
+        val savedUri = ScheduleImageExporter.exportFullScheduleImage(
+            context = context,
+            tableName = table.name,
+            courses = courses,
+            timeSlots = timeSlots,
+            config = courseConfig,
+            showDashedDivider = showDashedDivider,
+            autoSplitConflict = autoSplitConflict
+        )
+        savedUri != null
     }
 }

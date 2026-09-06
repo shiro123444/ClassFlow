@@ -323,7 +323,7 @@ fun TimeSlotManagementScreen(
                     localTimeSlots.clear()
                     localTimeSlots.addAll(generated)
                     showBatchGeneratorSheet = false
-                    Toast.makeText(context, "已生成 $sectionCount 节时间段，请点击保存", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.toast_generated_time_slots, sectionCount), Toast.LENGTH_SHORT).show()
                 }
             )
         }
@@ -338,15 +338,15 @@ private fun QuickTemplateSection(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("快捷时间模板", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.title_quick_time_templates), style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = false, onClick = onApplyWbuTemplate, label = { Text("WBU 12 节模板") })
-                FilterChip(selected = false, onClick = onApplyCompactTemplate, label = { Text("10 节紧凑模板") })
+                FilterChip(selected = false, onClick = onApplyWbuTemplate, label = { Text(stringResource(R.string.template_wbu_12_slots)) })
+                FilterChip(selected = false, onClick = onApplyCompactTemplate, label = { Text(stringResource(R.string.template_compact_10_slots)) })
             }
             Button(onClick = onOpenBatchGenerator, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Filled.Schedule, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("批量生成时间段")
+                Text(stringResource(R.string.action_batch_generate_slots))
             }
         }
     }
@@ -375,11 +375,11 @@ private fun BatchGeneratorSheet(
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("批量生成", style = MaterialTheme.typography.titleLarge)
-            OutlinedTextField(value = startTime, onValueChange = { startTime = it }, label = { Text("首节开始时间 (HH:mm)") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = sectionCount, onValueChange = { sectionCount = it }, label = { Text("节次数") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = localClassDuration, onValueChange = { localClassDuration = it }, label = { Text("单节时长(分钟)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = localBreakDuration, onValueChange = { localBreakDuration = it }, label = { Text("课间时长(分钟)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+            Text(stringResource(R.string.title_batch_generate), style = MaterialTheme.typography.titleLarge)
+            OutlinedTextField(value = startTime, onValueChange = { startTime = it }, label = { Text(stringResource(R.string.label_first_slot_start_time)) }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = sectionCount, onValueChange = { sectionCount = it }, label = { Text(stringResource(R.string.label_slot_count)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = localClassDuration, onValueChange = { localClassDuration = it }, label = { Text(stringResource(R.string.label_single_slot_duration)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = localBreakDuration, onValueChange = { localBreakDuration = it }, label = { Text(stringResource(R.string.label_break_duration)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
 
             Button(onClick = {
                 val count = sectionCount.toIntOrNull()
@@ -387,12 +387,12 @@ private fun BatchGeneratorSheet(
                 val brk = localBreakDuration.toIntOrNull()
                 val isTimeOk = runCatching { LocalTime.parse(startTime, DateTimeFormatter.ofPattern("HH:mm")) }.isSuccess
                 if (count == null || cls == null || brk == null || !isTimeOk) {
-                    Toast.makeText(context, "请检查输入格式", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.toast_invalid_input_format), Toast.LENGTH_SHORT).show()
                 } else {
                     onConfirm(startTime, count, cls, brk)
                 }
             }, modifier = Modifier.fillMaxWidth()) {
-                Text("生成并覆盖")
+                Text(stringResource(R.string.action_generate_and_overwrite))
             }
             Spacer(modifier = Modifier.height(8.dp))
         }

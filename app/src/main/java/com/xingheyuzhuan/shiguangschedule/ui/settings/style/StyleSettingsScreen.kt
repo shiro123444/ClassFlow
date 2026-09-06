@@ -41,6 +41,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -255,7 +257,16 @@ private fun SettingsListContent(
                         selected = currentStyle.glassPreset == preset,
                         onClick = { viewModel.applyGlassPreset(preset) },
                         shape = SegmentedButtonDefaults.itemShape(index, 4)
-                    ) { Text(label) }
+                    ) {
+                        Text(
+                            text = label,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontSize = 12.sp
+                        )
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -337,7 +348,16 @@ private fun BorderTypeSelector(
                 selected = currentType == type,
                 onClick = { onTypeChange(type) },
                 shape = SegmentedButtonDefaults.itemShape(index, types.size)
-            ) { Text(label) }
+            ) {
+                Text(
+                    text = label,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontSize = 12.sp
+                )
+            }
         }
     }
 }
@@ -440,7 +460,13 @@ internal fun ScheduleGridContent(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(ThemeGradients.weeklyScheduleGradient())
+                .then(
+                    if (drawBackground) {
+                        Modifier.background(ThemeGradients.weeklyScheduleGradient())
+                    } else {
+                        Modifier
+                    }
+                )
                 .hazeSource(previewHaze)
         ) {
             if (drawBackground && style.backgroundImagePath.isNotEmpty()) {

@@ -97,6 +97,52 @@ fun QuickActionsScreen(
                     }
                 }
             }
+
+            item {
+                // 校园服务分类卡片
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.section_campus_service),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        QuickActionItem(
+                            title = stringResource(R.string.item_grade_query),
+                            subtitle = stringResource(R.string.desc_quick_grade_query),
+                            onClick = { navBridge.navigate(Destination.GradeQuery) }
+                        )
+
+                        QuickActionItem(
+                            title = stringResource(R.string.item_free_classroom_query),
+                            subtitle = stringResource(R.string.desc_free_classroom_query),
+                            onClick = { navBridge.navigate(Destination.FreeClassroomQuery) }
+                        )
+
+                        QuickActionItem(
+                            title = stringResource(R.string.item_academic_progress),
+                            subtitle = stringResource(R.string.desc_academic_progress),
+                            onClick = { navBridge.navigate(Destination.AcademicProgress) }
+                        )
+
+                        QuickActionItem(
+                            title = stringResource(R.string.item_library_borrow),
+                            subtitle = stringResource(R.string.desc_library_borrow),
+                            onClick = { navBridge.navigate(Destination.LibraryBorrow) }
+                        )
+                    }
+                }
+            }
         }
     }
 }

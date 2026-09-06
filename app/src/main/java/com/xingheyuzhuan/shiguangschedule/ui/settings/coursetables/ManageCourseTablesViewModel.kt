@@ -8,6 +8,8 @@ import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTable
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWithWeeks
 import com.xingheyuzhuan.shiguangschedule.data.repository.AppSettingsRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.CourseTableRepository
+import com.xingheyuzhuan.shiguangschedule.data.repository.TimeSlotRepository
+import com.xingheyuzhuan.shiguangschedule.data.repository.normalizeImportedTimeSlots
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -22,7 +24,8 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class ManageCourseTablesViewModel @Inject constructor(
     private val appSettingsRepository: AppSettingsRepository,
-    private val courseTableRepository: CourseTableRepository
+    private val courseTableRepository: CourseTableRepository,
+    private val timeSlotRepository: TimeSlotRepository
 ) : ViewModel() {
 
     // 组合两个数据流，提供一个包含课表列表和当前选中ID的单一UI状态
@@ -98,6 +101,35 @@ class ManageCourseTablesViewModel @Inject constructor(
             semesterTotalWeeks = config.semesterTotalWeeks
         )
         appSettingsRepository.insertOrUpdateCourseConfig(updated)
+
+        if (!config.timeSlots.isNullOrEmpty()) {
+            val normalizedSlots = normalizeImportedTimeSlots(
+                timeSlots = config.timeSlots,
+                classDuration = 45,
+                breakDuration = 10,
+                tableId = targetTableId
+            )
+            if (normalizedSlots.isNotEmpty()) {
+                timeSlotRepository.replaceAllForCourseTable(targetTableId, normalizedSlots)
+            }
+        }
+    }
+
+    suspend fun updateTableMeta(
+        tableId: String,
+        name: String? = null,
+        studentId: String? = null,
+        semesterCode: String? = null,
+        isArchived: Boolean? = null
+    ) {
+        val table = courseTableRepository.getCourseTableById(tableId) ?: return
+        val updated = table.copy(
+            name = name ?: table.name,
+            studentId = studentId ?: table.studentId,
+            semesterCode = semesterCode ?: table.semesterCode,
+            isArchived = isArchived ?: table.isArchived
+        )
+        courseTableRepository.updateCourseTable(updated)
     }
 
     /**

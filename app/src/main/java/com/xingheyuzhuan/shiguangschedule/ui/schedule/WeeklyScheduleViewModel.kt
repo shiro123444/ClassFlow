@@ -752,7 +752,7 @@ class WeeklyScheduleViewModel @Inject constructor(
         }
     }
 
-    /** 写入学期配置（开学日期/总周数）；config 为 null 时跳过。 */
+    /** 写入学期配置（开学日期/总周数/作息时间）；config 为 null 时跳过。 */
     suspend fun applySemesterConfig(
         config: com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSemesterConfig?,
         targetTableId: String? = null
@@ -765,6 +765,18 @@ class WeeklyScheduleViewModel @Inject constructor(
             semesterTotalWeeks = config.semesterTotalWeeks
         )
         appSettingsRepository.insertOrUpdateCourseConfig(updated)
+
+        if (!config.timeSlots.isNullOrEmpty()) {
+            val normalizedSlots = normalizeImportedTimeSlots(
+                timeSlots = config.timeSlots,
+                classDuration = 45,
+                breakDuration = 10,
+                tableId = tableId
+            )
+            if (normalizedSlots.isNotEmpty()) {
+                timeSlotRepository.replaceAllForCourseTable(tableId, normalizedSlots)
+            }
+        }
     }
 }
 

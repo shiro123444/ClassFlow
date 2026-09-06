@@ -14,13 +14,28 @@ import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -32,6 +47,8 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.Button
@@ -42,9 +59,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -59,20 +78,26 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.xingheyuzhuan.shiguangschedule.Destination
 import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.BuildConfig
 import com.xingheyuzhuan.shiguangschedule.R
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.repository.AppSettingsRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.CourseConversionRepository
+import com.xingheyuzhuan.shiguangschedule.data.repository.CourseTableRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.TimeSlotRepository
 import com.xingheyuzhuan.shiguangschedule.ui.components.CourseTablePickerDialog
 import kotlinx.coroutines.Dispatchers
@@ -85,6 +110,8 @@ private const val WBU_HOST = "jwxt.wbu.edu.cn"
 private const val WBU_VPN_HOST = "jwxt-wbu-edu-cn-s.webvpn.wbu.edu.cn"
 private const val WBU_IDS_VPN_HOST = "ids-wbu-edu-cn.webvpn.wbu.edu.cn"
 private const val WBU_FALLBACK_ASSET_JS_PATH = "WBU/wbu_chaoxing.js"
+private const val WBU_CAMPUS_URL = "https://jwxt.wbu.edu.cn"
+private const val WBU_WEBVPN_URL = "https://webvpn.wbu.edu.cn/portal/?redirect_uri=http%3A%2F%2Fjwxt-wbu-edu-cn-s.webvpn.wbu.edu.cn%3A8118%2F#!/login"
 private val WBU_TIMETABLE_PATH_HINTS = listOf(
     "/xsd/pkgl/xskb",
     "/getcurrentpkzc",
@@ -100,6 +127,7 @@ fun WebViewScreen(
     initialUrl: String?,
     assetJsPath: String?,
     courseConversionRepository: CourseConversionRepository,
+    courseTableRepository: CourseTableRepository,
     timeSlotRepository: TimeSlotRepository,
     appSettingsRepository: AppSettingsRepository,
 ) {
@@ -125,8 +153,42 @@ fun WebViewScreen(
     val toastImportNotFoundFmt = stringResource(R.string.toast_import_script_not_found)
     val toastLoadImportFailedFmt = stringResource(R.string.toast_load_import_script_failed)
 
-    var currentUrl by remember { mutableStateOf(initialUrl ?: "about:blank") }
-    var inputUrl by remember { mutableStateOf(initialUrl ?: "https://") }
+    val isWbuFlow = remember {
+        assetJsPath == WBU_FALLBACK_ASSET_JS_PATH ||
+        assetJsPath?.contains("WBU", ignoreCase = true) == true ||
+        initialUrl?.contains("wbu.edu.cn", ignoreCase = true) == true
+    }
+
+    var currentUrl by remember { mutableStateOf(if (isWbuFlow) "about:blank" else (initialUrl ?: "about:blank")) }
+    var inputUrl by remember { mutableStateOf(if (isWbuFlow) "https://" else (initialUrl ?: "https://")) }
+    var isProbingCampus by remember { mutableStateOf(isWbuFlow) }
+    val defaultProbingText = stringResource(R.string.status_probing_campus_network)
+    var probeStatusText by remember { mutableStateOf(defaultProbingText) }
+    var probeInterrupted by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isWbuFlow) {
+        if (!isWbuFlow) return@LaunchedEffect
+        val onCampus = WbuNetworkProbe.refresh()
+        if (!probeInterrupted) {
+            if (onCampus) {
+                probeStatusText = context.getString(R.string.status_campus_detected_connecting)
+                kotlinx.coroutines.delay(400)
+                if (!probeInterrupted) {
+                    currentUrl = WBU_CAMPUS_URL
+                    inputUrl = WBU_CAMPUS_URL
+                    isProbingCampus = false
+                }
+            } else {
+                probeStatusText = context.getString(R.string.status_not_campus_routing_webvpn)
+                kotlinx.coroutines.delay(400)
+                if (!probeInterrupted) {
+                    currentUrl = WBU_WEBVPN_URL
+                    inputUrl = WBU_WEBVPN_URL
+                    isProbingCampus = false
+                }
+            }
+        }
+    }
     var loadingProgress by remember { mutableFloatStateOf(0f) }
     var pageTitle by remember {
         mutableStateOf(
@@ -205,6 +267,8 @@ fun WebViewScreen(
                 uiEventChannel = uiEventChannel,
                 courseConversionRepository = courseConversionRepository,
                 timeSlotRepository = timeSlotRepository,
+                courseTableRepository = courseTableRepository,
+                appSettingsRepository = appSettingsRepository,
                 onTaskCompleted = {
                     // 使用预取的字符串
                     Toast.makeText(context, toastImportFinished, Toast.LENGTH_LONG).show()
@@ -251,7 +315,7 @@ fun WebViewScreen(
                             engine.importCookiesFromWebView(CookieManager.getInstance())
                             vpnCookiesSaved = true
                             view?.post {
-                                Toast.makeText(context, "会话已保存，后续同步无需重新登录", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, context.getString(R.string.toast_session_saved_no_relogin), Toast.LENGTH_LONG).show()
                             }
                             Log.d("WebViewScreen", "cookies extracted and persisted for: $url")
                         }
@@ -298,7 +362,7 @@ fun WebViewScreen(
                 }
             }
 
-            loadUrl(initialUrl ?: "about:blank")
+            loadUrl(if (isWbuFlow) "about:blank" else (initialUrl ?: "about:blank"))
         }
     }
 
@@ -363,6 +427,20 @@ fun WebViewScreen(
             webView.loadUrl(urlToLoad)
         } else if (currentUrl == "about:blank") {
             webView.loadUrl("about:blank")
+        }
+    }
+
+    BackHandler {
+        if (isProbingCampus) {
+            navBridge.popBackStack()
+        } else if (isEditingUrl) {
+            isEditingUrl = false
+            inputUrl = webView.url ?: currentUrl
+            keyboardController?.hide()
+        } else if (webView.canGoBack()) {
+            webView.goBack()
+        } else {
+            navBridge.popBackStack()
         }
     }
 
@@ -600,6 +678,24 @@ fun WebViewScreen(
                 uiEvents = uiEventChannel.receiveAsFlow()
             )
 
+            if (isProbingCampus) {
+                CampusNetworkProbeOverlay(
+                    statusText = probeStatusText,
+                    onSelectCampus = {
+                        probeInterrupted = true
+                        currentUrl = WBU_CAMPUS_URL
+                        inputUrl = WBU_CAMPUS_URL
+                        isProbingCampus = false
+                    },
+                    onSelectVpn = {
+                        probeInterrupted = true
+                        currentUrl = WBU_WEBVPN_URL
+                        inputUrl = WBU_WEBVPN_URL
+                        isProbingCampus = false
+                    }
+                )
+            }
+
             if (showCourseTablePicker) {
                 CourseTablePickerDialog(
                     title = stringResource(R.string.dialog_title_select_table_for_import),
@@ -738,6 +834,14 @@ private fun maybeAutofillWbuCredentials(webView: WebView, url: String?) {
         val currentUrl = url ?: return
         val uri = runCatching { Uri.parse(currentUrl) }.getOrNull() ?: return
         val host = uri.host?.lowercase() ?: return
+        val path = uri.path?.lowercase().orEmpty()
+
+        // 仅在明确的登录页面执行自动填充，避免污染内页或其它功能页面
+        val isLoginPage = path.contains("login") ||
+                path.contains("/portal") ||
+                path.contains("/por/") ||
+                currentUrl.contains("loginType")
+        if (!isLoginPage) return
 
         val shouldTryAutofill = host == "webvpn.wbu.edu.cn" ||
                 host == WBU_IDS_VPN_HOST ||
@@ -747,8 +851,17 @@ private fun maybeAutofillWbuCredentials(webView: WebView, url: String?) {
         if (!shouldTryAutofill) return
 
         val credentials = WbuWebLoginAutofillStore.getActiveOrNull() ?: return
-        val studentId = jsQuote(credentials.studentId)
-        val password = jsQuote(credentials.password)
+        val rawStudentId = credentials.studentId.trim()
+        val rawPassword = credentials.password
+
+        // 仅在 studentId 格式合理时（非乱码/GUID/非法字符）才执行填充
+        if (rawStudentId.isBlank() || rawStudentId.contains("-") || rawStudentId.length > 20) {
+            WbuWebLoginAutofillStore.clear()
+            return
+        }
+
+        val studentId = jsQuote(rawStudentId)
+        val password = jsQuote(rawPassword)
 
         // Fill username/password inputs only; keep captcha/manual verification for user interaction.
         val js = """
@@ -790,7 +903,12 @@ private fun maybeAutofillWbuCredentials(webView: WebView, url: String?) {
                 })();
         """.trimIndent()
 
-        webView.evaluateJavascript(js, null)
+        webView.evaluateJavascript(js) { result ->
+            if (result == "true") {
+                // 填充成功后立即清空一次性凭证，防止在后续其它页面反复误注入
+                WbuWebLoginAutofillStore.clear()
+            }
+        }
 }
 
 private fun jsQuote(raw: String): String {
@@ -800,5 +918,227 @@ private fun jsQuote(raw: String): String {
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
         return "\"$escaped\""
+}
+
+@Composable
+private fun CampusNetworkProbeOverlay(
+    statusText: String,
+    onSelectCampus: () -> Unit,
+    onSelectVpn: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "campusProbe")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.75f,
+        targetValue = 1.35f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseScale"
+    )
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.12f,
+        targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
+
+    Surface(
+        modifier = modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // Animated Radar Pulse
+            Box(
+                modifier = Modifier.size(140.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                // Outer ring
+                Box(
+                    modifier = Modifier
+                        .size(130.dp)
+                        .graphicsLayer {
+                            scaleX = pulseScale
+                            scaleY = pulseScale
+                            alpha = pulseAlpha
+                        }
+                        .border(
+                            width = 2.dp,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                            shape = CircleShape
+                        )
+                        .background(
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                            shape = CircleShape
+                        )
+                )
+                // Inner ring
+                Box(
+                    modifier = Modifier
+                        .size(90.dp)
+                        .graphicsLayer {
+                            scaleX = pulseScale * 0.85f
+                            scaleY = pulseScale * 0.85f
+                            alpha = pulseAlpha * 0.8f
+                        }
+                        .background(
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                            shape = CircleShape
+                        )
+                )
+                // Center Core
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shadowElevation = 6.dp,
+                    modifier = Modifier.size(60.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Wifi,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(30.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            Text(
+                text = stringResource(R.string.title_campus_network_detect),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = statusText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 24.dp)
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .width(180.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(36.dp))
+
+            Text(
+                text = stringResource(R.string.hint_choose_access_method_direct),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // 校园网直连 Card
+            OutlinedCard(
+                onClick = onSelectCampus,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        modifier = Modifier.size(42.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Wifi,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.label_campus_direct_on_campus),
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = stringResource(R.string.desc_campus_direct_guide),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // WebVPN Card
+            OutlinedCard(
+                onClick = onSelectVpn,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
+                        modifier = Modifier.size(42.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.VpnKey,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.label_webvpn_off_campus),
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = stringResource(R.string.desc_webvpn_guide),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 

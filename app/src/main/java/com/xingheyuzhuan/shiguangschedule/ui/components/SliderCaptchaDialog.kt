@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.xingheyuzhuan.shiguangschedule.R
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.foundation.Image
@@ -51,7 +53,6 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaData
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaResult
 import kotlin.math.max
 import kotlin.math.roundToInt
-
 private fun decodeBase64Image(base64: String): ImageBitmap? {
     return runCatching {
         val cleaned = base64.substringAfter(',') // 兼容 data:image/png;base64, 前缀
@@ -59,7 +60,6 @@ private fun decodeBase64Image(base64: String): ImageBitmap? {
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
     }.getOrNull()
 }
-
 /**
  * 统一身份认证滑块验证码弹窗。
  * 展示大图与小拼块，用户拖拽对齐缺口后自动提交位移距离。
@@ -72,22 +72,20 @@ fun SliderCaptchaDialog(
 ) {
     val bigImage = remember(captcha.bigImageBase64) { decodeBase64Image(captcha.bigImageBase64) }
     val smallImage = remember(captcha.smallImageBase64) { decodeBase64Image(captcha.smallImageBase64) }
-
     AlertDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = true),
         title = {
-            Text("安全验证", style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.title_security_verification), style = MaterialTheme.typography.titleLarge)
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "拖动滑块至缺口位置完成验证",
+                    text = stringResource(R.string.desc_slider_captcha_guide),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-
                 if (bigImage != null && smallImage != null) {
                     SliderCaptchaArea(
                         captcha = captcha,
@@ -99,7 +97,7 @@ fun SliderCaptchaDialog(
                     )
                 } else {
                     Text(
-                        text = "验证码图片加载失败，请点击刷新重试",
+                        text = stringResource(R.string.err_captcha_load_failed),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -114,17 +112,16 @@ fun SliderCaptchaDialog(
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("换一张")
+                Text(stringResource(R.string.action_refresh_captcha))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("取消")
+                Text(stringResource(R.string.action_cancel))
             }
         }
     )
 }
-
 /**
  * 滑块交互区。
  * 参考官方 longbow.slidercaptcha 实现：
@@ -141,7 +138,6 @@ private fun SliderCaptchaArea(
 ) {
     var offsetX by remember(captcha.smallImageBase64) { mutableFloatStateOf(0f) }
     val density = LocalDensity.current
-
     Column(modifier = Modifier.fillMaxWidth()) {
         // 图片区：大图 + 拼块竖条
         BoxWithConstraints(
@@ -156,9 +152,7 @@ private fun SliderCaptchaArea(
             } else {
                 containerWidthPx
             }
-
             val pieceWidthPx = smallImage.width.toFloat() * (containerWidthPx / bigImage.width.toFloat())
-
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -170,11 +164,10 @@ private fun SliderCaptchaArea(
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.FillBounds
                 )
-
                 // 全高度竖条：纵向位置由图片自带，宽度按比例缩放，随 offsetX 同步移动
                 Image(
                     bitmap = smallImage,
-                    contentDescription = "滑块拼块",
+                    contentDescription = stringResource(R.string.a11y_captcha_slider_block),
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .offset { IntOffset(offsetX.roundToInt(), 0) }
@@ -186,9 +179,7 @@ private fun SliderCaptchaArea(
                 )
             }
         }
-
         Spacer(modifier = Modifier.height(10.dp))
-
         // 底部滑块轨道：Material3 Slider，样式对齐"个性化配置"中的拖动条（圆形 thumb + 圆形高条），整体加大。
         // 填充物自绘，右端与 thumb 左缘对齐（而非默认延伸到 thumb 中心），使 thumb 完全骑在填充物前方；
         // thumb 初始位置在填充物起点处（刚露出一小段填充），允许往回拖到最左。
@@ -204,19 +195,16 @@ private fun SliderCaptchaArea(
             val initialOffsetPx = if (maxDragPx > 0f) {
                 ((initialGapPx + thumbRadiusPx) / trackWidthPx * maxDragPx).coerceIn(0f, maxDragPx)
             } else 0f
-
             LaunchedEffect(captcha.smallImageBase64) {
                 offsetX = initialOffsetPx
             }
-
             // 提示文字（置于轨道之下，thumb 可覆盖其上）
             Text(
-                text = "向右滑动填充拼图",
+                text = stringResource(R.string.label_slide_to_verify),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 modifier = Modifier.align(Alignment.Center)
             )
-
             // 轨道：高条圆形底 + Material3 Slider（样式对齐"个性化配置"拖动条，整体加大）
             Box(
                 modifier = Modifier

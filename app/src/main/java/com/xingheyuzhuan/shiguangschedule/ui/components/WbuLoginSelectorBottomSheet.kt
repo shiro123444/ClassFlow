@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.xingheyuzhuan.shiguangschedule.R
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -24,7 +26,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WbuLoginSelectorBottomSheet(
@@ -56,12 +57,11 @@ fun WbuLoginSelectorBottomSheet(
                 .padding(horizontal = 24.dp, vertical = 16.dp)
         ) {
             Text(
-                text = "选择登录方式",
+                text = stringResource(R.string.title_select_login_method),
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(bottom = 24.dp)
             )
-
             // 校园网选项
             Surface(
                 onClick = onCampusNetworkSelected,
@@ -84,12 +84,12 @@ fun WbuLoginSelectorBottomSheet(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "校园网直连",
+                            text = stringResource(R.string.label_campus_network_direct),
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                         Text(
-                            text = "适用于在校园内连接校园网",
+                            text = stringResource(R.string.desc_campus_network_direct),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
                             modifier = Modifier.padding(top = 4.dp)
@@ -97,7 +97,6 @@ fun WbuLoginSelectorBottomSheet(
                     }
                 }
             }
-
             // VPN选项
             Surface(
                 onClick = onVpnSelected,
@@ -118,12 +117,12 @@ fun WbuLoginSelectorBottomSheet(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "WebVPN 访问",
+                            text = stringResource(R.string.label_webvpn_access),
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
                         Text(
-                            text = "适用于校外通过VPN访问",
+                            text = stringResource(R.string.desc_webvpn_access),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
                             modifier = Modifier.padding(top = 4.dp)
@@ -131,9 +130,7 @@ fun WbuLoginSelectorBottomSheet(
                     }
                 }
             }
-
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
-

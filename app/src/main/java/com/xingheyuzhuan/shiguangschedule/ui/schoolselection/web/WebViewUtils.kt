@@ -122,7 +122,17 @@ fun WebView.injectAllJavaScript(isDesktopMode: Boolean) {
                     window._androidPromiseRejectors[promiseId] = reject;
                     AndroidBridge.savePresetTimeSlots(timeSlotsJsonString, promiseId);
                 });
+            },
+            saveTableMeta: function(metaJsonString) {
+                return new Promise((resolve, reject) => {
+                    const promiseId = 'saveMeta_' + Date.now() + Math.random().toString(36).substring(2);
+                    window._androidPromiseResolvers[promiseId] = resolve;
+                    window._androidPromiseRejectors[promiseId] = reject;
+                    AndroidBridge.saveTableMeta(metaJsonString, promiseId);
+                });
             }
         };
+        window.shiguangBridgePromise = window.AndroidBridgePromise;
+        window.shiguangBridge = window.AndroidBridge;
     """, null)
 }
