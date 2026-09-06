@@ -48,8 +48,8 @@ git diff 3eb39c2 --stat -- app/src/main/java app/src/main/res | sort -t'|' -k2 -
 ### 3. 宿主与导航
 | 文件 | 差异内容 |
 |---|---|
-| `MainActivity.kt` | 悬浮课程时隐藏 Dock（`isFloatingCourseMode`）、onboarding 引导、背景壁纸容器 |
-| `Navigation.kt` | 仅 `WallpaperAdjust` 目的地（~8 行） |
+| `MainActivity.kt` | 悬浮课程时隐藏 Dock（`isFloatingCourseMode`）、onboarding 引导、背景壁纸容器、校园服务路由（成绩/空教室/学业进程） |
+| `Navigation.kt` | `WallpaperAdjust`、`GradeQuery`、`FreeClassroomQuery`、`AcademicProgress` 目的地 |
 | `ui/components/NavigationComponents.kt` | 液态玻璃 Dock（`BottomNavigationBar`）+ `DockSafeBottomPadding` |
 
 ### 4. 数据层（Room/proto 无法拆文件，追加字段）
@@ -60,8 +60,8 @@ git diff 3eb39c2 --stat -- app/src/main/java app/src/main/res | sort -t'|' -k2 -
 | `app/src/main/proto/schedule_style.proto` | ClassFlow 自有字段段（编号 ≥100，与上游区隔） |
 | `data/repository/StyleSettingsRepository.kt` | ClassFlow 字段 setter |
 
-### 5. WBU 教务同步（独有子系统，上游无此文件）
-`data/network/wbu/`、`ui/components/WbuAuthBottomSheet.kt`、`WbuLoginSelectorBottomSheet.kt`、`ui/schedule/components/WbuSyncComponents.kt`、`ui/schoolselection/web/`（WebView 注入）、`WbuWebLoginAutofillStore.kt` 等——**上游不存在，merge 零冲突**
+### 5. WBU 教务同步与校园服务（独有子系统，上游无此文件）
+`data/network/wbu/`、`data/model/wbu/`、`ui/campus/`（成绩查询、空教室查询、学业完成度与课程进程）、`ui/components/WbuAuthBottomSheet.kt`、`WbuLoginSelectorBottomSheet.kt`、`ui/schedule/components/WbuSyncComponents.kt`、`ui/schoolselection/web/`（WebView 注入）、`WbuWebLoginAutofillStore.kt` 等——**上游不存在，merge 零冲突**
 
 ### 6. 其他独有/定制
 - `ui/theme/ThemeClassFlow.kt`（Sakura/Afternoon/Evening 色板 + ClassFlowTheme）

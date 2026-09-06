@@ -127,6 +127,9 @@ import com.xingheyuzhuan.shiguangschedule.ui.components.isOnboardingCompleted
 import com.xingheyuzhuan.shiguangschedule.ui.components.markOnboardingCompleted
 import com.xingheyuzhuan.shiguangschedule.ui.schedule.WeeklyScheduleScreen
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.list.AdapterSelectionScreen
+import com.xingheyuzhuan.shiguangschedule.ui.campus.academic.AcademicProgressScreen
+import com.xingheyuzhuan.shiguangschedule.ui.campus.classroom.FreeClassroomScreen
+import com.xingheyuzhuan.shiguangschedule.ui.campus.grade.GradeQueryScreen
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.list.SchoolSelectionListScreen
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.web.WebViewScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.SettingsScreen
@@ -602,6 +605,10 @@ fun AppNavigation(
                             Destination.StyleSettings -> StyleSettingsScreen(navBridge = navBridge)
                             Destination.WallpaperAdjust -> WallpaperAdjustScreen(onBack = navBridge::popBackStack)
                             Destination.QuickDelete -> QuickDeleteScreen(navBridge = navBridge)
+                            Destination.GradeQuery -> GradeQueryScreen(navBridge = navBridge)
+                            Destination.FreeClassroomQuery -> FreeClassroomScreen(navBridge = navBridge)
+                            Destination.AcademicProgress -> AcademicProgressScreen(navBridge = navBridge)
+                            Destination.LibraryBorrow -> com.xingheyuzhuan.shiguangschedule.ui.campus.library.LibraryScreen(navBridge = navBridge)
                             Destination.UpdateRepo -> UpdateRepoScreen(navBridge = navBridge)
                             Destination.NotificationSettings -> NotificationSettingsScreen(onBack = navBridge::popBackStack)
                             Destination.ThemeSettings -> ThemeSettingsScreen(onBack = navBridge::popBackStack)

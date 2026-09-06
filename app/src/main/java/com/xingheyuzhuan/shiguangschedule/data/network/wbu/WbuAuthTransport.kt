@@ -62,11 +62,16 @@ internal class WbuAuthTransport(
     private val cookieJar = object : CookieJar {
         override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
             cookies.forEach { cookie ->
+                // 特殊保全：若为教务核心会话凭证 jw_uf，确保 path 覆盖所有 /admin 子接口
+                val normalizedCookie = if (cookie.name == "jw_uf" && cookie.path.length > 6 && cookie.path.startsWith("/admin")) {
+                    cookie.newBuilder().path("/admin").build()
+                } else cookie
+
                 cookieStore.removeAll {
-                    it.name == cookie.name && it.domain == cookie.domain && it.path == cookie.path
+                    it.name == normalizedCookie.name && it.domain == normalizedCookie.domain && (it.path == normalizedCookie.path || (normalizedCookie.name == "jw_uf" && it.path.startsWith("/admin")))
                 }
-                if (!cookie.expiresAt.let { expiresAt -> expiresAt <= System.currentTimeMillis() }) {
-                    cookieStore.add(cookie)
+                if (!normalizedCookie.expiresAt.let { expiresAt -> expiresAt <= System.currentTimeMillis() }) {
+                    cookieStore.add(normalizedCookie)
                 }
             }
             persistCookieStore()
@@ -76,7 +81,15 @@ internal class WbuAuthTransport(
             val now = System.currentTimeMillis()
             val validCookies = cookieStore.filter { it.expiresAt > now }
             cookieStore.removeAll { it.expiresAt <= now }
-            return validCookies.filter { it.matches(url) }
+
+            return validCookies.filter { cookie ->
+                if (cookie.name == "TWFID") {
+                    // TWFID 是 WebVPN 网关门禁通行证，只要是 webvpn 域或其代理子域均全域匹配放行
+                    url.host == "webvpn.wbu.edu.cn" || url.host.endsWith(".webvpn.wbu.edu.cn")
+                } else {
+                    cookie.matches(url)
+                }
+            }
         }
     }
 
@@ -111,7 +124,8 @@ internal class WbuAuthTransport(
                     .header("User-Agent", authUserAgent())
                     .header("Accept-Language", authAcceptLanguage)
                     .build()
-                Log.d("WbuSyncEngine", "REQ ${req.method} ${req.url}")
+                val matched = cookieStore.filter { it.matches(req.url) }.map { it.name }
+                Log.d("WbuSyncEngine", "REQ ${req.method} ${req.url} [Cookies: $matched]")
                 chain.proceed(req)
             }
 
@@ -233,6 +247,13 @@ internal class WbuAuthTransport(
 
     /** 教务(jwxt)代理宿主基址：scheme/端口跟随 WebVPN 设置。供 CAS 回跳重写使用。 */
     fun jwxtProxyBase(): String = "${webVpnScheme()}://jwxt-wbu-edu-cn-s.webvpn.wbu.edu.cn${webVpnPort()}"
+
+    /** 图书馆(opac)基址：WebVPN 模式下走代理子域，校内直连走公网 */
+    fun opacBase(): String = if (useVpn) {
+        "${webVpnScheme()}://opac-wbu-edu-cn-s.webvpn.wbu.edu.cn${webVpnPort()}"
+    } else {
+        "https://opac.wbu.edu.cn"
+    }
 
     private fun idsProxyBase(): String = "${webVpnScheme()}://ids-wbu-edu-cn.webvpn.wbu.edu.cn${webVpnPort()}"
 
@@ -367,8 +388,13 @@ internal class WbuAuthTransport(
 
     // ------------------- Cookie 持久化 / 导入 -------------------
 
-    fun isWebVpnCookie(cookie: Cookie): Boolean =
-        cookie.domain == "webvpn.wbu.edu.cn" || cookie.domain.endsWith(".webvpn.wbu.edu.cn")
+    fun isWebVpnCookie(cookie: Cookie): Boolean {
+        // jw_uf 是教务系统的身份凭证，TWFID 是 WebVPN 网关门禁通行凭证，
+        // CASTGC 是统一认证凭证，PHPSESSID 是图书馆等系统的核心会话凭证，
+        // 即便在 WebVPN 镜像域名下也必须允许持久化，以便冷启动/跨组件调用时恢复网络通道
+        if (cookie.name == "jw_uf" || cookie.name == "TWFID" || cookie.name == "CASTGC" || cookie.name == "PHPSESSID") return false
+        return cookie.domain == "webvpn.wbu.edu.cn" || cookie.domain.endsWith(".webvpn.wbu.edu.cn")
+    }
 
     fun persistCookieStore() {
         val array = JSONArray()
@@ -417,9 +443,9 @@ internal class WbuAuthTransport(
                     builder.domain(domain)
                 }
 
-                if (obj.optBoolean("persistent", false)) {
-                    val expiresAt = obj.optLong("expiresAt", 0L)
-                    if (expiresAt > System.currentTimeMillis()) builder.expiresAt(expiresAt)
+                val expiresAt = obj.optLong("expiresAt", 0L)
+                if (expiresAt > System.currentTimeMillis()) {
+                    builder.expiresAt(expiresAt)
                 }
                 if (obj.optBoolean("secure", false)) builder.secure()
                 if (obj.optBoolean("httpOnly", false)) builder.httpOnly()
@@ -572,6 +598,30 @@ internal class WbuAuthTransport(
         private const val KEY_USE_FIXED_SERVICE_FOR_TICKET = "use_fixed_service_for_ticket"
         const val IDS_PERSON_CENTER_SERVICE = "http://ids.wbu.edu.cn/personalInfo/personCenter/index.html"
         const val MAX_CAPTCHA_ATTEMPTS = 5
+
+        @Volatile
+        private var sharedDirectTransport: WbuAuthTransport? = null
+        @Volatile
+        private var sharedVpnTransport: WbuAuthTransport? = null
+
+        fun getShared(context: Context, useVpn: Boolean): WbuAuthTransport {
+            val appCtx = context.applicationContext ?: context
+            return if (useVpn) {
+                sharedVpnTransport ?: synchronized(this) {
+                    sharedVpnTransport ?: WbuAuthTransport(appCtx, true).also {
+                        it.restoreCookieStore()
+                        sharedVpnTransport = it
+                    }
+                }
+            } else {
+                sharedDirectTransport ?: synchronized(this) {
+                    sharedDirectTransport ?: WbuAuthTransport(appCtx, false).also {
+                        it.restoreCookieStore()
+                        sharedDirectTransport = it
+                    }
+                }
+            }
+        }
 
         fun prefKeyLastStudentId(): String = KEY_LAST_STUDENT_ID
 

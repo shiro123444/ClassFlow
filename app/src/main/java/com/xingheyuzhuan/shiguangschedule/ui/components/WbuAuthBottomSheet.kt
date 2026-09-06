@@ -152,7 +152,11 @@ fun WbuAuthBottomSheet(
     errorMessage: String = "",
     initialStudentId: String = "",
     initialUseVpn: Boolean = false,
-    hideSelectSemesterSwitch: Boolean = false
+    hideSelectSemesterSwitch: Boolean = false,
+    hideImportPreferences: Boolean = false,
+    primaryButtonText: String? = null,
+    loadingButtonText: String? = null,
+    customLoadingTips: List<String>? = null
 ) {
     val isDark = LocalIsDarkTheme.current
     val context = LocalContext.current
@@ -193,8 +197,8 @@ fun WbuAuthBottomSheet(
     val tip1 = stringResource(R.string.tip_syncing_hello_jwxt)
     val tip2 = stringResource(R.string.tip_syncing_fairy_moving)
     val tip3 = stringResource(R.string.tip_syncing_finishing_up)
-    val loadingTips = remember(tip1, tip2, tip3) {
-        listOf(tip1, tip2, tip3)
+    val loadingTips = remember(tip1, tip2, tip3, customLoadingTips) {
+        if (!customLoadingTips.isNullOrEmpty()) customLoadingTips else listOf(tip1, tip2, tip3)
     }
     var loadingTipIndex by remember { mutableIntStateOf(0) }
     LaunchedEffect(isLoading) {
@@ -503,7 +507,7 @@ fun WbuAuthBottomSheet(
                 WbuLoginMethod.PASSWORD -> {
                     val canSubmit = studentId.isNotBlank() && (password.isNotBlank() || hasSavedPassword)
                     Triple(
-                        stringResource(R.string.action_one_tap_sync),
+                        primaryButtonText ?: stringResource(R.string.action_one_tap_sync),
                         canSubmit,
                         {
                             val effectivePassword = if (hasSavedPassword && !isPasswordModified) {
@@ -525,7 +529,7 @@ fun WbuAuthBottomSheet(
                         }
                     )
                 }
-                WbuLoginMethod.DYNAMIC_CODE -> Triple(stringResource(R.string.action_login), studentId.isNotBlank() && dynamicCode.length == 6, { onDynamicCodeLogin(studentId, dynamicCode, useVpn) })
+                WbuLoginMethod.DYNAMIC_CODE -> Triple(primaryButtonText ?: stringResource(R.string.action_login), studentId.isNotBlank() && dynamicCode.length == 6, { onDynamicCodeLogin(studentId, dynamicCode, useVpn) })
                 WbuLoginMethod.QR -> {
                     val phase = qrState?.phase ?: QrPhase.PLACEHOLDER
                     val busy = phase == QrPhase.GENERATING || phase == QrPhase.SCANNED || phase == QrPhase.CONFIRMING
@@ -556,7 +560,7 @@ fun WbuAuthBottomSheet(
                         strokeWidth = 2.dp
                     )
                     Spacer(modifier = Modifier.padding(horizontal = 8.dp))
-                    Text(stringResource(R.string.status_fetching_schedule), style = MaterialTheme.typography.titleMedium)
+                    Text(loadingButtonText ?: stringResource(R.string.status_fetching_schedule), style = MaterialTheme.typography.titleMedium)
                 } else {
                     Text(label, style = MaterialTheme.typography.titleMedium)
                 }
@@ -653,38 +657,40 @@ fun WbuAuthBottomSheet(
                     MethodRow(stringResource(R.string.method_password), WbuLoginMethod.PASSWORD, method, onMethodChange)
                     MethodRow(stringResource(R.string.method_qr), WbuLoginMethod.QR, method, onMethodChange)
                     MethodRow(stringResource(R.string.method_otp), WbuLoginMethod.DYNAMIC_CODE, method, onMethodChange)
-                    Text(
-                        text = stringResource(R.string.category_import_preferences),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    if (!hideSelectSemesterSwitch) {
+                    if (!hideImportPreferences) {
+                        Text(
+                            text = stringResource(R.string.category_import_preferences),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        if (!hideSelectSemesterSwitch) {
+                            ToggleRow(
+                                label = stringResource(R.string.title_select_import_semester),
+                                checked = selectSemesterOnImport,
+                                onCheckedChange = {
+                                    selectSemesterOnImport = it
+                                    WbuSyncEngine.setSelectSemesterOnImport(context, it)
+                                }
+                            )
+                        }
                         ToggleRow(
-                            label = stringResource(R.string.title_select_import_semester),
-                            checked = selectSemesterOnImport,
+                            label = stringResource(R.string.pref_keep_teacher_id),
+                            checked = keepTeacherId,
                             onCheckedChange = {
-                                selectSemesterOnImport = it
-                                WbuSyncEngine.setSelectSemesterOnImport(context, it)
+                                keepTeacherId = it
+                                WbuSyncEngine.setKeepTeacherId(context, it)
+                            }
+                        )
+                        ToggleRow(
+                            label = stringResource(R.string.pref_keep_building_name),
+                            checked = keepBuilding,
+                            onCheckedChange = {
+                                keepBuilding = it
+                                WbuSyncEngine.setKeepBuilding(context, it)
                             }
                         )
                     }
-                    ToggleRow(
-                        label = stringResource(R.string.pref_keep_teacher_id),
-                        checked = keepTeacherId,
-                        onCheckedChange = {
-                            keepTeacherId = it
-                            WbuSyncEngine.setKeepTeacherId(context, it)
-                        }
-                    )
-                    ToggleRow(
-                        label = stringResource(R.string.pref_keep_building_name),
-                        checked = keepBuilding,
-                        onCheckedChange = {
-                            keepBuilding = it
-                            WbuSyncEngine.setKeepBuilding(context, it)
-                        }
-                    )
                     Text(
                         text = stringResource(R.string.category_network_settings),
                         style = MaterialTheme.typography.labelMedium,

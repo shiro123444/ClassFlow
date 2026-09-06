@@ -97,10 +97,14 @@ fun SettingsScreen(
 
     LaunchedEffect(forceScrollToManageTables) {
         if (forceScrollToManageTables) {
-            // LazyColumn 中 index=0 是 Header，index=1 是通用设置，index=2 是高级功能。
-            // 直接将高级功能卡片顶部平滑推到屏幕顶部，管理课表就会居中在屏幕中上方偏下位置
+            // LazyColumn 中:
+            // index=0 是 Header
+            // index=1 是通用设置
+            // index=2 是校园服务（包含成绩、空教室、学业进程、图书馆借阅）
+            // index=3 是高级功能（包含第 4 步引导目标“管理课表”）
+            // 校园服务新增项目后卡片高度增加，将滚动偏移量加大，确保完整露出“管理课表”并避开底部遮挡
             kotlinx.coroutines.delay(100)
-            settingsListState.animateScrollToItem(index = 2, scrollOffset = 0)
+            settingsListState.animateScrollToItem(index = 3, scrollOffset = 640)
         }
     }
 
@@ -214,6 +218,38 @@ fun SettingsScreen(
                         title = stringResource(R.string.item_quick_actions),
                         subtitle = stringResource(R.string.desc_quick_actions),
                         onClick = { navBridge.navigate(Destination.QuickActions) }
+                    )
+                }
+            }
+
+            item {
+                SettingsCard(title = stringResource(R.string.section_campus_service)) {
+                    SettingTile(
+                        icon = Icons.Rounded.Assessment,
+                        title = stringResource(R.string.item_grade_query),
+                        subtitle = stringResource(R.string.desc_grade_query),
+                        onClick = { navBridge.navigate(Destination.GradeQuery) }
+                    )
+                    SettingDivider()
+                    SettingTile(
+                        icon = Icons.Rounded.MeetingRoom,
+                        title = stringResource(R.string.item_free_classroom_query),
+                        subtitle = stringResource(R.string.desc_free_classroom_query),
+                        onClick = { navBridge.navigate(Destination.FreeClassroomQuery) }
+                    )
+                    SettingDivider()
+                    SettingTile(
+                        icon = Icons.Rounded.School,
+                        title = stringResource(R.string.item_academic_progress),
+                        subtitle = stringResource(R.string.desc_academic_progress),
+                        onClick = { navBridge.navigate(Destination.AcademicProgress) }
+                    )
+                    SettingDivider()
+                    SettingTile(
+                        icon = androidx.compose.material.icons.Icons.Rounded.AutoStories,
+                        title = stringResource(R.string.item_library_borrow),
+                        subtitle = stringResource(R.string.desc_library_borrow),
+                        onClick = { navBridge.navigate(Destination.LibraryBorrow) }
                     )
                 }
             }

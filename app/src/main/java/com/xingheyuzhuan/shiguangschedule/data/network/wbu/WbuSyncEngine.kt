@@ -146,7 +146,7 @@ class WbuSyncEngine(
     private val context: Context,
     val useVpn: Boolean = false,
 ) {
-    private val transport = WbuAuthTransport(context, useVpn)
+    internal val transport: WbuAuthTransport = WbuAuthTransport.getShared(context, useVpn)
     private val portal = WebVpnClient(transport)
     private val cas = IdsCasClient(transport)
 
@@ -680,7 +680,7 @@ class WbuSyncEngine(
 
     // ------------------- 教务登录：经 VPN + CAS -------------------
 
-    private suspend fun loginViaVpnCas(
+    suspend fun loginViaVpnCas(
         studentId: String,
         password: String,
         captchaProvider: SliderCaptchaProvider? = null,
