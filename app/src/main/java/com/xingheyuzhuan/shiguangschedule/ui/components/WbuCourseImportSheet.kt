@@ -164,10 +164,26 @@ fun WbuCourseImportSheet(
         val cfg = engine.fetchSemesterConfig(xnxq = chosenSemester, xqdm = engine.lastResolvedXqdm)
         viewModel.applySemesterConfig(cfg, newTable.id)
 
+        val effectiveSid = engine.lastResolvedStudentId?.takeIf { it.isNotBlank() } ?: sid
+        val finalTableName = if (newTableName == "我的课表" && chosenSemester.isNotBlank() && effectiveSid.isNotBlank()) {
+            WbuSyncEngine.computeNonConflictingTableName(chosenSemester, effectiveSid, uiState.courseTables)
+        } else {
+            newTableName
+        }
+        viewModel.updateTableMeta(
+            tableId = newTable.id,
+            name = finalTableName,
+            studentId = effectiveSid.takeIf { it.isNotBlank() },
+            semesterCode = chosenSemester.takeIf { it.isNotBlank() }
+        )
+        if (effectiveSid.isNotBlank()) {
+            WbuSyncEngine.setSavedStudentId(context, effectiveSid)
+        }
+
         isImporting = false
         importStatusMessage = ""
-        Toast.makeText(context, "课表【$newTableName】导入成功！", Toast.LENGTH_LONG).show()
-        onImportSuccess?.invoke(newTableName)
+        Toast.makeText(context, "课表【$finalTableName】导入成功！", Toast.LENGTH_LONG).show()
+        onImportSuccess?.invoke(finalTableName)
         onDismissRequest()
         return true
     }

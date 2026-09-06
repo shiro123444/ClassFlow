@@ -136,7 +136,10 @@ class CourseConversionRepository @Inject constructor(
         val usageCounter = mutableMapOf<Int, Int>()
 
         courseDao.deleteCoursesByTableId(tableId)
-        timeSlotDao.deleteAllTimeSlotsByCourseTableId(tableId)
+        val shouldUpdateSlots = !courseTableJsonModel.timeSlots.isNullOrEmpty()
+        if (shouldUpdateSlots) {
+            timeSlotDao.deleteAllTimeSlotsByCourseTableId(tableId)
+        }
 
         val courseEntities = ArrayList<Course>(courseTableJsonModel.courses.size)
         val courseWeekEntities = mutableListOf<CourseWeek>()
@@ -202,7 +205,7 @@ class CourseConversionRepository @Inject constructor(
 
         if (courseEntities.isNotEmpty()) courseDao.insertAll(courseEntities)
         if (courseWeekEntities.isNotEmpty()) courseWeekDao.insertAll(courseWeekEntities)
-        if (normalizedTimeSlots.isNotEmpty()) timeSlotDao.insertAll(normalizedTimeSlots)
+        if (shouldUpdateSlots && normalizedTimeSlots.isNotEmpty()) timeSlotDao.insertAll(normalizedTimeSlots)
 
         // 配置导入逻辑保持不变...
         val configJson = courseTableJsonModel.config

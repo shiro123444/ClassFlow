@@ -6,6 +6,7 @@ import android.util.Log
 import com.xingheyuzhuan.shiguangschedule.data.db.main.Course
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWithWeeks
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWeek
+import com.xingheyuzhuan.shiguangschedule.data.db.main.TimeSlot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
@@ -77,7 +78,8 @@ enum class QrStatus {
  */
 data class WbuSemesterConfig(
     val semesterStartDate: String?,
-    val semesterTotalWeeks: Int
+    val semesterTotalWeeks: Int,
+    val timeSlots: List<TimeSlot>? = null
 )
 
 /**
@@ -1082,12 +1084,46 @@ class WbuSyncEngine(
                 }
                 if (items.isEmpty()) return@withContext null
                 val sorted = items.sortedBy { it.first }
+
+                val jcsjszList = data.optJSONArray("jcsjszList")
+                val parsedSlots = mutableListOf<TimeSlot>()
+                if (jcsjszList != null) {
+                    for (i in 0 until jcsjszList.length()) {
+                        val j = jcsjszList.optJSONObject(i) ?: continue
+                        val jc = j.optInt("jc", -1).takeIf { it > 0 }
+                            ?: j.optString("jc", "").toIntOrNull()
+                            ?: continue
+                        val kssj = padTime(j.optString("kssj", ""))
+                        val jssj = padTime(j.optString("jssj", ""))
+                        if (kssj.isNotBlank() && jssj.isNotBlank()) {
+                            parsedSlots.add(
+                                TimeSlot(
+                                    number = jc,
+                                    startTime = kssj,
+                                    endTime = jssj,
+                                    courseTableId = ""
+                                )
+                            )
+                        }
+                    }
+                }
+                val timeSlots = parsedSlots.sortedBy { it.number }.takeIf { it.isNotEmpty() }
+
                 WbuSemesterConfig(
                     semesterStartDate = sorted.first().second.take(10),
-                    semesterTotalWeeks = sorted.maxOf { it.first }
+                    semesterTotalWeeks = sorted.maxOf { it.first },
+                    timeSlots = timeSlots
                 )
             }.getOrNull()
         }
+
+    private fun padTime(timeStr: String): String {
+        val trimmed = timeStr.trim()
+        val match = Regex("""^(\d{1,2}):(\d{1,2})""").find(trimmed) ?: return trimmed
+        val hour = match.groupValues[1].toIntOrNull() ?: return trimmed
+        val min = match.groupValues[2].toIntOrNull() ?: return trimmed
+        return "%02d:%02d".format(java.util.Locale.ROOT, hour, min)
+    }
 
     // ------------------- 教务登录后的学号解析 -------------------
 
