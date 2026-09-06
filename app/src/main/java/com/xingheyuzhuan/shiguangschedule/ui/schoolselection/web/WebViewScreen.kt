@@ -162,7 +162,8 @@ fun WebViewScreen(
     var currentUrl by remember { mutableStateOf(if (isWbuFlow) "about:blank" else (initialUrl ?: "about:blank")) }
     var inputUrl by remember { mutableStateOf(if (isWbuFlow) "https://" else (initialUrl ?: "https://")) }
     var isProbingCampus by remember { mutableStateOf(isWbuFlow) }
-    var probeStatusText by remember { mutableStateOf("正在探测校园网络环境...") }
+    val defaultProbingText = stringResource(R.string.status_probing_campus_network)
+    var probeStatusText by remember { mutableStateOf(defaultProbingText) }
     var probeInterrupted by remember { mutableStateOf(false) }
 
     LaunchedEffect(isWbuFlow) {
@@ -170,7 +171,7 @@ fun WebViewScreen(
         val onCampus = WbuNetworkProbe.refresh()
         if (!probeInterrupted) {
             if (onCampus) {
-                probeStatusText = "已检测到校园网，正在直连教务系统..."
+                probeStatusText = context.getString(R.string.status_campus_detected_connecting)
                 kotlinx.coroutines.delay(400)
                 if (!probeInterrupted) {
                     currentUrl = WBU_CAMPUS_URL
@@ -178,7 +179,7 @@ fun WebViewScreen(
                     isProbingCampus = false
                 }
             } else {
-                probeStatusText = "未处于校园网，正在通过 WebVPN 接入..."
+                probeStatusText = context.getString(R.string.status_not_campus_routing_webvpn)
                 kotlinx.coroutines.delay(400)
                 if (!probeInterrupted) {
                     currentUrl = WBU_WEBVPN_URL
@@ -314,7 +315,7 @@ fun WebViewScreen(
                             engine.importCookiesFromWebView(CookieManager.getInstance())
                             vpnCookiesSaved = true
                             view?.post {
-                                Toast.makeText(context, "会话已保存，后续同步无需重新登录", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, context.getString(R.string.toast_session_saved_no_relogin), Toast.LENGTH_LONG).show()
                             }
                             Log.d("WebViewScreen", "cookies extracted and persisted for: $url")
                         }
@@ -1016,7 +1017,7 @@ private fun CampusNetworkProbeOverlay(
             Spacer(modifier = Modifier.height(28.dp))
 
             Text(
-                text = "校园网环境检测",
+                text = stringResource(R.string.title_campus_network_detect),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -1045,7 +1046,7 @@ private fun CampusNetworkProbeOverlay(
             Spacer(modifier = Modifier.height(36.dp))
 
             Text(
-                text = "也可直接选择接入方式 (跳过检测)：",
+                text = stringResource(R.string.hint_choose_access_method_direct),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
             )
@@ -1081,12 +1082,12 @@ private fun CampusNetworkProbeOverlay(
                     Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "校园网直连 (校内)",
+                            text = stringResource(R.string.label_campus_direct_on_campus),
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "连接了学校 Wi-Fi 或有线网络",
+                            text = stringResource(R.string.desc_campus_direct_guide),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1125,12 +1126,12 @@ private fun CampusNetworkProbeOverlay(
                     Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "WebVPN 访问 (校外)",
+                            text = stringResource(R.string.label_webvpn_off_campus),
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "在校外使用手机流量或家庭宽带",
+                            text = stringResource(R.string.desc_webvpn_guide),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

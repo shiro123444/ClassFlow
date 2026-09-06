@@ -464,6 +464,7 @@ fun SettingTile(
     modifier: Modifier = Modifier,
     contentHighlightModifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    titleBadge: @Composable (() -> Unit)? = null,
     trailingContent: @Composable (() -> Unit)? = {
         val dark = LocalIsDarkTheme.current
         Box(
@@ -537,17 +538,35 @@ fun SettingTile(
             contentAlignment = Alignment.CenterStart
         ) {
             Column(modifier = contentHighlightModifier) {
-                Text(
-                    text = title,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                if (titleBadge != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = title,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        titleBadge()
+                    }
+                } else {
+                    Text(
+                        text = title,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
                 if (!subtitle.isNullOrEmpty()) {
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = subtitle,
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 16.sp
                     )
                 }
             }
