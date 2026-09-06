@@ -267,8 +267,12 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="channel_beta_desc">Early preview of upcoming features</string>
     <string name="channel_dev_title">Dev</string>
     <string name="channel_dev_desc">Cutting-edge features with highest update frequency</string>
-    <string name="title_wbu_sync_schedule">WBU One-Tap Sync</string>
-    <string name="desc_wbu_sync_schedule">Auto login, fetch schedule and overwrite current table (WebView)</string>
+    <string name="title_wbu_direct_import">WBU Direct Academic Import</string>
+    <string name="desc_wbu_direct_import">Direct API fast sync with semester selection and deduplication (Recommended)</string>
+    <string name="badge_recommended">Recommended</string>
+    <string name="badge_standby">Backup</string>
+    <string name="title_wbu_sync_schedule">WBU Web-based Import (WebView)</string>
+    <string name="desc_wbu_sync_schedule">Log in via built-in browser to scrape schedule when direct API is unavailable (Backup)</string>
     <string name="status_scan_qr_to_login">Scan QR to Log In</string>
     <string name="status_qr_fetching">Fetching QR code...</string>
     <string name="status_qr_fetch_failed">Failed to load QR code. Tap to retry.</string>

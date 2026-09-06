@@ -267,8 +267,12 @@
     <string name="channel_beta_desc">优先体验新功能，包含少量灰度特性</string>
     <string name="channel_dev_title">开发版 (dev)</string>
     <string name="channel_dev_desc">包含最新开发中的预览特性，更新频次最高</string>
-    <string name="title_wbu_sync_schedule">WBU教务一键同步</string>
-    <string name="desc_wbu_sync_schedule">自动登录后抓取课表并回写到当前课表 (WebView)</string>
+    <string name="title_wbu_direct_import">WBU 教务直连导入</string>
+    <string name="desc_wbu_direct_import">原生接口极速同步，支持学期选择与冲突合并（推荐）</string>
+    <string name="badge_recommended">推荐</string>
+    <string name="badge_standby">备用</string>
+    <string name="title_wbu_sync_schedule">WBU 网页仿真导入 (WebView)</string>
+    <string name="desc_wbu_sync_schedule">在内置浏览器中登录抓取课表，当直连接口受限时使用（备用）</string>
     <string name="status_scan_qr_to_login">请扫码登录</string>
     <string name="status_qr_fetching">正在获取二维码...</string>
     <string name="status_qr_fetch_failed">获取二维码失败，点二维码重试</string>

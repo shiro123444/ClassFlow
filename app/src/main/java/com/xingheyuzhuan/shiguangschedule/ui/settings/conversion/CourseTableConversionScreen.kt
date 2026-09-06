@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -51,6 +53,16 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.rounded.ArrowForwardIos
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.sp
+import com.xingheyuzhuan.shiguangschedule.ui.components.WbuCourseImportSheet
+import com.xingheyuzhuan.shiguangschedule.ui.theme.LocalIsDarkTheme
 import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.Destination
@@ -103,6 +115,9 @@ fun CourseTableConversionScreen(
 
     // Wakeup 导出后的动作选择弹窗状态（保存待处理的文件名）
     var showWakeupActionDialog by remember { mutableStateOf<String?>(null) }
+
+    // 直连导入课表 Sheet 状态
+    var showDirectImportSheet by remember { mutableStateOf(false) }
 
     // 文件导入启动器
     val importLauncher = rememberLauncherForActivityResult(OpenJsonDocumentContract()) { uri: Uri? ->
@@ -335,15 +350,96 @@ fun CourseTableConversionScreen(
                 )
             }
 
-            // 教务导入：仅保留 WBU 入口。
-            // 多校 SchoolSelection / 适配仓库 UpdateRepo 代码与路由仍保留（无 UI 入口），降低下次上游 merge 冲突面。
+            // 教务导入：支持原生极速直连（推荐）与 WebView 网页仿真（备用）。
             SettingsCard(title = stringResource(R.string.section_school_import)) {
+                val isDark = LocalIsDarkTheme.current
+                SettingTile(
+                    icon = Icons.Rounded.CloudDownload,
+                    title = stringResource(R.string.title_wbu_direct_import),
+                    subtitle = stringResource(R.string.desc_wbu_direct_import),
+                    onClick = { showDirectImportSheet = true },
+                    trailingContent = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.primaryContainer)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.badge_recommended),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = if (isDark) 0.18f else 0.4f))
+                                    .border(
+                                        width = 0.6.dp,
+                                        color = Color.White.copy(alpha = if (isDark) 0.18f else 0.45f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.ArrowForwardIos,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                )
+                            }
+                        }
+                    }
+                )
+                SettingDivider()
                 SettingTile(
                     icon = Icons.Rounded.School,
                     title = stringResource(R.string.title_wbu_sync_schedule),
                     subtitle = stringResource(R.string.desc_wbu_sync_schedule),
                     onClick = {
                         navBridge.navigate(Destination.WebView(initialUrl = "https://jwxt.wbu.edu.cn", assetJsPath = "WBU/wbu_chaoxing.js"))
+                    },
+                    trailingContent = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.badge_standby),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Normal,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = if (isDark) 0.18f else 0.4f))
+                                    .border(
+                                        width = 0.6.dp,
+                                        color = Color.White.copy(alpha = if (isDark) 0.18f else 0.45f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.ArrowForwardIos,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                )
+                            }
+                        }
                     }
                 )
             }
@@ -537,6 +633,12 @@ fun CourseTableConversionScreen(
                     Text(actionCancel)
                 }
             }
+        )
+    }
+
+    if (showDirectImportSheet) {
+        WbuCourseImportSheet(
+            onDismissRequest = { showDirectImportSheet = false }
         )
     }
 }

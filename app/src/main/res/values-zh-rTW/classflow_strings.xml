@@ -267,8 +267,12 @@
     <string name="channel_beta_desc">優先體驗新功能，包含少量灰度特性</string>
     <string name="channel_dev_title">開發版 (dev)</string>
     <string name="channel_dev_desc">包含最新開發中的預覽特性，更新頻率最高</string>
-    <string name="title_wbu_sync_schedule">WBU教務一鍵同步</string>
-    <string name="desc_wbu_sync_schedule">自動登入後抓取課表並回寫到當前課表 (WebView)</string>
+    <string name="title_wbu_direct_import">WBU 教務直連匯入</string>
+    <string name="desc_wbu_direct_import">原生介面極速同步，支援學期選擇與衝突合併（推薦）</string>
+    <string name="badge_recommended">推薦</string>
+    <string name="badge_standby">備用</string>
+    <string name="title_wbu_sync_schedule">WBU 網頁仿真匯入 (WebView)</string>
+    <string name="desc_wbu_sync_schedule">在內建瀏覽器中登入抓取課表，當直連介面受限時使用（備用）</string>
     <string name="status_scan_qr_to_login">請掃碼登入</string>
     <string name="status_qr_fetching">正在獲取二維碼...</string>
     <string name="status_qr_fetch_failed">獲取二維碼失敗，點二維碼重試</string>
