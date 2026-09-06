@@ -354,8 +354,8 @@ fun MoreOptionsScreen(
 
                 ListItem(
                     modifier = Modifier.clickable {
-                        val groupUin = "133364402"
-                        val groupKey = "bTUS3eDwhq"
+                        val groupUin = "1050669511"
+                        val webUrl = "https://qun.qq.com/universal-share/share?ac=1&authKey=RFtUQvg2d0iCUGzJW%2B5DOI8B74Xn%2FgY0cgk9U6mmMyeZ%2BpCzRQL0k3W5VEUjQI%2Br&busi_data=eyJncm91cENvZGUiOiIxMDUwNjY5NTExIiwidG9rZW4iOiJ1U3RhbjRpMjNQMzUyN3BuTjZ1NXhIU1J5REdDbW53eC9TeVVhbCs5T0p6dTdLNmU3S1FWOXQ3ZW96OFhDeDk5IiwidWluIjoiMjg2Nzk2NDQyNSJ9&data=Iy_pb6rJpzb3GkdcRsYYfzjreuUAO0UEd77PgpQbVU2dHoUvBCOIprV2k2sghzp6qRXcsLhMZJhU3PJREr5kyA&svctype=4&tempid=h5_group_info"
                         // 1. 优先使用 Android 手机 QQ 专用的直接打开群资料/加群页面协议
                         val cardIntent = Intent(
                             Intent.ACTION_VIEW,
@@ -364,32 +364,22 @@ fun MoreOptionsScreen(
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
 
-                        // 2. 备选通用唤起加群协议
-                        val qrIntent = Intent(
-                            Intent.ACTION_VIEW,
-                            Uri.parse("mqqopensdkapi://bizAgent/qm/qr?url=http%3A%2F%2Fqm.qq.com%2Fcgi-bin%2Fqm%2Fqr%3Ffrom%3Dapp%26p%3Dandroid%26jump_from%3Dwebapi%26k%3D$groupKey")
-                        ).apply {
+                        // 2. 备选通用唤起/网页加群链接
+                        val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse(webUrl)).apply {
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
 
-                        // 依次尝试唤起 QQ 客户端，若均无法处理则唤起浏览器打开加群网页
+                        // 依次尝试唤起 QQ 客户端，若无法处理则唤起网页链接
                         try {
                             context.startActivity(cardIntent)
                         } catch (_: Exception) {
                             try {
-                                context.startActivity(qrIntent)
-                            } catch (_: Exception) {
-                                try {
-                                    val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://qm.qq.com/q/$groupKey")).apply {
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                    context.startActivity(webIntent)
-                                } catch (_: Exception) { }
-                            }
+                                context.startActivity(webIntent)
+                            } catch (_: Exception) { }
                         }
                     },
-                    headlineContent = { Text(stringResource(R.string.title_ai_association_group)) },
-                    supportingContent = { Text(stringResource(R.string.desc_ai_association_group)) },
+                    headlineContent = { Text(stringResource(R.string.title_user_group)) },
+                    supportingContent = { Text(stringResource(R.string.desc_user_group)) },
                     leadingContent = {
                         Icon(
                             imageVector = Icons.Default.Groups,

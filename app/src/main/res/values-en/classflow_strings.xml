@@ -70,8 +70,8 @@
     <string name="desc_future_plan">Ongoing JWXT updates &amp; smoother sync experience</string>
     <string name="desc_contributors">View developers contributing to the project</string>
     <string name="desc_open_source_licenses">View software licenses and compliance info</string>
-    <string name="title_ai_association_group">AI Association QQ Group</string>
-    <string name="desc_ai_association_group">Join the QQ group to chat with peers</string>
+    <string name="title_user_group">ClassFlow User Group</string>
+    <string name="desc_user_group">Join the QQ group to chat with peers</string>
     <string name="desc_feedback_github">Submit issues on GitHub</string>
     <string name="item_auto_check_update">Auto-check Updates</string>
     <string name="desc_auto_check_update">Silently check for new versions on startup</string>

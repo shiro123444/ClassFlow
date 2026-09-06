@@ -68,8 +68,8 @@
     <string name="desc_future_plan">持续对接教务系统，优化课表导入体验</string>
     <string name="desc_contributors">查看为项目做出贡献的开发者</string>
     <string name="desc_open_source_licenses">查看许可证与合规信息</string>
-    <string name="title_ai_association_group">智汇AI协会交流群</string>
-    <string name="desc_ai_association_group">加入QQ群与同学交流</string>
+    <string name="title_user_group">ClassFlow 用户群</string>
+    <string name="desc_user_group">加入QQ群与同学交流</string>
     <string name="desc_feedback_github">前往 GitHub 提交 Issue</string>
     <string name="item_auto_check_update">自动检查更新</string>
     <string name="desc_auto_check_update">启动应用时静默检查是否有新版本</string>
