@@ -36,8 +36,8 @@ android {
         applicationId = "com.shiro.classflow"
         minSdk = 26
         targetSdk = 37
-        versionCode = 16
-        versionName = "1.1.0"
+        versionCode = 17
+        versionName = "1.1.1"
 
         buildConfigField("String", "UPDATE_API_URL", "\"$updateApiUrl\"")
 
