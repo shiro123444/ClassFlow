@@ -567,4 +567,60 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="label_webvpn_off_campus">WebVPN (Off-campus)</string>
     <string name="desc_webvpn_guide">Using mobile data or home broadband</string>
     <string name="toast_session_saved_no_relogin">Session saved. Future syncs require no re-login.</string>
+
+    <!-- Course selection -->
+    <string name="item_course_selection">Course Selection</string>
+    <string name="desc_course_selection">Enroll / drop courses (campus network only)</string>
+    <string name="title_course_selection">Course Selection</string>
+    <string name="cs_disclaimer_title">Read Before Use</string>
+    <string name="cs_disclaimer_untested">This feature has not been fully tested yet. Feedback and bug reports are welcome.</string>
+    <string name="cs_disclaimer_campus_only">Currently available on the campus network only. Off-campus access and WebVPN are not supported yet.</string>
+    <string name="cs_disclaimer_body">This feature calls your school\'s academic system APIs directly. Enroll and drop actions are written to the real academic system and are subject to your school\'s rules (capacity, time conflicts, credit limits, batch open windows, etc.).\n\nPlease note:\n1. This feature is for personal study use only; do not use it commercially or in violation of any rules;\n2. Any consequence caused by network issues, API changes, or misoperation is solely your responsibility;\n3. The final result is subject to your school\'s academic system. Please verify after each operation.</string>
+    <string name="cs_disclaimer_agree">Agree and Continue</string>
+    <string name="cs_disclaimer_agree_countdown">Agree (%1$d)</string>
+    <string name="cs_disclaimer_disagree">Disagree</string>
+    <string name="cs_tab_classes">Available</string>
+    <string name="cs_tab_selected">Enrolled</string>
+    <string name="cs_search_hint">Course name / teacher</string>
+    <string name="cs_filter_full">Hide full</string>
+    <string name="cs_filter_conflict">Hide conflicts</string>
+    <string name="cs_empty_no_batch">No course selection batch is currently open</string>
+    <string name="cs_loading_campus_hint">Loading… Please make sure you are connected to the campus network</string>
+    <string name="cs_empty_classes">No available class in this batch</string>
+    <string name="cs_empty_selected">No enrolled course yet</string>
+    <string name="cs_unsupported_batch">Not supported yet</string>
+    <string name="format_cs_quota">%1$s/%2$s</string>
+    <string name="cs_tag_full">Full</string>
+    <string name="cs_tag_conflict">Time conflict</string>
+    <string name="cs_tag_partial_conflict">Partial conflict</string>
+    <string name="cs_tag_selected">Enrolled</string>
+    <string name="cs_tag_waitlist">Waitlisted</string>
+    <string name="cs_action_select">Enroll</string>
+    <string name="cs_action_drop">Drop</string>
+    <string name="cs_action_enroll">Sign up</string>
+    <string name="cs_action_cancel_enroll">Cancel sign-up</string>
+    <string name="cs_action_waitlist">Waitlist</string>
+    <string name="cs_action_cancel_waitlist">Cancel waitlist</string>
+    <string name="cs_confirm_select_title">Confirm enrollment</string>
+    <string name="cs_confirm_select_msg">Enroll in \"%1$s\"?</string>
+    <string name="cs_confirm_drop_title">Confirm drop</string>
+    <string name="cs_confirm_drop_msg">Drop \"%1$s\"?</string>
+    <string name="cs_confirm_ok">OK</string>
+    <string name="cs_op_success">Success</string>
+    <string name="cs_op_failed">Failed: %1$s</string>
+    <string name="cs_detail_title">Class Details</string>
+    <string name="cs_detail_class_time">Class time</string>
+    <string name="cs_detail_quota">Enrolled / capacity</string>
+    <string name="cs_detail_campus">Campus</string>
+    <string name="cs_detail_jxms">Teaching mode</string>
+    <string name="cs_detail_jxbzc">Class composition</string>
+    <string name="cs_detail_bz">Remark</string>
+    <string name="cs_retake_pick_course">Select a course to retake</string>
+
+    <!-- Course selection mock test mode -->
+    <string name="cs_mock_badge">MOCK</string>
+    <string name="cs_mock_enabled">Mock test mode enabled</string>
+    <string name="cs_mock_disabled">Mock test mode disabled</string>
+    <string name="cs_mock_banner">Mock test mode: data is simulated locally and never written to the academic system</string>
+    <string name="cs_mock_exit">Exit Mock</string>
 </resources>

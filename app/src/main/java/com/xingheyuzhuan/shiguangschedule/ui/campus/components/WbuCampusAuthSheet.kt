@@ -71,7 +71,9 @@ import kotlinx.coroutines.withContext
 fun WbuCampusAuthSheet(
     onDismiss: () -> Unit,
     onLoginSuccess: () -> Unit,
-    requireUnifiedCas: Boolean = false
+    requireUnifiedCas: Boolean = false,
+    forceDirectCampus: Boolean = false,
+    defaultAuthMode: WbuAuthMode? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -80,7 +82,9 @@ fun WbuCampusAuthSheet(
     var isLoading by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
-    var initialUseVpn by remember { mutableStateOf(WbuSyncEngine.getSavedUseVpn(context) ?: false) }
+    var initialUseVpn by remember {
+        mutableStateOf(if (forceDirectCampus) false else (WbuSyncEngine.getSavedUseVpn(context) ?: false))
+    }
 
     var dynamicPrep by remember { mutableStateOf<AuthForm?>(null) }
     var qrState by remember { mutableStateOf<QrUiState?>(null) }
@@ -380,7 +384,7 @@ fun WbuCampusAuthSheet(
                                 )
                                 isLoading = false
                                 if (qrOk) {
-                                    WbuSyncEngine.setSavedUseVpn(context, useVpn)
+                                    if (!forceDirectCampus) WbuSyncEngine.setSavedUseVpn(context, useVpn)
                                     onLoginSuccess()
                                     onDismiss()
                                 } else {
@@ -432,16 +436,18 @@ fun WbuCampusAuthSheet(
         },
         onUseVpnChange = {
             initialUseVpn = it
-            WbuSyncEngine.setSavedUseVpn(context, it)
+            if (!forceDirectCampus) WbuSyncEngine.setSavedUseVpn(context, it)
         },
         qrState = qrState,
         isLoading = isLoading,
         statusMessage = statusMessage,
         errorMessage = errorMessage,
         initialStudentId = WbuSyncEngine.getSavedStudentId(context),
-        initialUseVpn = initialUseVpn,
+        initialUseVpn = if (forceDirectCampus) false else initialUseVpn,
+        defaultAuthMode = defaultAuthMode,
         hideSelectSemesterSwitch = true,
         hideImportPreferences = true,
+        hideNetworkSwitch = forceDirectCampus,
         primaryButtonText = stringResource(R.string.action_confirm_login),
         loadingButtonText = stringResource(R.string.status_logging_in),
         customLoadingTips = campusTips,
@@ -499,7 +505,7 @@ fun WbuCampusAuthSheet(
                             }
                         )
                         if (vpnOk) {
-                            WbuSyncEngine.setSavedUseVpn(context, true)
+                            if (!forceDirectCampus) WbuSyncEngine.setSavedUseVpn(context, true)
                             // 若要求持有有效 CASTGC（如访问图书馆），且当前是 JYXT_LEGACY 模式
                             val hasCastgc = engine.transport.cookieStore.any { it.name == "CASTGC" && !it.value.isBlank() }
                             if (requireUnifiedCas && !hasCastgc) {
@@ -566,7 +572,7 @@ fun WbuCampusAuthSheet(
                             }
                         )
                         if (directOk) {
-                            WbuSyncEngine.setSavedUseVpn(context, false)
+                            if (!forceDirectCampus) WbuSyncEngine.setSavedUseVpn(context, false)
                         }
                         directOk
                     }
@@ -627,7 +633,7 @@ fun WbuCampusAuthSheet(
                     )
                     isLoading = false
                     if (res.success) {
-                        WbuSyncEngine.setSavedUseVpn(context, useVpn)
+                        if (!forceDirectCampus) WbuSyncEngine.setSavedUseVpn(context, useVpn)
                         onLoginSuccess()
                         onDismiss()
                     } else {

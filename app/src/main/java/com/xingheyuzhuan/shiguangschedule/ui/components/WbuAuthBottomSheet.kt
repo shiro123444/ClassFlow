@@ -153,8 +153,10 @@ fun WbuAuthBottomSheet(
     errorMessage: String = "",
     initialStudentId: String = "",
     initialUseVpn: Boolean = false,
+    defaultAuthMode: WbuAuthMode? = null,
     hideSelectSemesterSwitch: Boolean = false,
     hideImportPreferences: Boolean = false,
+    hideNetworkSwitch: Boolean = false,
     primaryButtonText: String? = null,
     loadingButtonText: String? = null,
     customLoadingTips: List<String>? = null
@@ -169,7 +171,9 @@ fun WbuAuthBottomSheet(
         mutableStateOf(if (WbuAuthTransport.hasSavedPassword(context)) "••••••••" else "")
     }
     var useVpn by remember(initialUseVpn) { mutableStateOf(initialUseVpn) }
-    var authMode by remember { mutableStateOf(WbuAuthTransport.getSavedAuthMode(context)) }
+    var authMode by remember {
+        mutableStateOf(defaultAuthMode ?: WbuAuthTransport.getSavedAuthMode(context))
+    }
     var authMenuExpanded by remember { mutableStateOf(false) }
     var panelExpanded by remember { mutableStateOf(false) }
     var idsVpnEnabled by remember { mutableStateOf(IdsCasClient.getIdsViaWebVpn(context)) }
@@ -352,7 +356,8 @@ fun WbuAuthBottomSheet(
                         authMode = authMode,
                         onAuthModeChange = { newMode ->
                             authMode = newMode
-                            if (rememberPassword) {
+                            // 指定了默认登录方式时（如选课页）不写回全局偏好，避免影响其它页面
+                            if (rememberPassword && defaultAuthMode == null) {
                                 WbuAuthTransport.setSavedAuthMode(context, newMode)
                             }
                         },
@@ -368,7 +373,9 @@ fun WbuAuthBottomSheet(
                                 }
                             } else {
                                 WbuAuthTransport.setRememberPasswordEnabled(context, true)
-                                WbuAuthTransport.setSavedAuthMode(context, authMode)
+                                if (defaultAuthMode == null) {
+                                    WbuAuthTransport.setSavedAuthMode(context, authMode)
+                                }
                                 val effective = if (hasSavedPassword && !isPasswordModified) {
                                     WbuAuthTransport.getSavedPassword(context) ?: ""
                                 } else {
@@ -442,6 +449,7 @@ fun WbuAuthBottomSheet(
             }
             Spacer(modifier = Modifier.height(24.dp))
             // 校园网/VPN 切换
+            if (!hideNetworkSwitch) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = if (useVpn) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.48f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
@@ -488,6 +496,7 @@ fun WbuAuthBottomSheet(
                     )
                 }
             }
+            }
             // 校园网环境提示（仅直连模式显示）：检测中 / 未检测到；检测到校园网则不显示。
             // 开启「不检测校园网环境」时不探测、也不显示该提示。
             if (!useVpn && !skipCampusCheck && campus != true) {
@@ -522,7 +531,9 @@ fun WbuAuthBottomSheet(
                             if (rememberPassword && effectivePassword.isNotBlank()) {
                                 WbuAuthTransport.setRememberPasswordEnabled(context, true)
                                 WbuAuthTransport.savePassword(context, effectivePassword)
-                                WbuAuthTransport.setSavedAuthMode(context, authMode)
+                                if (defaultAuthMode == null) {
+                                    WbuAuthTransport.setSavedAuthMode(context, authMode)
+                                }
                                 hasSavedPassword = true
                             } else if (!rememberPassword) {
                                 WbuAuthTransport.setRememberPasswordEnabled(context, false)

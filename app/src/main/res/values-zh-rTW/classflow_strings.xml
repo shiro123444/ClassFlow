@@ -567,4 +567,60 @@
     <string name="label_webvpn_off_campus">WebVPN 存取 (校外)</string>
     <string name="desc_webvpn_guide">在校外使用手機流量或家庭寬頻</string>
     <string name="toast_session_saved_no_relogin">會話已儲存，後續同步無需重新登入</string>
+
+    <!-- 學生選課 -->
+    <string name="item_course_selection">學生選課</string>
+    <string name="desc_course_selection">教務選課 / 退課，僅支援校園網路環境</string>
+    <string name="title_course_selection">學生選課</string>
+    <string name="cs_disclaimer_title">使用前請閱讀</string>
+    <string name="cs_disclaimer_untested">本功能尚未經過充分測試，歡迎反饋問題與建議</string>
+    <string name="cs_disclaimer_campus_only">目前僅支援校園網路（校內網路）環境使用，校外 / WebVPN 暫不可用</string>
+    <string name="cs_disclaimer_body">本功能直接呼叫學校教務系統介面，選課 / 退課結果會真實寫入教務系統，並受學校選課規則（容量、時間衝突、學分上限、批次開放時間等）約束。\n\n請注意：\n1. 本功能僅供個人學習使用，請勿用於任何商業或違規用途；\n2. 因網路波動、介面調整或操作失誤導致的一切後果由使用者自行承擔；\n3. 最終結果以學校教務系統為準，請在操作後自行核對。</string>
+    <string name="cs_disclaimer_agree">同意並繼續</string>
+    <string name="cs_disclaimer_agree_countdown">同意（%1$d）</string>
+    <string name="cs_disclaimer_disagree">不同意</string>
+    <string name="cs_tab_classes">可選課程</string>
+    <string name="cs_tab_selected">已選課程</string>
+    <string name="cs_search_hint">課程名稱 / 教師</string>
+    <string name="cs_filter_full">過濾已滿</string>
+    <string name="cs_filter_conflict">過濾衝突</string>
+    <string name="cs_empty_no_batch">目前沒有開放的選課批次</string>
+    <string name="cs_loading_campus_hint">正在載入，請確保已連接校園網路</string>
+    <string name="cs_empty_classes">該批次暫無可選教學班</string>
+    <string name="cs_empty_selected">暫無已選課程</string>
+    <string name="cs_unsupported_batch">暫不支援</string>
+    <string name="format_cs_quota">%1$s/%2$s</string>
+    <string name="cs_tag_full">已滿</string>
+    <string name="cs_tag_conflict">時間衝突</string>
+    <string name="cs_tag_partial_conflict">部分衝突</string>
+    <string name="cs_tag_selected">已選</string>
+    <string name="cs_tag_waitlist">已候補</string>
+    <string name="cs_action_select">選課</string>
+    <string name="cs_action_drop">退課</string>
+    <string name="cs_action_enroll">報名</string>
+    <string name="cs_action_cancel_enroll">取消報名</string>
+    <string name="cs_action_waitlist">候補</string>
+    <string name="cs_action_cancel_waitlist">取消候補</string>
+    <string name="cs_confirm_select_title">確認選課</string>
+    <string name="cs_confirm_select_msg">確定選擇「%1$s」？</string>
+    <string name="cs_confirm_drop_title">確認退課</string>
+    <string name="cs_confirm_drop_msg">確定退掉「%1$s」？</string>
+    <string name="cs_confirm_ok">確定</string>
+    <string name="cs_op_success">操作成功</string>
+    <string name="cs_op_failed">操作失敗：%1$s</string>
+    <string name="cs_detail_title">教學班詳情</string>
+    <string name="cs_detail_class_time">上課時間</string>
+    <string name="cs_detail_quota">選課人數 / 額度</string>
+    <string name="cs_detail_campus">開課校區</string>
+    <string name="cs_detail_jxms">教學模式</string>
+    <string name="cs_detail_jxbzc">教學班組成</string>
+    <string name="cs_detail_bz">備註</string>
+    <string name="cs_retake_pick_course">請選擇要重修的課程</string>
+
+    <!-- 選課 Mock 測試模式 -->
+    <string name="cs_mock_badge">MOCK</string>
+    <string name="cs_mock_enabled">已進入 Mock 測試模式</string>
+    <string name="cs_mock_disabled">已退出 Mock 測試模式</string>
+    <string name="cs_mock_banner">Mock 測試模式：資料為本機模擬，不會寫入教務系統</string>
+    <string name="cs_mock_exit">退出 Mock</string>
 </resources>
