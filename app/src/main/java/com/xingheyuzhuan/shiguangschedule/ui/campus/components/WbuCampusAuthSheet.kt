@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -189,15 +190,18 @@ fun WbuCampusAuthSheet(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.padding(end = 6.dp)
                             ) {
-                                IconButton(
-                                    onClick = { passwordVisible = !passwordVisible },
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(20.dp)
-                                    )
+                                // 预填已记住的密码（••••••••）时隐藏"显示密码"按钮，避免展示无意义的占位符
+                                if (!(hasSavedVpnPassword && !isVpnPasswordModified)) {
+                                    IconButton(
+                                        onClick = { passwordVisible = !passwordVisible },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -222,7 +226,7 @@ fun WbuCampusAuthSheet(
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Checkbox(
                                         checked = rememberVpnPassword,
                                         onCheckedChange = { next ->
@@ -236,7 +240,9 @@ fun WbuCampusAuthSheet(
                                                 WbuSyncEngine.setRememberVpnPasswordEnabled(context, true)
                                             }
                                         },
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .scale(0.85f)
                                     )
                                 }
                             }
@@ -498,20 +504,32 @@ fun WbuCampusAuthSheet(
                             val hasCastgc = engine.transport.cookieStore.any { it.name == "CASTGC" && !it.value.isBlank() }
                             if (requireUnifiedCas && !hasCastgc) {
                                 statusMessage = "正在完成统一身份认证..."
-                                val casPwd = customVpnPassword ?: WbuSyncEngine.getSavedVpnPassword(context)
-                                if (!casPwd.isNullOrBlank()) {
-                                    engine.loginViaVpnCas(
-                                        studentId = sid,
-                                        password = casPwd,
-                                        captchaProvider = { captcha ->
-                                            val def = CompletableDeferred<SliderCaptchaResult?>()
-                                            captchaDeferred = def
-                                            captchaDialogData = captcha
-                                            def.await() ?: SliderCaptchaResult.Cancel
-                                        },
-                                        authMode = WbuAuthMode.UNIFIED_CAS
-                                    )
+                                // 若前面已索取过统一认证密码则直接复用；否则无论是否已记住密码都弹窗，
+                                // 让用户确认或修改，避免服务端改密后静默沿用旧密码导致登录失败
+                                var casPwd = customVpnPassword
+                                if (casPwd.isNullOrBlank()) {
+                                    val d = CompletableDeferred<String?>()
+                                    withContext(Dispatchers.Main) {
+                                        vpnPasswordDeferred = d
+                                    }
+                                    casPwd = d.await()
+                                    if (casPwd.isNullOrBlank()) {
+                                        isLoading = false
+                                        statusMessage = ""
+                                        return@launch
+                                    }
                                 }
+                                engine.loginViaVpnCas(
+                                    studentId = sid,
+                                    password = casPwd,
+                                    captchaProvider = { captcha ->
+                                        val def = CompletableDeferred<SliderCaptchaResult?>()
+                                        captchaDeferred = def
+                                        captchaDialogData = captcha
+                                        def.await() ?: SliderCaptchaResult.Cancel
+                                    },
+                                    authMode = WbuAuthMode.UNIFIED_CAS
+                                )
                             }
                         }
                         vpnOk
@@ -520,20 +538,19 @@ fun WbuCampusAuthSheet(
                         var actualPassword = pwd
                         var actualAuthMode = authMode
                         if (requireUnifiedCas && authMode == WbuAuthMode.JYXT_LEGACY) {
-                            var savedUnifiedPwd = WbuSyncEngine.getSavedVpnPassword(context)
-                            if (savedUnifiedPwd.isNullOrBlank()) {
-                                val d = CompletableDeferred<String?>()
-                                withContext(Dispatchers.Main) {
-                                    vpnPasswordDeferred = d
-                                }
-                                savedUnifiedPwd = d.await()
-                                if (savedUnifiedPwd.isNullOrBlank()) {
-                                    isLoading = false
-                                    statusMessage = ""
-                                    return@launch
-                                }
+                            // 无论是否已记住密码都弹窗，让用户确认或修改，
+                            // 避免服务端改密后静默沿用旧密码导致登录失败
+                            val d = CompletableDeferred<String?>()
+                            withContext(Dispatchers.Main) {
+                                vpnPasswordDeferred = d
                             }
-                            actualPassword = savedUnifiedPwd
+                            val unifiedPwd = d.await()
+                            if (unifiedPwd.isNullOrBlank()) {
+                                isLoading = false
+                                statusMessage = ""
+                                return@launch
+                            }
+                            actualPassword = unifiedPwd
                             actualAuthMode = WbuAuthMode.UNIFIED_CAS
                         }
 

@@ -1513,15 +1513,18 @@ fun WeeklyScheduleScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.padding(end = 6.dp)
                             ) {
-                                IconButton(
-                                    onClick = { passwordVisible = !passwordVisible },
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                        contentDescription = if (passwordVisible) stringResource(R.string.a11y_hide_password) else stringResource(R.string.a11y_show_password),
-                                        modifier = Modifier.size(20.dp)
-                                    )
+                                // 预填已记住的密码（••••••••）时隐藏"显示密码"按钮，避免展示无意义的占位符
+                                if (!(hasSavedVpnPassword && !isVpnPasswordModified)) {
+                                    IconButton(
+                                        onClick = { passwordVisible = !passwordVisible },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                            contentDescription = if (passwordVisible) stringResource(R.string.a11y_hide_password) else stringResource(R.string.a11y_show_password),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
