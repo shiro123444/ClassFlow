@@ -17,8 +17,11 @@ import com.xingheyuzhuan.shiguangschedule.data.model.wbu.FreeClassroom
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.FreeClassroomQueryResult
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.GradeQueryResult
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.GradeStats
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.KCGS_DICT
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.KCLX_DICT
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.KCXZ_DICT
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.KHFS_DICT
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.KSXS_DICT
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.STANDARD_PERIODS
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.StudentProfile
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.BookDetail
@@ -570,6 +573,7 @@ class WbuQueryClient(
      * 3. /admin/xsd/xskp/xywcd?fasz=2 (培养方案完成度百分比)
      * 4. /admin/xsd/xskp/xyjc?fasz=2 (课程性质树)
      * 5. /admin/xsd/xskp/xyjc?fasz=3 (学年学期推进树)
+     * 并额外拉取成绩库与培养方案全库，用于补全官方考核方式 (ksxs) 与 17 项完整元数据
      */
     suspend fun queryAcademicProgress(): Result<AcademicProgressData> = withContext(Dispatchers.IO) {
         ensureCookies()
@@ -615,12 +619,96 @@ class WbuQueryClient(
                 val progressDeferred = async { executeGetJson("/admin/xsd/xskp/xywcd?fasz=2") }
                 val natureDeferred = async { executeGetJson("/admin/xsd/xskp/xyjc?fasz=2") }
                 val semesterDeferred = async { executeGetJson("/admin/xsd/xskp/xyjc?fasz=3") }
+                // 并发拉取培养方案全库，用于补全全部课程（含未修）的官方考核方式 (ksxs)
+                val pyfaDeferred = async {
+                    runCatching {
+                        val form = FormBody.Builder()
+                            .add("page.pn", "1")
+                            .add("page.size", "200")
+                            .add("gridtype", "jqgrid")
+                            .build()
+                        val req = Request.Builder()
+                            .url("$baseUrl/admin/xsd/studentpyfa/ajaxList2?gridtype=jqgrid")
+                            .post(form)
+                            .header("X-Requested-With", "XMLHttpRequest")
+                            .header("Referer", "$baseUrl/admin/xsd/studentpyfa")
+                            .build()
+                        val manualClient = client.newBuilder().followRedirects(false).build()
+                        manualClient.newCall(req).execute().use { resp ->
+                            val text = resp.body?.string().orEmpty()
+                            if (text.isNotBlank() && !transport.looksLikeHtml(text)) {
+                                JSONObject(text)
+                            } else null
+                        }
+                    }.getOrNull()
+                }
+
+                // 并发拉取教务成绩库，用于补全官方考核方式 (khfs/ksxs) 及 17 项完整元数据
+                val gradesDeferred = async {
+                    runCatching {
+                        val form = FormBody.Builder()
+                            .add("page.pn", "1")
+                            .add("page.size", "200")
+                            .add("sort", "xnxq")
+                            .add("order", "desc")
+                            .add("startXnxq", "2020-2021-1")
+                            .add("endXnxq", "2030-2031-2")
+                            .add("queryFields", "id,xhid,xnxq,kcbh,kcmc,xf,kcxz,kclx,ksxs,kcgs,xdxz,kclb,cjfxms,zhcj,jd,hdxf,tscjzwmc,sfbk,cjlrjsxm,kcsx,fxcj,kkyxmc,khfs,zgcj")
+                            .build()
+                        val req = Request.Builder()
+                            .url("$baseUrl/admin/xsd/xsdcjcx/xsdQueryXscjList?gridtype=jqgrid")
+                            .post(form)
+                            .header("X-Requested-With", "XMLHttpRequest")
+                            .header("Referer", "$baseUrl/admin/xsd/xsdcjcx/qbcjcx")
+                            .build()
+                        val manualClient = client.newBuilder().followRedirects(false).build()
+                        manualClient.newCall(req).execute().use { resp ->
+                            val text = resp.body?.string().orEmpty()
+                            if (text.isNotBlank() && !transport.looksLikeHtml(text)) {
+                                JSONObject(text)
+                            } else null
+                        }
+                    }.getOrNull()
+                }
 
                 val studentJson = studentDeferred.await()
                 val statsJson = statsDeferred.await()
                 val progressJson = progressDeferred.await()
                 val natureJson = natureDeferred.await()
                 val semesterJson = semesterDeferred.await()
+                val gradesJson = gradesDeferred.await()
+                val pyfaJson = pyfaDeferred.await()
+
+                // 构建培养方案匹配表（按课程编号与课程名，含未修课程）
+                val pyfaMapByCode = mutableMapOf<String, JSONObject>()
+                val pyfaMapByName = mutableMapOf<String, JSONObject>()
+                val pyfaResults = pyfaJson?.optJSONArray("results")
+                if (pyfaResults != null) {
+                    for (k in 0 until pyfaResults.length()) {
+                        val pObj = pyfaResults.optJSONObject(k) ?: continue
+                        val name = pObj.optString("kcmc", "").trim()
+                        val code = pObj.optString("kcbh", "").trim()
+                        if (code.isNotBlank()) pyfaMapByCode[code] = pObj
+                        if (name.isNotBlank()) pyfaMapByName[name] = pObj
+                    }
+                }
+
+                // 构建成绩库匹配表
+                val gradeMapByName = mutableMapOf<String, JSONObject>()
+                val gradeMapByCode = mutableMapOf<String, JSONObject>()
+                val gradeResults = gradesJson?.optJSONArray("results")
+                if (gradeResults != null) {
+                    for (k in 0 until gradeResults.length()) {
+                        val gObj = gradeResults.optJSONObject(k) ?: continue
+                        val name = gObj.optString("kcmc", "").trim()
+                        val code = gObj.optString("kcbh", "").trim()
+                        if (name.isNotBlank()) gradeMapByName[name] = gObj
+                        // 成绩库课程名可能带 "[学年学期]" 前缀，去前缀后再建索引
+                        val cleanName = name.replace(Regex("^\\[[^\\]]+\\]"), "").trim()
+                        if (cleanName.isNotBlank()) gradeMapByName[cleanName] = gObj
+                        if (code.isNotBlank()) gradeMapByCode[code] = gObj
+                    }
+                }
 
                 // 1. 解析学生基本信息
                 val studentObj = studentJson.optJSONObject("data") ?: JSONObject()
@@ -653,7 +741,7 @@ class WbuQueryClient(
                 val progressObj = progressJson.optJSONObject("data") ?: JSONObject()
                 val xfwcdPercent = progressObj.optDouble("xfwcd", 0.0)
 
-                // 4. 解析课程组辅助函数
+                // 4. 解析课程组辅助函数（支持多层子模块递归展开与 17 项全字段补全）
                 fun parseCourseGroups(json: JSONObject): List<AcademicCourseGroup> {
                     val dataArr = json.optJSONArray("data") ?: JSONArray()
                     val groups = mutableListOf<AcademicCourseGroup>()
@@ -662,39 +750,204 @@ class WbuQueryClient(
                         val groupObj = dataArr.optJSONObject(i) ?: continue
                         val nodeId = groupObj.optString("nodeId", "")
                         val nodeName = groupObj.optString("nodeName", "")
-                        val groupEarnedCredits = groupObj.optDouble("hdxf", 0.0)
 
-                        val kcArr = groupObj.optJSONArray("kcList") ?: JSONArray()
+                        val rawKcList = mutableListOf<JSONObject>()
+                        fun collectCourses(node: JSONObject) {
+                            val list = node.optJSONArray("kcList")
+                            if (list != null) {
+                                for (idx in 0 until list.length()) {
+                                    list.optJSONObject(idx)?.let { rawKcList.add(it) }
+                                }
+                            }
+                            val children = node.optJSONArray("children")
+                            if (children != null) {
+                                for (idx in 0 until children.length()) {
+                                    children.optJSONObject(idx)?.let { collectCourses(it) }
+                                }
+                            }
+                            val nodeList = node.optJSONArray("nodeList")
+                            if (nodeList != null) {
+                                for (idx in 0 until nodeList.length()) {
+                                    nodeList.optJSONObject(idx)?.let { collectCourses(it) }
+                                }
+                            }
+                        }
+                        collectCourses(groupObj)
+
                         val courseList = mutableListOf<AcademicCourse>()
                         var groupPlanCredits = 0.0
+                        var groupEarnedCreditsCalculated = 0.0
 
-                        for (j in 0 until kcArr.length()) {
-                            val cObj = kcArr.optJSONObject(j) ?: continue
-                            val planXf = cObj.optString("xf", "0").toDoubleOrNull() ?: 0.0
-                            val earnedXf = cObj.optString("hdxf", "0").toDoubleOrNull() ?: 0.0
+                        for (cObj in rawKcList) {
+                            val cName = cObj.optString("kcmc", "").trim()
+                            val cCode = cObj.optString("kcbh", "").trim()
+                            val extra = gradeMapByName[cName] ?: gradeMapByCode[cCode]
+                            val py = pyfaMapByCode[cCode] ?: pyfaMapByName[cName]
+
+                            val planXf = (cObj.optString("xf").takeIf { it.isNotBlank() }
+                                ?: extra?.optString("xf", "0") ?: "0").toDoubleOrNull() ?: 0.0
+                            // 人培学分: c.rpxf -> py.xf -> c.xf
+                            val rpxf = (cObj.optString("rpxf").takeIf { it.isNotBlank() }
+                                ?: py?.optString("xf")?.takeIf { it.isNotBlank() }
+                                ?: cObj.optString("xf").takeIf { it.isNotBlank() }
+                                ?: extra?.optString("xf", "0") ?: "0").toDoubleOrNull() ?: planXf
+
+                            val wczt = cObj.optString("wczt", "")
+                            val rawHdxf = cObj.optString("hdxf").takeIf { it.isNotBlank() }
+                                ?: extra?.optString("hdxf", "0") ?: "0"
+                            val earnedXf = if (wczt == "已修") {
+                                rawHdxf.toDoubleOrNull() ?: planXf
+                            } else {
+                                rawHdxf.toDoubleOrNull() ?: 0.0
+                            }
+
                             groupPlanCredits += planXf
+                            if (wczt == "已修") {
+                                groupEarnedCreditsCalculated += earnedXf
+                            }
+
+                            // 课程类别: c.kclb -> py.kclb -> gr.kclb
+                            val cat = cObj.optString("kclb").takeIf { it.isNotBlank() }
+                                ?: py?.optString("kclb")?.takeIf { it.isNotBlank() }
+                                ?: extra?.optString("kclb", "") ?: ""
+
+                            // 课程类型: gr.kclx (编码 -> 名称)
+                            val kclxRaw = extra?.optString("kclx", "").orEmpty()
+                            val courseType = KCLX_DICT[kclxRaw] ?: kclxRaw
+
+                            // 课程归属: gr.kcgs (编码 -> 名称)
+                            val kcgsRaw = extra?.optString("kcgs", "").orEmpty()
+                            val courseBelonging = KCGS_DICT[kcgsRaw] ?: kcgsRaw
+
+                            // 课程性质: c.kcxz -> py.kcxz -> gr.kcxz (编码 -> 名称；学期树缺节点性质时回退节点名)
+                            val kcxzRaw = cObj.optString("kcxz").takeIf { it.isNotBlank() }
+                                ?: py?.optString("kcxz")?.takeIf { it.isNotBlank() }
+                                ?: extra?.optString("kcxz", "") ?: ""
+                            val nature = if (kcxzRaw.isNotBlank()) {
+                                KCXZ_DICT[kcxzRaw] ?: kcxzRaw
+                            } else if (!nodeName.contains("20")) {
+                                nodeName
+                            } else ""
+
+                            val isElective = nature.contains("选") || nodeName.contains("选")
+
+                            // 课程属性: c.kcsx -> py.kcsx -> gr.kcsx (编码 1/2/3 -> 必修/公选/专选)
+                            val kcsxRaw = cObj.optString("kcsx").takeIf { it.isNotBlank() }
+                                ?: cObj.optString("xxbx").takeIf { it.isNotBlank() }
+                                ?: py?.optString("kcsx")?.takeIf { it.isNotBlank() }
+                                ?: extra?.optString("kcsx", "") ?: ""
+                            val courseAttr = when {
+                                kcsxRaw == "1" -> "必修"
+                                kcsxRaw == "2" -> "公选"
+                                kcsxRaw == "3" -> "专选"
+                                kcsxRaw.isNotBlank() -> kcsxRaw
+                                else -> if (isElective) "选修" else "必修"
+                            }
+
+                            // 考核方式: py.ksxs -> gr.khfs -> c.ksxs (优先官方培养方案)
+                            val ksxsRaw = py?.optString("ksxs")?.takeIf { it.isNotBlank() }
+                                ?: extra?.optString("khfs")?.takeIf { it.isNotBlank() }
+                                ?: cObj.optString("ksxs").takeIf { it.isNotBlank() }
+                                ?: cObj.optString("ksxsmc").takeIf { it.isNotBlank() }
+                                ?: ""
+                            val ksxsName = KSXS_DICT[ksxsRaw] ?: ksxsRaw
+
+                            val (examType, examTag) = when {
+                                ksxsName == "考试" || ksxsName.contains("试") -> "考试" to "试"
+                                ksxsName == "考查" || ksxsName.contains("查") || ksxsName.contains("察") -> "考查" to "查"
+                                ksxsName.isNotBlank() -> ksxsName to ""
+                                cat.contains("实践") || cat.contains("环节") || cat.contains("实验") ||
+                                        cName.contains("实习") || cName.contains("实训") || cName.contains("设计") ||
+                                        cName.contains("论文") || cName.contains("技能") || cName.contains("劳动") ||
+                                        cName.contains("体育") || cName.contains("形势与政策") || isElective -> "考查" to "查"
+                                else -> "考试" to "试"
+                            }
+
+                            // 成绩: c.zhcj -> gr.zhcj
+                            val score = cObj.optString("zhcj").takeIf { it.isNotBlank() }
+                                ?: extra?.optString("zhcj", "") ?: ""
+
+                            // 绩点: c.jd -> gr.xfjd -> gr.jd
+                            val gpa = cObj.optString("jd").takeIf { it.isNotBlank() }
+                                ?: extra?.optString("xfjd")?.takeIf { it.isNotBlank() }
+                                ?: extra?.optString("jd", "") ?: ""
+
+                            val college = cObj.optString("kkyx").takeIf { it.isNotBlank() }
+                                ?: cObj.optString("kkyxmc").takeIf { it.isNotBlank() }
+                                ?: py?.optString("kkyxmc")?.takeIf { it.isNotBlank() }
+                                ?: extra?.optString("kkyxmc", "") ?: ""
+
+                            val allowedSemester = cObj.optString("xdxnxq").takeIf { it.isNotBlank() }
+                                ?: cObj.optString("yxxdxnxq").takeIf { it.isNotBlank() }
+                                ?: cObj.optString("jyxdxq").takeIf { it.isNotBlank() }
+                                ?: py?.optString("yxxdxq")?.takeIf { it.isNotBlank() }
+                                ?: (if (nodeName.contains("20")) nodeName else "")
+
+                            val gradeSemester = cObj.optString("cjxnxq").takeIf { it.isNotBlank() }
+                                ?: extra?.optString("xnxq")?.takeIf { it.isNotBlank() }
+                                ?: (if (wczt == "已修" && nodeName.contains("20")) nodeName else "")
+
+                            // 修读性质: gr.xdxz -> c.xdxz (2 -> 重修)
+                            val xdxzRaw = extra?.optString("xdxz")?.takeIf { it.isNotBlank() }
+                                ?: cObj.optString("xdxz").takeIf { it.isNotBlank() }
+                                ?: ""
+                            val studyNature = if (xdxzRaw == "2") "重修" else if (wczt == "已修") "初修" else ""
+
+                            // 是否补考: gr.sfbk -> c.sfbk
+                            val bkRaw = extra?.optString("sfbk")?.takeIf { it.isNotBlank() }
+                                ?: cObj.optString("sfbk").takeIf { it.isNotBlank() }
+                                ?: ""
+                            val isMakeup = if (bkRaw == "1" || bkRaw == "是") "是" else if (wczt == "已修") "否" else ""
+
+                            val specialGrade = extra?.optString("tscjzwmc")?.takeIf { it.isNotBlank() }
+                                ?: cObj.optString("tscjzwmc").takeIf { it.isNotBlank() }
+                                ?: ""
+
+                            val remark = cObj.optString("bz").takeIf { it.isNotBlank() }
+                                ?: extra?.optString("cjfxms")?.takeIf { it.isNotBlank() }
+                                ?: extra?.optString("bz", "") ?: ""
+
+                            // 是否获得学分 (sfhdxf)
+                            val creditEarned = if (wczt == "已修" || earnedXf > 0) "是" else "否"
 
                             courseList.add(
                                 AcademicCourse(
-                                    courseCode = cObj.optString("kcbh", ""),
-                                    courseName = cObj.optString("kcmc", ""),
-                                    college = cObj.optString("kkyx", ""),
+                                    courseCode = cCode,
+                                    courseName = cName,
+                                    college = college,
                                     planCredit = planXf,
+                                    rpxf = rpxf,
                                     earnedCredit = earnedXf,
-                                    category = cObj.optString("kclb", ""),
-                                    nature = cObj.optString("kcxz", ""),
-                                    score = cObj.optString("zhcj", ""),
-                                    gpa = cObj.optString("jd", ""),
-                                    status = cObj.optString("wczt", "")
+                                    category = cat,
+                                    courseType = courseType,
+                                    courseBelonging = courseBelonging,
+                                    nature = nature,
+                                    courseAttribute = courseAttr,
+                                    isElective = isElective,
+                                    examType = examType,
+                                    examTag = examTag,
+                                    creditEarned = creditEarned,
+                                    score = score,
+                                    gpa = gpa,
+                                    status = wczt,
+                                    allowedSemester = allowedSemester,
+                                    gradeSemester = gradeSemester,
+                                    studyNature = studyNature,
+                                    isMakeup = isMakeup,
+                                    specialGrade = specialGrade,
+                                    remark = remark
                                 )
                             )
                         }
+
+                        val explicitEarned = groupObj.optDouble("hdxf", 0.0)
+                        val finalEarned = if (explicitEarned > 0) explicitEarned else Math.round(groupEarnedCreditsCalculated * 100.0) / 100.0
 
                         groups.add(
                             AcademicCourseGroup(
                                 nodeId = nodeId,
                                 nodeName = nodeName,
-                                earnedCredits = groupEarnedCredits,
+                                earnedCredits = finalEarned,
                                 planCredits = Math.round(groupPlanCredits * 100.0) / 100.0,
                                 courses = courseList
                             )
