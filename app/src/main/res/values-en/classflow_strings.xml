@@ -701,4 +701,31 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="action_set">Set</string>
     <string name="label_more_settings">More settings</string>
 
+    <!-- QR scan (unified-auth scan-to-login) -->
+    <string name="shortcut_short_qr_scan">Scan</string>
+    <string name="item_qr_scan">Scan QR code</string>
+    <string name="desc_qr_scan">Scan the unified-auth login QR code to confirm sign-in on your computer</string>
+    <string name="title_qr_scan">Scan</string>
+    <string name="qr_scan_hint_align">Align the QR code within the frame</string>
+    <string name="qr_scan_permission_title">Camera permission required</string>
+    <string name="qr_scan_permission_desc">Scanning needs the camera. Please grant camera access in system settings.</string>
+    <string name="action_qr_scan_grant">Grant permission</string>
+    <string name="action_qr_scan_open_settings">Open system settings</string>
+    <string name="qr_scan_scanned_title">Scanned</string>
+    <string name="qr_scan_confirm_hint">Confirming will sign your account in on the computer</string>
+    <string name="qr_scan_confirming">Confirming…</string>
+    <string name="action_qr_scan_confirm">Confirm sign-in</string>
+    <string name="action_qr_scan_rescan">Scan again</string>
+    <string name="qr_scan_success_title">Sign-in confirmed</string>
+    <string name="qr_scan_success_desc">The computer is now signed in</string>
+    <string name="action_qr_scan_done">Done</string>
+    <string name="qr_scan_need_login_title">Not signed in to unified auth</string>
+    <string name="qr_scan_need_login_desc">This device must be signed in to unified auth before confirming</string>
+    <string name="action_qr_scan_login">Sign in</string>
+    <string name="qr_scan_err_not_cas">Not a unified-auth login QR code. Keep scanning.</string>
+    <string name="qr_scan_err_expired">This QR code has expired. Refresh it on your computer.</string>
+    <string name="qr_scan_err_network">Network error. Please try again.</string>
+    <string name="action_qr_scan_retry">Retry</string>
+    <string name="qr_scan_tls_prompt">Certificate validation failed. Trust and continue?</string>
+
 </resources>

@@ -701,4 +701,31 @@
     <string name="action_set">設定</string>
     <string name="label_more_settings">更多設定</string>
 
+    <!-- 掃一掃（統一認證掃碼登入） -->
+    <string name="shortcut_short_qr_scan">掃一掃</string>
+    <string name="item_qr_scan">掃一掃</string>
+    <string name="desc_qr_scan">掃描統一認證登入二維碼，確認電腦端登入</string>
+    <string name="title_qr_scan">掃一掃</string>
+    <string name="qr_scan_hint_align">將二維碼放入取景框內</string>
+    <string name="qr_scan_permission_title">需要相機權限</string>
+    <string name="qr_scan_permission_desc">掃碼需要使用相機，請在系統設定中授予相機權限</string>
+    <string name="action_qr_scan_grant">授予權限</string>
+    <string name="action_qr_scan_open_settings">開啟系統設定</string>
+    <string name="qr_scan_scanned_title">已掃描</string>
+    <string name="qr_scan_confirm_hint">確認後，電腦端將登入你的帳號</string>
+    <string name="qr_scan_confirming">正在確認…</string>
+    <string name="action_qr_scan_confirm">確認登入</string>
+    <string name="action_qr_scan_rescan">重新掃描</string>
+    <string name="qr_scan_success_title">登入已確認</string>
+    <string name="qr_scan_success_desc">電腦端已完成登入</string>
+    <string name="action_qr_scan_done">完成</string>
+    <string name="qr_scan_need_login_title">未登入統一認證</string>
+    <string name="qr_scan_need_login_desc">掃碼確認需要本機已登入統一認證</string>
+    <string name="action_qr_scan_login">去登入</string>
+    <string name="qr_scan_err_not_cas">不是統一認證登入二維碼，請繼續掃描</string>
+    <string name="qr_scan_err_expired">二維碼已失效，請在電腦上重新整理</string>
+    <string name="qr_scan_err_network">網路異常，請重試</string>
+    <string name="action_qr_scan_retry">重試</string>
+    <string name="qr_scan_tls_prompt">憑證校驗異常，是否信任並繼續？</string>
+
 </resources>

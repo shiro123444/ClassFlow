@@ -331,6 +331,13 @@ fun SettingsScreen(
                         subtitle = stringResource(R.string.desc_credential_management),
                         onClick = { navBridge.navigate(Destination.CredentialManagement) }
                     )
+                    SettingDivider()
+                    SettingTile(
+                        icon = Icons.Rounded.QrCodeScanner,
+                        title = stringResource(R.string.item_qr_scan),
+                        subtitle = stringResource(R.string.desc_qr_scan),
+                        onClick = { navBridge.navigate(Destination.QrScan) }
+                    )
                 }
             }
         }

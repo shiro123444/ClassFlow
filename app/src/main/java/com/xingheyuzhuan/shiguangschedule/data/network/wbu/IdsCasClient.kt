@@ -667,6 +667,92 @@ internal class IdsCasClient(
         }
     }
 
+    // ------------------- 二维码：扫码端（手机侧） -------------------
+
+    /**
+     * 扫码端：把 uuid 对应的二维码标记为「已扫描」，被扫码端 getStatus 由 0 变 2。
+     *
+     * `qrCodeLogin.do` 本身是 CAS 受保护地址，身份来自本机 CASTGC；
+     * 未登录时服务端返回 206302（XHR）或 302 到 /authserver/login（非 XHR）。
+     */
+    suspend fun scanPeerQrCode(uuid: String, flowTag: String): QrScanOutcome = withContext(Dispatchers.IO) {
+        val base = transport.idsBase()
+        transport.restoreCookieStore()
+        val url = "$base/authserver/qrCode/qrCodeLogin.do?uuid=${URLEncoder.encode(uuid, "UTF-8")}"
+        try {
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("X-Requested-With", "XMLHttpRequest")
+                .addHeader("Referer", "$base/authserver/login")
+                .get()
+                .build()
+            val manualClient = client.newBuilder().followRedirects(false).build()
+            manualClient.newCall(req).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                val location = resp.header("Location").orEmpty()
+                when {
+                    isAnonymousCasResponse(resp.code, location, body) -> QrScanOutcome.NEED_LOGIN
+                    body.contains("qrCodeConfirm.do") || body.contains("confirmLogin") -> QrScanOutcome.SCANNED
+                    else -> {
+                        Log.w("IdsCasClient", "$flowTag peer scan unexpected response: ${resp.code}")
+                        QrScanOutcome.EXPIRED
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("IdsCasClient", "$flowTag peer scan exception", e)
+            QrScanOutcome.ERROR
+        }
+    }
+
+    /** 扫码端：确认登录，被扫码端 getStatus 由 2 变 1，随后即可提交表单换 ST。 */
+    suspend fun confirmPeerQrCode(uuid: String, flowTag: String): QrConfirmOutcome = withContext(Dispatchers.IO) {
+        val base = transport.idsBase()
+        transport.restoreCookieStore()
+        val loginUrl = "$base/authserver/qrCode/qrCodeLogin.do?uuid=${URLEncoder.encode(uuid, "UTF-8")}"
+        try {
+            val form = FormBody.Builder().add("uuid", uuid).build()
+            val req = Request.Builder()
+                .url("$base/authserver/qrCode/qrCodeConfirm.do")
+                .post(form)
+                .addHeader("Content-Type", "application/x-www-form-urlencoded")
+                .addHeader("X-Requested-With", "XMLHttpRequest")
+                .addHeader("Referer", loginUrl)
+                .addHeader("Origin", base)
+                .build()
+            val manualClient = client.newBuilder().followRedirects(false).build()
+            manualClient.newCall(req).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                val location = resp.header("Location").orEmpty()
+                val json = runCatching { JSONObject(body) }.getOrNull()
+                when {
+                    json?.optString("res") == "1" -> QrConfirmOutcome.CONFIRMED
+                    isAnonymousCasResponse(resp.code, location, body) -> QrConfirmOutcome.NEED_LOGIN
+                    else -> {
+                        Log.w("IdsCasClient", "$flowTag peer confirm rejected: ${resp.code}")
+                        QrConfirmOutcome.EXPIRED
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("IdsCasClient", "$flowTag peer confirm exception", e)
+            QrConfirmOutcome.ERROR
+        }
+    }
+
+    /**
+     * 统一认证「未登录」特征：
+     * XHR 下返回 `{"errCode":"206302",...}`，非 XHR 下 302 到 `/authserver/login`。
+     * 注意 `.do` 是兜底路由（任何不存在的 `.do` 未登录时都返回同一段 JSON），故必须按内容判定。
+     */
+    private fun isAnonymousCasResponse(code: Int, location: String, body: String): Boolean {
+        if (code in 300..399 && location.contains("/authserver/login")) return true
+        if (body.isBlank()) return false
+        val json = runCatching { JSONObject(body) }.getOrNull() ?: return false
+        if (json.optString("errCode") == "206302") return true
+        return json.has("success") && !json.optBoolean("success")
+    }
+
     // ------------------- 加密 / 解析基元 -------------------
 
     private fun encryptCasPassword(password: String, salt: String): String {

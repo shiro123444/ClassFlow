@@ -49,8 +49,9 @@ git diff 3eb39c2 --stat -- app/src/main/java app/src/main/res | sort -t'|' -k2 -
 ### 3. 宿主与导航
 | 文件 | 差异内容 |
 |---|---|
-| `MainActivity.kt` | 悬浮课程时隐藏 Dock（`isFloatingCourseMode`）、onboarding 引导、背景壁纸容器、校园服务路由（成绩/空教室/学业进程） |
-| `Navigation.kt` | `WallpaperAdjust`、`GradeQuery`、`FreeClassroomQuery`、`AcademicProgress`、`CredentialManagement` 目的地 |
+| `MainActivity.kt` | 悬浮课程时隐藏 Dock（`isFloatingCourseMode`）、onboarding 引导、背景壁纸容器、校园服务路由（成绩/空教室/学业进程/扫一扫）、扫码快捷方式深链（`ACTION_QR_SCAN` + `pendingDeepLink`/`onNewIntent`） |
+| `Navigation.kt` | `WallpaperAdjust`、`GradeQuery`、`FreeClassroomQuery`、`AcademicProgress`、`CredentialManagement`、`QrScan` 目的地 |
+| `AndroidManifest.xml` | `CAMERA` 权限；`MainActivity` 追加 `QR_SCAN` intent-filter（不写 `targetPackage`，兼容 dev/prod 两个 applicationId）与 `android.app.shortcuts` meta-data |
 | `ui/components/NavigationComponents.kt` | 液态玻璃 Dock（`BottomNavigationBar`）+ `DockSafeBottomPadding` |
 
 ### 4. 数据层（Room/proto 无法拆文件，追加字段）
@@ -66,9 +67,12 @@ git diff 3eb39c2 --stat -- app/src/main/java app/src/main/res | sort -t'|' -k2 -
 
 - 凭据存储改造（`WbuAuthTransport.kt`）：key 由旧版扁平名改为「服务类型 × 账号」分桶（`<field>@<service>@<account>`，如 `password@ids@primary`、`cookies@jwxt@primary`），Cookie 按服务归属拆分持久化（运行时内存 jar 仍共用）；旧扁平 key 一次性**复制**迁移（`migrateLegacyCredentialKeysOnce`，`MyApplication` 启动调用），**保留旧数据不删**。新增 `data/model/wbu/CredentialService.kt`（服务枚举）、`WbuCredentialRepository.kt`、`CredentialVerifier.kt`。
 - 登录编排统一（**上游无此结构**）：`ui/campus/components/WbuCampusAuthSheet.kt` 升级为唯一登录编排宿主（WebVPN 门户登录 / 短信 / 滑块 / 二维码 / 证书异常询问 `SslIssueDialog` / 校园网确认回调 / 验证码回退回调 / `flowTagPrefix`），校园服务、课表页、导入弹窗、账号与凭据页共用；`ui/components/SslIssueDialog.kt` 为抽出的公共弹窗；`ui/components/WbuCourseImportSheet.kt` 瘦身为「导入管线 + 学期/重复课程弹窗」。
+- 扫码端（**上游无此结构**）：`ui/campus/qrscan/`（`QrScanScreen` + `QrScanViewModel`）用 CameraX + ML Kit 解码统一认证二维码；`CasQrLink.parseUuid` 解析二维码内 uuid；`IdsCasClient.scanPeerQrCode`/`confirmPeerQrCode`（+ `WbuSyncEngine` 门面）实现「置 2 → 置 1」，身份取自本机 `CASTGC`，未登录按 `206302` 判定。
 
 ### 6. 其他独有/定制
 - `ui/theme/ThemeClassFlow.kt`（Sakura/Afternoon/Evening 色板 + ClassFlowTheme）
+- 扫一扫快捷方式资源：`res/xml/shortcuts.xml`、`res/drawable/ic_shortcut_qr_scan.xml`（独有文件）
+- 依赖追加：`androidx.camera:camera-{core,camera2,lifecycle,view}` 1.6.2 + `com.google.mlkit:barcode-scanning` 17.3.0（`gradle/libs.versions.toml`、`app/build.gradle.kts`）
 - `ui/settings/themesettings/`、`WallpaperAdjustScreen.kt`、`OnboardingOverlay.kt`
 - widget `*NativeRenderer.kt` 系列（原生渲染，上游部分有对应文件——差异在渲染实现）
 - `tool/UpdateTool.kt`（更新渠道单渠道 + 兼容 API）

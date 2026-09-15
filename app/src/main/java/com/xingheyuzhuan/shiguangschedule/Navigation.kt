@@ -53,6 +53,7 @@ sealed interface Destination : NavKey {
     @Serializable data object LibraryBorrow : Destination
     @Serializable data object CredentialManagement : Destination
     @Serializable data object CourseSelection : Destination
+    @Serializable data object QrScan : Destination
 
     // --- 动态传参页面 ---
 

@@ -75,6 +75,40 @@ enum class QrStatus {
 }
 
 /**
+ * 扫码端（本机当「已登录的手机」）扫描他人二维码的结果。
+ */
+enum class QrScanOutcome {
+    /** 已扫描：被扫码端 getStatus 变为 2，等待本机确认。 */
+    SCANNED,
+
+    /** 本机没有有效的统一认证会话，需先登录。 */
+    NEED_LOGIN,
+
+    /** 二维码已失效。 */
+    EXPIRED,
+
+    /** 网络异常等无法判定。 */
+    ERROR
+}
+
+/**
+ * 扫码端确认登录的结果。
+ */
+enum class QrConfirmOutcome {
+    /** 已确认：被扫码端 getStatus 变为 1，随后可自行换 ST 完成登录。 */
+    CONFIRMED,
+
+    /** 本机没有有效的统一认证会话，需先登录。 */
+    NEED_LOGIN,
+
+    /** 二维码已失效。 */
+    EXPIRED,
+
+    /** 网络异常等无法判定。 */
+    ERROR
+}
+
+/**
  * 学期配置：从 /admin/api/getZclistByXnxq 派生。
  */
 data class WbuSemesterConfig(
@@ -463,6 +497,18 @@ class WbuSyncEngine(
 
     /** 轮询二维码状态。 */
     suspend fun pollQrStatus(session: QrSession): QrStatus = cas.pollQrStatus(session)
+
+    /** 扫码端：扫描他人展示的统一认证登录二维码。 */
+    suspend fun scanPeerQrCode(uuid: String): QrScanOutcome = cas.scanPeerQrCode(uuid, "CAS_QR_SCAN")
+
+    /** 扫码端：确认登录。 */
+    suspend fun confirmPeerQrCode(uuid: String): QrConfirmOutcome = cas.confirmPeerQrCode(uuid, "CAS_QR_SCAN")
+
+    /** 是否已持有统一认证会话（轻量，仅查本地 CASTGC，不发请求）。 */
+    fun hasUnifiedAuthSession(): Boolean {
+        transport.restoreCookieStore()
+        return transport.cookieStore.any { it.name == "CASTGC" && it.value.isNotBlank() }
+    }
 
     /** 扫码确认后完成登录（含教务会话引导与 WebVPN 门禁就绪检测）。 */
     suspend fun completeQrLogin(

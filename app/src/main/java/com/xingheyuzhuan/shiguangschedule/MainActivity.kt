@@ -1,5 +1,6 @@
 package com.xingheyuzhuan.shiguangschedule
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -111,6 +112,8 @@ import com.xingheyuzhuan.shiguangschedule.ui.components.AppDownloadProgressDialo
 import com.xingheyuzhuan.shiguangschedule.ui.components.AppUpdateFoundDialog
 import com.xingheyuzhuan.shiguangschedule.ui.components.InstallPermissionPromptDialog
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 import com.xingheyuzhuan.shiguangschedule.data.model.AppSettingsModel
@@ -131,6 +134,7 @@ import com.xingheyuzhuan.shiguangschedule.ui.campus.academic.AcademicProgressScr
 import com.xingheyuzhuan.shiguangschedule.ui.campus.classroom.FreeClassroomScreen
 import com.xingheyuzhuan.shiguangschedule.ui.campus.courseselection.CourseSelectionScreen
 import com.xingheyuzhuan.shiguangschedule.ui.campus.grade.GradeQueryScreen
+import com.xingheyuzhuan.shiguangschedule.ui.campus.qrscan.QrScanScreen
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.list.SchoolSelectionListScreen
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.web.WebViewScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.SettingsScreen
@@ -160,6 +164,14 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        /** 桌面快捷方式「扫一扫」入口 action（见 res/xml/shortcuts.xml）。 */
+        const val ACTION_QR_SCAN = "com.xingheyuzhuan.shiguangschedule.action.QR_SCAN"
+    }
+
+    /** 快捷方式入口产生的待处理跳转，由 AppNavigation 消费后清空。 */
+    private val pendingDeepLink = MutableStateFlow<Destination?>(null)
+
     @Inject
     lateinit var appSettingsRepository: AppSettingsRepository
 
@@ -184,6 +196,9 @@ class MainActivity : ComponentActivity() {
             )
         )
         super.onCreate(savedInstanceState)
+        // 仅在全新启动时消费一次：重建（旋转/进程恢复）时 intent 仍带着 action，
+        // 若照常处理会把用户从返回后的页面再次拉回扫码页
+        if (savedInstanceState == null) handleDeepLink(intent)
         enableHighRefreshRate()
         setContent {
             val settings by appSettingsRepository.getAppSettings()
@@ -209,12 +224,28 @@ class MainActivity : ComponentActivity() {
                         StartScreen.COURSE_SCHEDULE -> Destination.CourseSchedule
                         StartScreen.TODAY_SCHEDULE -> Destination.TodaySchedule
                     },
+                    pendingDeepLink = pendingDeepLink,
+                    onDeepLinkConsumed = { pendingDeepLink.value = null },
                     courseConversionRepository = courseConversionRepository,
                     courseTableRepository = courseTableRepository,
                     timeSlotRepository = timeSlotRepository,
                     appSettingsRepository = appSettingsRepository
                 )
             }
+        }
+    }
+
+    /** App 在后台时（singleTask）快捷方式走这里。 */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleDeepLink(intent)
+    }
+
+    /** 只识别扫码快捷方式入口；其余 intent（含桌面正常启动）不介入既有启动页逻辑。 */
+    private fun handleDeepLink(intent: Intent?) {
+        if (intent?.action == ACTION_QR_SCAN) {
+            pendingDeepLink.value = Destination.QrScan
         }
     }
 
@@ -238,6 +269,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppNavigation(
     startDestination: Destination,
+    pendingDeepLink: StateFlow<Destination?>,
+    onDeepLinkConsumed: () -> Unit,
     courseConversionRepository: CourseConversionRepository,
     courseTableRepository: CourseTableRepository,
     timeSlotRepository: TimeSlotRepository,
@@ -372,6 +405,15 @@ fun AppNavigation(
                 navBridge.navigateToMain(Destination.Settings)
             }
         }
+    }
+
+    // 快捷方式入口：等引导流程结束后再消费，避免被 onboarding 覆盖
+    val deepLinkTarget by pendingDeepLink.collectAsState()
+    LaunchedEffect(deepLinkTarget, showOnboarding) {
+        if (showOnboarding) return@LaunchedEffect
+        val target = deepLinkTarget ?: return@LaunchedEffect
+        onDeepLinkConsumed()
+        navBridge.navigate(target)
     }
 
     val showcaseStyle = ShowcaseStyle.Default.copy(
@@ -613,6 +655,7 @@ fun AppNavigation(
                             Destination.LibraryBorrow -> com.xingheyuzhuan.shiguangschedule.ui.campus.library.LibraryScreen(navBridge = navBridge)
                             Destination.CredentialManagement -> CredentialManagementScreen(navBridge = navBridge)
                             Destination.CourseSelection -> CourseSelectionScreen(navBridge = navBridge)
+                            Destination.QrScan -> QrScanScreen(navBridge = navBridge)
                             Destination.UpdateRepo -> UpdateRepoScreen(navBridge = navBridge)
                             Destination.NotificationSettings -> NotificationSettingsScreen(onBack = navBridge::popBackStack)
                             Destination.ThemeSettings -> ThemeSettingsScreen(onBack = navBridge::popBackStack)

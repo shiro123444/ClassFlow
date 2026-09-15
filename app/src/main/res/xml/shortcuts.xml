@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 桌面长按图标的静态快捷方式：扫一扫（统一认证扫码登录）。
+     intent 只声明自定义 action + DEFAULT，不写 targetPackage，
+     以兼容 dev(.dev)/prod 两个 flavor 的 applicationId。
+     只给 shortLabel（不带 longLabel），桌面展示的固定是「扫一扫」。 -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_qr_scan"
+        android:shortcutId="qr_scan"
+        android:shortcutShortLabel="@string/shortcut_short_qr_scan">
+
+        <intent android:action="com.xingheyuzhuan.shiguangschedule.action.QR_SCAN">
+            <categories android:name="android.intent.category.DEFAULT" />
+        </intent>
+    </shortcut>
+</shortcuts>
