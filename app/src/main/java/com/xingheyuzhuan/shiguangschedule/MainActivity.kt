@@ -139,6 +139,7 @@ import com.xingheyuzhuan.shiguangschedule.ui.settings.additional.OpenSourceLicen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.backup.BackupScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.contribution.ContributionScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.conversion.CourseTableConversionScreen
+import com.xingheyuzhuan.shiguangschedule.ui.settings.credentials.CredentialManagementScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.course.AddEditCourseScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.coursemanagement.CourseInstanceListScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.coursemanagement.CourseNameListScreen
@@ -610,6 +611,7 @@ fun AppNavigation(
                             Destination.FreeClassroomQuery -> FreeClassroomScreen(navBridge = navBridge)
                             Destination.AcademicProgress -> AcademicProgressScreen(navBridge = navBridge)
                             Destination.LibraryBorrow -> com.xingheyuzhuan.shiguangschedule.ui.campus.library.LibraryScreen(navBridge = navBridge)
+                            Destination.CredentialManagement -> CredentialManagementScreen(navBridge = navBridge)
                             Destination.CourseSelection -> CourseSelectionScreen(navBridge = navBridge)
                             Destination.UpdateRepo -> UpdateRepoScreen(navBridge = navBridge)
                             Destination.NotificationSettings -> NotificationSettingsScreen(onBack = navBridge::popBackStack)

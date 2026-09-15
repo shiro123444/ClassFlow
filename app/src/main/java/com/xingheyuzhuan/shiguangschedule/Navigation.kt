@@ -51,6 +51,7 @@ sealed interface Destination : NavKey {
     @Serializable data object FreeClassroomQuery : Destination
     @Serializable data object AcademicProgress : Destination
     @Serializable data object LibraryBorrow : Destination
+    @Serializable data object CredentialManagement : Destination
     @Serializable data object CourseSelection : Destination
 
     // --- 动态传参页面 ---

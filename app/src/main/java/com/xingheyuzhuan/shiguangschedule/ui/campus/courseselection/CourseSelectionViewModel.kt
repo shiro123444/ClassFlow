@@ -13,6 +13,8 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.CourseSelectionDataSo
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.CourseSelectionPrefs
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.MockCourseSelectionDataSource
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuCourseSelectionClient
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSessionExpiredException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -159,6 +161,20 @@ class CourseSelectionViewModel @Inject constructor(
      * 加载选课页初始化数据（批次 + 学生信息）
      */
     fun loadInit(isRefresh: Boolean = false) {
+        // 本地无教务凭据时直接进入登录引导，不空跑请求（Mock 模式无需凭据）
+        if (!_uiState.value.mockEnabled &&
+            !WbuAuthTransport.hasLocalSession(getApplication(), CredentialService.JIAOWU, useVpn = false)
+        ) {
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    isRefreshing = false,
+                    errorMessage = null,
+                    needLogin = true
+                )
+            }
+            return
+        }
         viewModelScope.launch {
             _uiState.update {
                 it.copy(isLoading = !isRefresh, isRefreshing = isRefresh, errorMessage = null)

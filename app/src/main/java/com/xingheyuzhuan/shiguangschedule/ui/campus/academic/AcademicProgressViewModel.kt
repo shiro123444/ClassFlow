@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.AcademicCourse
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.AcademicCourseGroup
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.AcademicProgressData
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuQueryClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSessionExpiredException
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -106,6 +108,18 @@ class AcademicProgressViewModel @Inject constructor(
      * 加载或刷新学业完成度与课程进程
      */
     fun loadAcademicProgress(isRefresh: Boolean = false) {
+        // 本地无教务凭据时直接进入登录引导，不空跑请求
+        if (!WbuAuthTransport.hasLocalSession(getApplication(), CredentialService.JIAOWU)) {
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    isRefreshing = false,
+                    errorMessage = null,
+                    needLogin = true
+                )
+            }
+            return
+        }
         viewModelScope.launch {
             _uiState.update {
                 it.copy(

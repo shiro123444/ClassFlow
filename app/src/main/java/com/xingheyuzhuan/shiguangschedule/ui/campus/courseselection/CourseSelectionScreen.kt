@@ -83,6 +83,7 @@ import com.xingheyuzhuan.shiguangschedule.data.model.wbu.SelectedCourse
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.SelectionBatch
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.TeachingClass
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthMode
+import com.xingheyuzhuan.shiguangschedule.Destination
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import com.xingheyuzhuan.shiguangschedule.ui.components.NavigationRailWidth
 import com.xingheyuzhuan.shiguangschedule.ui.components.isWideScreen
@@ -109,8 +110,10 @@ fun CourseSelectionScreen(
 
     if (uiState.needLogin || showLoginSheet) {
         WbuCampusAuthSheet(
+            onNavigateToAccount = { navBridge.navigate(Destination.CredentialManagement) },
             forceDirectCampus = true,
             defaultAuthMode = WbuAuthMode.JYXT_LEGACY,
+            title = stringResource(R.string.title_login_course_selection),
             onDismiss = {
                 showLoginSheet = false
                 viewModel.onLoginDismissed()

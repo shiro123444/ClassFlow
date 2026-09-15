@@ -7,6 +7,8 @@ import com.xingheyuzhuan.shiguangschedule.data.model.wbu.BookDetail
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.BorrowHistoryBook
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.BorrowedBook
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.LibraryDashboardData
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuQueryClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSessionExpiredException
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
@@ -65,6 +67,18 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun loadLibraryData(isRefresh: Boolean = false) {
+        // 本地连读者会话凭据都没有时不再空跑一次请求，直接进入登录引导
+        if (!WbuAuthTransport.hasLocalSession(getApplication(), CredentialService.LIBRARY)) {
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    isRefreshing = false,
+                    errorMessage = null,
+                    isSessionExpired = true
+                )
+            }
+            return
+        }
         viewModelScope.launch {
             _uiState.update {
                 it.copy(

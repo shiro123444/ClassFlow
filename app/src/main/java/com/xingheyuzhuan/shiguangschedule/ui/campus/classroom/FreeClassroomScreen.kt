@@ -71,6 +71,7 @@ import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CAMPUS_HGH_UUID
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CAMPUS_MYH_ID
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.FreeClassroom
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.JSLX_DICT
+import com.xingheyuzhuan.shiguangschedule.Destination
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import com.xingheyuzhuan.shiguangschedule.ui.components.DockSafeBottomPadding
 import com.xingheyuzhuan.shiguangschedule.ui.components.NavigationRailWidth
@@ -99,6 +100,7 @@ fun FreeClassroomScreen(
 
     if (uiState.needLogin || showLoginDialog) {
         WbuCampusAuthSheet(
+            onNavigateToAccount = { navBridge.navigate(Destination.CredentialManagement) },
             onDismiss = {
                 showLoginDialog = false
                 viewModel.onLoginDismissed()
@@ -106,7 +108,8 @@ fun FreeClassroomScreen(
             onLoginSuccess = {
                 showLoginDialog = false
                 viewModel.onLoginSuccess()
-            }
+            },
+            title = stringResource(R.string.title_login_free_classroom)
         )
     }
 

@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CourseGrade
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.GradeStats
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuQueryClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSessionExpiredException
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -45,6 +47,11 @@ class GradeQueryViewModel @Inject constructor(
     }
 
     fun loadGrades() {
+        // 本地无教务凭据时直接进入登录引导，不空跑请求
+        if (!WbuAuthTransport.hasLocalSession(context, CredentialService.JIAOWU)) {
+            _uiState.update { it.copy(isLoading = false, needLogin = true, errorMessage = null) }
+            return
+        }
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null, needLogin = false) }
 

@@ -274,6 +274,9 @@ internal class WebVpnClient(
         fun setTwfid(context: android.content.Context, value: String) = WbuAuthTransport.setTwfid(context, value)
         fun clearTwfid(context: android.content.Context) = WbuAuthTransport.clearTwfid(context)
 
+        /** 凭据变更信号（TWFID / Cookie），供界面同步刷新。 */
+        val credentialChanges get() = WbuAuthTransport.credentialChanges
+
         /** 「使用 https 访问 WebVPN」：默认关闭。 */
         fun getUseHttpsWebVpn(context: android.content.Context): Boolean =
             WbuAuthTransport.getUseHttpsWebVpn(context)

@@ -321,6 +321,18 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            // 账号与凭据管理（追加在末尾，避免打乱上方 onboarding 依赖的 LazyColumn index）
+            item {
+                SettingsCard(title = stringResource(R.string.item_credential_management)) {
+                    SettingTile(
+                        icon = Icons.Rounded.Lock,
+                        title = stringResource(R.string.item_credential_management),
+                        subtitle = stringResource(R.string.desc_credential_management),
+                        onClick = { navBridge.navigate(Destination.CredentialManagement) }
+                    )
+                }
+            }
         }
     }
 

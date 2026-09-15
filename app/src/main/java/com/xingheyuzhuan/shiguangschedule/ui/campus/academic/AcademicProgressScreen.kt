@@ -91,6 +91,7 @@ import com.xingheyuzhuan.shiguangschedule.data.model.wbu.AcademicProgressData
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.AcademicProgressSummary
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.AcademicStats
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.StudentProfile
+import com.xingheyuzhuan.shiguangschedule.Destination
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import com.xingheyuzhuan.shiguangschedule.ui.components.DockSafeBottomPadding
 import com.xingheyuzhuan.shiguangschedule.ui.components.NavigationRailWidth
@@ -108,6 +109,7 @@ fun AcademicProgressScreen(
 
     if (uiState.needLogin || showLoginSheet) {
         WbuCampusAuthSheet(
+            onNavigateToAccount = { navBridge.navigate(Destination.CredentialManagement) },
             onDismiss = {
                 showLoginSheet = false
                 viewModel.onLoginDismissed()
@@ -115,7 +117,8 @@ fun AcademicProgressScreen(
             onLoginSuccess = {
                 showLoginSheet = false
                 viewModel.onLoginSuccess()
-            }
+            },
+            title = stringResource(R.string.title_login_academic)
         )
     }
 

@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.xingheyuzhuan.shiguangschedule.data.db.main.TimeSlot
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.repository.AppSettingsRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.TimeSlotRepository
 import com.xingheyuzhuan.shiguangschedule.data.sync.SyncManager
@@ -42,6 +43,11 @@ class MyApplication : Application(), Configuration.Provider {
         // Room → DataStore 一次性迁移（幂等：DataStore 已有数据时跳过）
         CoroutineScope(Dispatchers.IO).launch {
             appSettingsRepository.migrateFromRoomOnce()
+        }
+
+        // WBU 凭据 key 一次性迁移：旧版扁平 key →「服务类型 × 账号」分桶（复制，保留旧数据）
+        CoroutineScope(Dispatchers.IO).launch {
+            WbuAuthTransport.migrateLegacyCredentialKeysOnce(this@MyApplication)
         }
 
         // 创建并启动同步管理器（由 Hilt 注入后直接使用）

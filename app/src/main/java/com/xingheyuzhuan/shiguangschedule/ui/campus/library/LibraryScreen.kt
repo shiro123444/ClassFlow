@@ -93,6 +93,9 @@ import com.xingheyuzhuan.shiguangschedule.data.model.wbu.BorrowHistoryBook
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.BorrowedBook
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.HoldingItem
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.ReaderProfile
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthMode
+import com.xingheyuzhuan.shiguangschedule.Destination
+import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -119,12 +122,18 @@ fun LibraryScreen(
 
     if (showAuthSheet) {
         WbuCampusAuthSheet(
+            onNavigateToAccount = { navBridge.navigate(Destination.CredentialManagement) },
             onDismiss = { showAuthSheet = false },
             onLoginSuccess = {
                 showAuthSheet = false
                 viewModel.loadLibraryData(isRefresh = true)
             },
-            requireUnifiedCas = true
+            requireUnifiedCas = true,
+            // 图书馆只走统一认证，锁定密码类型
+            defaultAuthMode = WbuAuthMode.UNIFIED_CAS,
+            lockPasswordType = true,
+            tipsScenario = WbuAuthTipsScenario.LIBRARY,
+            title = stringResource(R.string.title_login_library)
         )
     }
 
