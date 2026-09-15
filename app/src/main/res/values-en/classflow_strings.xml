@@ -728,4 +728,17 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="action_qr_scan_retry">Retry</string>
     <string name="qr_scan_tls_prompt">Certificate validation failed. Trust and continue?</string>
 
+    <!-- Language settings (upstream sync: language tag array + display name array, empty tag = follow system) -->
+    <string-array name="language_tags">
+        <item>zh-CN</item>
+        <item>zh-TW</item>
+        <item>en</item>
+    </string-array>
+
+    <string-array name="language_names">
+        <item>Simplified Chinese</item>
+        <item>Traditional Chinese</item>
+        <item>English</item>
+    </string-array>
+
 </resources>

@@ -40,7 +40,8 @@ git diff 3eb39c2 --stat -- app/src/main/java app/src/main/res | sort -t'|' -k2 -
 | 文件 | 差异内容 |
 |---|---|
 | `ui/settings/SettingsScreen.kt` | 毛玻璃卡片体系（SettingsCard/SettingTile）、品牌头部、Sakura 开关 |
-| `ui/settings/additional/MoreOptionsScreen.kt` | 毛玻璃、WBU VPN 手动开关、产品愿景卡片、贡献者入口；**不恢复**「更新适配仓库」入口（有意定制） |
+| `ui/settings/additional/MoreOptionsScreen.kt` | 毛玻璃、WBU VPN 手动开关、产品愿景卡片、贡献者入口；语言入口改为导航到 `LanguageSettings` 独立页（旧对话框已移除）；**不恢复**「更新适配仓库」入口（有意定制） |
+| `ui/settings/additional/LanguageSettingScreen.kt` | 上游移植文件（上游为 `shared/commonMain` + expect/actual，此处为 Android-only 单文件实现） |
 | `ui/settings/credentials/` | 账号与凭据管理页：按服务类型（统一认证/教务/图书馆/WebVPN/一卡通/WebDAV）分区，支持进入自动验证会话（可开关）、密码脱敏清除/重设、按服务清会话；独有文件 |
 | `ui/settings/style/StyleSettingsScreen.kt` + `Components.kt` + `ViewModel.kt` | 新增设置项：壁纸调整入口（WallpaperAdjust）、玻璃样式预设、字体样式、背景遮罩等；布局与上游不同 |
 | `ui/settings/conversion/` | WBU 教务一键同步入口（替换上游多校入口）、ICS 导出定制弹窗（Dialog+Card）、同步到系统日历（复用上游链路） |
@@ -49,9 +50,10 @@ git diff 3eb39c2 --stat -- app/src/main/java app/src/main/res | sort -t'|' -k2 -
 ### 3. 宿主与导航
 | 文件 | 差异内容 |
 |---|---|
-| `MainActivity.kt` | 悬浮课程时隐藏 Dock（`isFloatingCourseMode`）、onboarding 引导、背景壁纸容器、校园服务路由（成绩/空教室/学业进程/扫一扫）、扫码快捷方式深链（`ACTION_QR_SCAN` + `pendingDeepLink`/`onNewIntent`） |
-| `Navigation.kt` | `WallpaperAdjust`、`GradeQuery`、`FreeClassroomQuery`、`AcademicProgress`、`CredentialManagement`、`QrScan` 目的地 |
-| `AndroidManifest.xml` | `CAMERA` 权限；`MainActivity` 追加 `QR_SCAN` intent-filter（不写 `targetPackage`，兼容 dev/prod 两个 applicationId）与 `android.app.shortcuts` meta-data |
+| `MainActivity.kt` | 悬浮课程时隐藏 Dock（`isFloatingCourseMode`）、onboarding 引导、背景壁纸容器、校园服务路由（成绩/空教室/学业进程/扫一扫）、扫码快捷方式深链（`ACTION_QR_SCAN` + `pendingDeepLink`/`onNewIntent`）、`AppCompatActivity` 宿主（语言切换依赖 AppCompat delegate 生效） |
+| `Navigation.kt` | `WallpaperAdjust`、`GradeQuery`、`FreeClassroomQuery`、`AcademicProgress`、`CredentialManagement`、`QrScan`、`LanguageSettings` 目的地 |
+| `AndroidManifest.xml` | `CAMERA` 权限；`MainActivity` 追加 `QR_SCAN` intent-filter（不写 `targetPackage`，兼容 dev/prod 两个 applicationId）与 `android.app.shortcuts` meta-data；`AppLocalesMetadataHolderService` + `autoStoreLocales=true`（语言选择持久化，上游同款） |
+| `res/values/themes.xml` | `Theme.ClassFlow` 父主题改为 `Theme.AppCompat.DayNight.NoActionBar` + 透明状态栏 + 关闭 Activity 转场（上游 androidApp 同款；AppCompatActivity 必需） |
 | `ui/components/NavigationComponents.kt` | 液态玻璃 Dock（`BottomNavigationBar`）+ `DockSafeBottomPadding` |
 
 ### 4. 数据层（Room/proto 无法拆文件，追加字段）

@@ -728,4 +728,17 @@
     <string name="action_qr_scan_retry">重試</string>
     <string name="qr_scan_tls_prompt">憑證校驗異常，是否信任並繼續？</string>
 
+    <!-- 語言設定（上游同步：語言 Tag 陣列 + 語言顯示名稱陣列，跟隨系統用空 tag 表示） -->
+    <string-array name="language_tags">
+        <item>zh-CN</item>
+        <item>zh-TW</item>
+        <item>en</item>
+    </string-array>
+
+    <string-array name="language_names">
+        <item>簡體中文</item>
+        <item>繁體中文</item>
+        <item>English</item>
+    </string-array>
+
 </resources>

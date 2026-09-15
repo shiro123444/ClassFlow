@@ -115,7 +115,6 @@ fun MoreOptionsScreen(
 
     var updateStatus by remember { mutableStateOf<UpdateStatus>(UpdateStatus.Idle) }
     var showResultDialog by remember { mutableStateOf(false) }
-    var showLanguageDialog by remember { mutableStateOf(false) }
     var showStartScreenDialog by remember { mutableStateOf(false) }
     var showInstallPermissionDialog by remember { mutableStateOf(false) }
     var showServerUrlDialog by remember { mutableStateOf(false) }
@@ -230,7 +229,7 @@ fun MoreOptionsScreen(
 
                 ListItem(
                     modifier = Modifier.clickable {
-                        handleLanguageSettingClick(context) { showLanguageDialog = true }
+                        navBridge.navigate(Destination.LanguageSettings)
                     },
                     headlineContent = { Text(stringResource(R.string.item_language_settings)) },
                     leadingContent = {
@@ -719,11 +718,6 @@ fun MoreOptionsScreen(
                 snackbarHostState.showSnackbar(context.getString(R.string.toast_channel_switched, context.getString(UpdateChannelType.fromId(newChannel).titleRes)))
             }
         }
-    )
-
-    LanguageSelectionDialog(
-        showDialog = showLanguageDialog,
-        onDismiss = { showLanguageDialog = false }
     )
 
     val currentStartScreen by viewModel.startScreen.collectAsState()

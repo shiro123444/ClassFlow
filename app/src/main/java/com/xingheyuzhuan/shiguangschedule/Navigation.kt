@@ -33,6 +33,7 @@ sealed interface Destination : NavKey {
     @Serializable data object CourseTableConversion : Destination
     @Serializable data object NotificationSettings : Destination
     @Serializable data object MoreOptions : Destination
+    @Serializable data object LanguageSettings : Destination
     @Serializable data object OpenSourceLicenses : Destination
     @Serializable data object UpdateRepo : Destination
     @Serializable data object QuickActions : Destination

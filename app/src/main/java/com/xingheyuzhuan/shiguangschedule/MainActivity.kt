@@ -6,7 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
 import dagger.hilt.android.AndroidEntryPoint
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -138,6 +138,7 @@ import com.xingheyuzhuan.shiguangschedule.ui.campus.qrscan.QrScanScreen
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.list.SchoolSelectionListScreen
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.web.WebViewScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.SettingsScreen
+import com.xingheyuzhuan.shiguangschedule.ui.settings.additional.LanguageSettingScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.additional.MoreOptionsScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.additional.OpenSourceLicensesScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.backup.BackupScreen
@@ -162,7 +163,7 @@ import com.xingheyuzhuan.shiguangschedule.ui.today.TodayScheduleScreen
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     companion object {
         /** 桌面快捷方式「扫一扫」入口 action（见 res/xml/shortcuts.xml）。 */
@@ -658,6 +659,7 @@ fun AppNavigation(
                             Destination.QrScan -> QrScanScreen(navBridge = navBridge)
                             Destination.UpdateRepo -> UpdateRepoScreen(navBridge = navBridge)
                             Destination.NotificationSettings -> NotificationSettingsScreen(onBack = navBridge::popBackStack)
+                            Destination.LanguageSettings -> LanguageSettingScreen(onBack = navBridge::popBackStack)
                             Destination.ThemeSettings -> ThemeSettingsScreen(onBack = navBridge::popBackStack)
                             Destination.BackupAndRestore -> BackupScreen(onBack = navBridge::popBackStack)
 
