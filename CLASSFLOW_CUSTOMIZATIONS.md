@@ -41,6 +41,7 @@ git diff 3eb39c2 --stat -- app/src/main/java app/src/main/res | sort -t'|' -k2 -
 |---|---|
 | `ui/settings/SettingsScreen.kt` | 毛玻璃卡片体系（SettingsCard/SettingTile）、品牌头部、Sakura 开关 |
 | `ui/settings/additional/MoreOptionsScreen.kt` | 毛玻璃、WBU VPN 手动开关、产品愿景卡片、贡献者入口；**不恢复**「更新适配仓库」入口（有意定制） |
+| `ui/settings/credentials/` | 账号与凭据管理页：按服务类型（统一认证/教务/图书馆/WebVPN/一卡通/WebDAV）分区，支持进入自动验证会话（可开关）、密码脱敏清除/重设、按服务清会话；独有文件 |
 | `ui/settings/style/StyleSettingsScreen.kt` + `Components.kt` + `ViewModel.kt` | 新增设置项：壁纸调整入口（WallpaperAdjust）、玻璃样式预设、字体样式、背景遮罩等；布局与上游不同 |
 | `ui/settings/conversion/` | WBU 教务一键同步入口（替换上游多校入口）、ICS 导出定制弹窗（Dialog+Card）、同步到系统日历（复用上游链路） |
 | `ui/settings/AppSettingsViewModel.kt` | 追加字段 setter（Sakura、显示非本周课程等） |
@@ -49,7 +50,7 @@ git diff 3eb39c2 --stat -- app/src/main/java app/src/main/res | sort -t'|' -k2 -
 | 文件 | 差异内容 |
 |---|---|
 | `MainActivity.kt` | 悬浮课程时隐藏 Dock（`isFloatingCourseMode`）、onboarding 引导、背景壁纸容器、校园服务路由（成绩/空教室/学业进程） |
-| `Navigation.kt` | `WallpaperAdjust`、`GradeQuery`、`FreeClassroomQuery`、`AcademicProgress` 目的地 |
+| `Navigation.kt` | `WallpaperAdjust`、`GradeQuery`、`FreeClassroomQuery`、`AcademicProgress`、`CredentialManagement` 目的地 |
 | `ui/components/NavigationComponents.kt` | 液态玻璃 Dock（`BottomNavigationBar`）+ `DockSafeBottomPadding` |
 
 ### 4. 数据层（Room/proto 无法拆文件，追加字段）
@@ -62,6 +63,9 @@ git diff 3eb39c2 --stat -- app/src/main/java app/src/main/res | sort -t'|' -k2 -
 
 ### 5. WBU 教务同步与校园服务（独有子系统，上游无此文件）
 `data/network/wbu/`、`data/model/wbu/`、`ui/campus/`（成绩查询、空教室查询、学业完成度与课程进程）、`ui/components/WbuAuthBottomSheet.kt`、`WbuLoginSelectorBottomSheet.kt`、`ui/schedule/components/WbuSyncComponents.kt`、`ui/schoolselection/web/`（WebView 注入）、`WbuWebLoginAutofillStore.kt` 等——**上游不存在，merge 零冲突**
+
+- 凭据存储改造（`WbuAuthTransport.kt`）：key 由旧版扁平名改为「服务类型 × 账号」分桶（`<field>@<service>@<account>`，如 `password@ids@primary`、`cookies@jwxt@primary`），Cookie 按服务归属拆分持久化（运行时内存 jar 仍共用）；旧扁平 key 一次性**复制**迁移（`migrateLegacyCredentialKeysOnce`，`MyApplication` 启动调用），**保留旧数据不删**。新增 `data/model/wbu/CredentialService.kt`（服务枚举）、`WbuCredentialRepository.kt`、`CredentialVerifier.kt`。
+- 登录编排统一（**上游无此结构**）：`ui/campus/components/WbuCampusAuthSheet.kt` 升级为唯一登录编排宿主（WebVPN 门户登录 / 短信 / 滑块 / 二维码 / 证书异常询问 `SslIssueDialog` / 校园网确认回调 / 验证码回退回调 / `flowTagPrefix`），校园服务、课表页、导入弹窗、账号与凭据页共用；`ui/components/SslIssueDialog.kt` 为抽出的公共弹窗；`ui/components/WbuCourseImportSheet.kt` 瘦身为「导入管线 + 学期/重复课程弹窗」。
 
 ### 6. 其他独有/定制
 - `ui/theme/ThemeClassFlow.kt`（Sakura/Afternoon/Evening 色板 + ClassFlowTheme）
