@@ -253,6 +253,13 @@ fun SettingsScreen(
                     )
                     SettingDivider()
                     SettingTile(
+                        icon = androidx.compose.material.icons.Icons.Rounded.EventSeat,
+                        title = stringResource(R.string.item_library_seat),
+                        subtitle = stringResource(R.string.desc_library_seat),
+                        onClick = { navBridge.navigate(Destination.WebApp(com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId.LIBRARY_SEAT.name)) }
+                    )
+                    SettingDivider()
+                    SettingTile(
                         icon = androidx.compose.material.icons.Icons.Rounded.HowToReg,
                         title = stringResource(R.string.item_course_selection),
                         subtitle = stringResource(R.string.desc_course_selection),

@@ -108,7 +108,8 @@ fun WbuCampusAuthSheet(
     flowTagPrefix: String = "CAMPUS",
     onVpnStatus: ((VpnFullLoginStatus, WbuAuthMode) -> Unit)? = null,
     confirmCampusNetwork: (suspend (Boolean) -> Boolean)? = null,
-    onCaptchaFallback: ((String, String, Boolean) -> Unit)? = null
+    onCaptchaFallback: ((String, String, Boolean) -> Unit)? = null,
+    initialUseVpnOverride: Boolean? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -117,9 +118,9 @@ fun WbuCampusAuthSheet(
     var isLoading by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
-    var initialUseVpn by remember {
+    var initialUseVpn by remember(initialUseVpnOverride) {
         mutableStateOf(
-            when {
+            initialUseVpnOverride ?: when {
                 forceDirectCampus -> false
                 // 仅登录统一认证：是否经 WebVPN 由「统一认证经过WebVPN」决定
                 // （该设置关闭时开关不显示，并由 Sheet 强制直连）

@@ -490,6 +490,12 @@
     <string name="item_library_borrow">圖書館借閱</string>
     <string name="desc_library_borrow">當前在借圖書、一鍵續借、借閱歷史足跡</string>
     <string name="title_library_borrow">圖書館借閱</string>
+    <string name="item_library_seat">圖書館座位預約</string>
+    <string name="desc_library_seat">在線座位預約、樓層選座、簽到與使用狀態</string>
+    <string name="title_library_seat">圖書館座位預約</string>
+    <string name="status_fetching_webapp_token">正在獲取統一身分認證訪問憑證...</string>
+    <string name="title_load_failed">頁面載入失敗</string>
+    <string name="action_exit">退出</string>
     <string name="loading_library_data">正在連接圖書館系統...</string>
     <string name="default_reader_name">讀者</string>
     <string name="tab_current_borrows">當前在借</string>
@@ -569,6 +575,10 @@
     <string name="status_probing_campus_network">正在探測校園網路環境...</string>
     <string name="status_campus_detected_connecting">已檢測到校園網路，正在直連教務系統...</string>
     <string name="status_not_campus_routing_webvpn">未處於校園網路，正在透過 WebVPN 接入...</string>
+    <string name="title_off_campus_detected">未處於校園網路</string>
+    <string name="desc_off_campus_detected">當前未連線校園 Wi-Fi 或校內網路，校外存取建議使用 WebVPN 接入。</string>
+    <string name="hint_off_campus_choose_access">請選擇網路接入方式：</string>
+    <string name="status_probing_campus_after_vpn_fail">WebVPN 門禁已失效，正在探測校園網路...</string>
     <string name="hint_choose_access_method_direct">也可直接選擇接入方式 (跳過檢測)：</string>
     <string name="label_campus_direct_on_campus">校園網直連 (校內)</string>
     <string name="desc_campus_direct_guide">連線了學校 Wi-Fi 或有線網路</string>

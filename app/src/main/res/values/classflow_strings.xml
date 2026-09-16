@@ -487,6 +487,12 @@
     <string name="item_library_borrow">图书馆借阅</string>
     <string name="desc_library_borrow">当前在借图书、一键续借、借阅历史足迹</string>
     <string name="title_library_borrow">图书馆借阅</string>
+    <string name="item_library_seat">图书馆座位预约</string>
+    <string name="desc_library_seat">在线座位预约、楼层选座、签到与使用状态</string>
+    <string name="title_library_seat">图书馆座位预约</string>
+    <string name="status_fetching_webapp_token">正在获取统一身份认证访问凭证...</string>
+    <string name="title_load_failed">页面加载失败</string>
+    <string name="action_exit">退出</string>
     <string name="loading_library_data">正在连接图书馆系统...</string>
     <string name="default_reader_name">读者</string>
     <string name="tab_current_borrows">当前在借</string>
@@ -566,6 +572,10 @@
     <string name="status_probing_campus_network">正在探测校园网络环境...</string>
     <string name="status_campus_detected_connecting">已检测到校园网，正在直连教务系统...</string>
     <string name="status_not_campus_routing_webvpn">未处于校园网，正在通过 WebVPN 接入...</string>
+    <string name="title_off_campus_detected">未处于校园网</string>
+    <string name="desc_off_campus_detected">当前未连接校园 Wi-Fi 或校内网络，校外访问建议使用 WebVPN 接入。</string>
+    <string name="hint_off_campus_choose_access">请选择网络接入方式：</string>
+    <string name="status_probing_campus_after_vpn_fail">WebVPN 门禁已失效，正在探测校园网...</string>
     <string name="hint_choose_access_method_direct">也可直接选择接入方式 (跳过检测)：</string>
     <string name="label_campus_direct_on_campus">校园网直连 (校内)</string>
     <string name="desc_campus_direct_guide">连接了学校 Wi-Fi 或有线网络</string>

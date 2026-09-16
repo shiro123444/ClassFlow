@@ -73,6 +73,11 @@ sealed interface Destination : NavKey {
     ) : Destination
 
     @Serializable
+    data class WebApp(
+        val appId: String
+    ) : Destination
+
+    @Serializable
     data class AddEditCourse(
         val courseId: String? = null
     ) : Destination

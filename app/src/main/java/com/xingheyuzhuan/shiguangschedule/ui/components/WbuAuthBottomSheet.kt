@@ -249,10 +249,10 @@ fun WbuAuthBottomSheet(
             loadingTipIndex = (loadingTipIndex + 1) % loadingTips.size
         }
     }
-    // 「仅登录统一认证」时，统一认证是否经 WebVPN 完全由「统一认证经过WebVPN」决定：
-    // 该设置关闭 => 本次登录无可选项（统一认证只能走公网），隐藏开关并强制直连。
-    val casOnlyForceDirect = unifiedAuthOnly && !idsVpnEnabled
-    val showNetworkSwitch = !hideNetworkSwitch && (!unifiedAuthOnly || idsVpnEnabled)
+    // 「仅登录统一认证」时，统一认证是否经 WebVPN 通常由「统一认证经过WebVPN」决定：
+    // 若外部调用方显式指定了 initialUseVpn=true（如网页应用在校外需经 WebVPN 穿透），则允许使用 WebVPN
+    val casOnlyForceDirect = unifiedAuthOnly && !idsVpnEnabled && !initialUseVpn
+    val showNetworkSwitch = !hideNetworkSwitch && (!unifiedAuthOnly || idsVpnEnabled || initialUseVpn)
     LaunchedEffect(casOnlyForceDirect) {
         if (casOnlyForceDirect && useVpn) {
             useVpn = false

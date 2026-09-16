@@ -490,6 +490,12 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="item_library_borrow">Library Borrowing</string>
     <string name="desc_library_borrow">Active borrows, one-tap renewal &amp; borrowing history</string>
     <string name="title_library_borrow">Library</string>
+    <string name="item_library_seat">Library Seat Booking</string>
+    <string name="desc_library_seat">Seat booking, floor plans, check-ins and live status</string>
+    <string name="title_library_seat">Library Seat Booking</string>
+    <string name="status_fetching_webapp_token">Fetching unified authentication token...</string>
+    <string name="title_load_failed">Page Load Failed</string>
+    <string name="action_exit">Exit</string>
     <string name="loading_library_data">Connecting to library system...</string>
     <string name="default_reader_name">Reader</string>
     <string name="tab_current_borrows">Current Borrows</string>
@@ -569,6 +575,10 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="status_probing_campus_network">Detecting campus network environment...</string>
     <string name="status_campus_detected_connecting">Campus network detected. Connecting directly...</string>
     <string name="status_not_campus_routing_webvpn">Not on campus network. Routing via WebVPN...</string>
+    <string name="title_off_campus_detected">Not on Campus Network</string>
+    <string name="desc_off_campus_detected">Campus Wi-Fi or wired network not detected. WebVPN access is recommended.</string>
+    <string name="hint_off_campus_choose_access">Please select an access method:</string>
+    <string name="status_probing_campus_after_vpn_fail">WebVPN session expired, probing campus network...</string>
     <string name="hint_choose_access_method_direct">Or choose an access method directly:</string>
     <string name="label_campus_direct_on_campus">Campus Direct (On-campus)</string>
     <string name="desc_campus_direct_guide">Connected to school Wi-Fi or ethernet</string>

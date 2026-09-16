@@ -285,6 +285,18 @@ internal class WbuAuthTransport(
         "https://opac.wbu.edu.cn"
     }
 
+    /** 通用 WebVPN 代理基址构造器：将任意 wbu.edu.cn 目标主机映射为对应的代理子域名。 */
+    fun webVpnProxyBase(targetHost: String, withSingleSuffix: Boolean = true): String {
+        val slug = targetHost.replace('.', '-') + if (withSingleSuffix) "-s" else ""
+        return "${webVpnScheme()}://$slug.webvpn.wbu.edu.cn${webVpnPort()}"
+    }
+
+    /** 图书馆座位预约(libseat)代理宿主基址。 */
+    fun libseatProxyBase(): String = webVpnProxyBase("libseat.wbu.edu.cn", withSingleSuffix = true)
+
+    /** 图书馆座位预约(libseat)基址：WebVPN 模式下走代理子域，校内直连走公网。 */
+    fun libseatBase(): String = if (useVpn) libseatProxyBase() else "https://libseat.wbu.edu.cn"
+
     private fun idsProxyBase(): String = "${webVpnScheme()}://ids-wbu-edu-cn.webvpn.wbu.edu.cn${webVpnPort()}"
 
     /** ids 认证基址：受「ids 走 WebVPN」开关控制（默认公网）。 */

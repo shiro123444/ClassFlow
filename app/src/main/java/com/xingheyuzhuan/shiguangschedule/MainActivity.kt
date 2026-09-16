@@ -682,6 +682,11 @@ fun AppNavigation(
                                 appSettingsRepository = appSettingsRepository
                             )
 
+                            is Destination.WebApp -> com.xingheyuzhuan.shiguangschedule.ui.webapp.WebAppScreen(
+                                navBridge = navBridge,
+                                appId = destination.appId
+                            )
+
                             is Destination.AddEditCourse -> AddEditCourseScreen(
                                 onBack = navBridge::popBackStack,
                                 courseId = destination.courseId
