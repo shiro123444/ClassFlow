@@ -745,6 +745,12 @@
     <string name="action_qr_scan_retry">重試</string>
     <string name="qr_scan_tls_prompt">憑證校驗異常，是否信任並繼續？</string>
 
+    <string name="title_login_campus_card">登入一卡通</string>
+    <string name="desc_campus_card_app">餘額明細、卡片管理與生活繳費</string>
+    <string name="credential_sync_campus_card_success">一卡通登入成功</string>
+    <string name="credential_sync_campus_card_failed">一卡通登入失敗：%1$s</string>
+    <string name="webapp_scan_hint">對準設備上的二維碼即可自動掃描</string>
+
     <!-- 語言設定（上游同步：語言 Tag 陣列 + 語言顯示名稱陣列，跟隨系統用空 tag 表示） -->
     <string-array name="language_tags">
         <item>zh-CN</item>

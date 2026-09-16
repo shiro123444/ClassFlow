@@ -742,6 +742,12 @@
     <string name="action_qr_scan_retry">重试</string>
     <string name="qr_scan_tls_prompt">证书校验异常，是否信任并继续？</string>
 
+    <string name="title_login_campus_card">登录一卡通</string>
+    <string name="desc_campus_card_app">余额流水、卡片管理与生活缴费</string>
+    <string name="credential_sync_campus_card_success">一卡通登录成功</string>
+    <string name="credential_sync_campus_card_failed">一卡通登录失败：%1$s</string>
+    <string name="webapp_scan_hint">对准设备上的二维码即可自动扫描</string>
+
     <!-- 语言设置（上游同步：语言 Tag 数组 + 语言显示名称数组，跟随系统用空 tag 表示） -->
     <string-array name="language_tags">
         <item>zh-CN</item>

@@ -795,6 +795,8 @@ internal class WbuAuthTransport(
         private const val FIELD_STUDENT_ID = "student_id"
         private const val FIELD_AUTH_MODE = "auth_mode"
         private const val FIELD_ACCOUNT_NAME = "account_name"
+        private const val FIELD_CAMPUS_CARD_ACCESS_TOKEN = "card_access_token"
+        private const val FIELD_CAMPUS_CARD_REFRESH_TOKEN = "card_refresh_token"
 
         /** 未归属任何服务的 Cookie（如 locale 等）统一落到共享桶。 */
         private const val SHARED_COOKIE_SCOPE = "shared"
@@ -810,6 +812,12 @@ internal class WbuAuthTransport(
 
         private fun twfidKey(context: Context) =
             fieldKey(FIELD_TWFID, CredentialService.WEBVPN, activeAccount(context, CredentialService.WEBVPN))
+
+        private fun campusCardAccessTokenKey(context: Context) =
+            fieldKey(FIELD_CAMPUS_CARD_ACCESS_TOKEN, CredentialService.CAMPUS_CARD, activeAccount(context, CredentialService.CAMPUS_CARD))
+
+        private fun campusCardRefreshTokenKey(context: Context) =
+            fieldKey(FIELD_CAMPUS_CARD_REFRESH_TOKEN, CredentialService.CAMPUS_CARD, activeAccount(context, CredentialService.CAMPUS_CARD))
 
         /** 某服务当前激活的账号（单用户阶段恒为 "primary"）。 */
         fun activeAccount(context: Context, service: CredentialService): String =
@@ -880,6 +888,9 @@ internal class WbuAuthTransport(
 
         /** 某服务当前是否持有落盘的会话（Cookie 桶非空）。 */
         fun hasServiceSession(context: Context, service: CredentialService): Boolean {
+            if (service == CredentialService.CAMPUS_CARD) {
+                return getCampusCardAccessToken(context).isNotBlank()
+            }
             val key = cookieKeyFor(service.id, activeAccount(context, service))
             return !prefsOf(context).getString(key, null).isNullOrBlank()
         }
@@ -1133,6 +1144,30 @@ internal class WbuAuthTransport(
         fun clearTwfid(context: Context) {
             prefsOf(context)
                 .edit().remove(twfidKey(context)).apply()
+            _credentialChanges.tryEmit(Unit)
+        }
+
+        fun getCampusCardAccessToken(context: Context): String =
+            prefsOf(context).getString(campusCardAccessTokenKey(context), "").orEmpty()
+
+        fun getCampusCardRefreshToken(context: Context): String =
+            prefsOf(context).getString(campusCardRefreshTokenKey(context), "").orEmpty()
+
+        fun setCampusCardTokens(context: Context, accessToken: String, refreshToken: String? = null) {
+            val editor = prefsOf(context).edit().putString(campusCardAccessTokenKey(context), accessToken.trim())
+            if (!refreshToken.isNullOrBlank()) {
+                editor.putString(campusCardRefreshTokenKey(context), refreshToken.trim())
+            }
+            editor.apply()
+            _credentialChanges.tryEmit(Unit)
+        }
+
+        fun clearCampusCardTokens(context: Context) {
+            prefsOf(context)
+                .edit()
+                .remove(campusCardAccessTokenKey(context))
+                .remove(campusCardRefreshTokenKey(context))
+                .apply()
             _credentialChanges.tryEmit(Unit)
         }
 

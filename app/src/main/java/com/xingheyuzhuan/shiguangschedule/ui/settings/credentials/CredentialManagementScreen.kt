@@ -1,5 +1,6 @@
 package com.xingheyuzhuan.shiguangschedule.ui.settings.credentials
 
+import android.widget.Toast
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -49,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -79,6 +81,20 @@ fun CredentialManagementScreen(
     val uiState by viewModel.uiState.collectAsState()
 
     LaunchedEffect(Unit) { viewModel.onScreenEnter() }
+
+    // 一卡通「使用已有统一认证凭据同步」的结果提示
+    val context = LocalContext.current
+    val campusCardSyncMessage by viewModel.campusCardSyncMessage.collectAsState()
+    LaunchedEffect(campusCardSyncMessage) {
+        val message = campusCardSyncMessage ?: return@LaunchedEffect
+        val text = if (message == "success") {
+            context.getString(R.string.credential_sync_campus_card_success)
+        } else {
+            context.getString(R.string.credential_sync_campus_card_failed, message)
+        }
+        Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+        viewModel.clearCampusCardSyncMessage()
+    }
 
     // 连点标题 3 次解锁「高级模式」：明文查看 + 编辑凭据。状态跨页面记住。
     var reveal by remember { mutableStateOf(viewModel.isAdvancedMode()) }
@@ -429,26 +445,36 @@ fun CredentialManagementScreen(
 
     // 登录 Sheet：复用校园服务同款（内建 WebVPN 门户登录 / 短信 / 滑块 / 二维码）
     loginService?.let { svc ->
-        // 统一认证 / WebVPN / 图书馆 都只走统一认证密码，锁定密码类型
+        // 统一认证 / WebVPN / 图书馆 / 一卡通 都只走统一认证密码，锁定密码类型
         val lockToCas = svc == CredentialService.UNIFIED_AUTH ||
             svc == CredentialService.WEBVPN ||
-            svc == CredentialService.LIBRARY
-        // 统一认证 / WebVPN 本身没有可复用的「现成凭据」，不显示同步图标
+            svc == CredentialService.LIBRARY ||
+            svc == CredentialService.CAMPUS_CARD
+        // 统一认证 / WebVPN 本身没有可复用的「现成凭据」，不显示同步图标；一卡通可用已有统一认证凭据同步
         val hideSync = svc == CredentialService.UNIFIED_AUTH || svc == CredentialService.WEBVPN
         WbuCampusAuthSheet(
             onDismiss = { loginService = null },
             onLoginSuccess = { viewModel.refreshAfterServiceLogin(svc) },
-            requireUnifiedCas = svc == CredentialService.UNIFIED_AUTH || svc == CredentialService.LIBRARY,
+            requireUnifiedCas = svc == CredentialService.UNIFIED_AUTH ||
+                svc == CredentialService.LIBRARY ||
+                svc == CredentialService.CAMPUS_CARD,
             defaultAuthMode = if (lockToCas) WbuAuthMode.UNIFIED_CAS else null,
             lockPasswordType = lockToCas,
             showSyncButton = !hideSync,
-            // WebVPN 卡的登录本身就是走 WebVPN，不提供「WebVPN 访问 / 校园网直连」开关
-            hideNetworkSwitch = svc == CredentialService.WEBVPN,
-            // 统一认证卡只登录统一认证：不校验校园网、不登录教务、网络开关随「统一认证经过WebVPN」显隐
-            unifiedAuthOnly = svc == CredentialService.UNIFIED_AUTH,
+            // 一卡通「同步」：直接用已有的统一认证凭据换一卡通令牌，无需重新输入密码
+            onSyncWithCredentials = if (svc == CredentialService.CAMPUS_CARD) {
+                {
+                    loginService = null
+                    viewModel.syncCampusCardWithExistingCredentials()
+                }
+            } else null,
+            // WebVPN 卡的登录本身就是走 WebVPN，不提供「WebVPN 访问 / 校园网直连」开关；一卡通直连，也不需要
+            hideNetworkSwitch = svc == CredentialService.WEBVPN || svc == CredentialService.CAMPUS_CARD,
+            // 统一认证卡/一卡通卡只登录统一认证：不校验校园网、不登录教务、网络开关随「统一认证经过WebVPN」显隐
+            unifiedAuthOnly = svc == CredentialService.UNIFIED_AUTH || svc == CredentialService.CAMPUS_CARD,
             tipsScenario = when (svc) {
                 CredentialService.LIBRARY -> WbuAuthTipsScenario.LIBRARY
-                CredentialService.UNIFIED_AUTH, CredentialService.WEBVPN -> WbuAuthTipsScenario.IDENTITY
+                CredentialService.UNIFIED_AUTH, CredentialService.WEBVPN, CredentialService.CAMPUS_CARD -> WbuAuthTipsScenario.IDENTITY
                 else -> WbuAuthTipsScenario.CAMPUS
             },
             title = stringResource(
@@ -456,6 +482,7 @@ fun CredentialManagementScreen(
                     CredentialService.UNIFIED_AUTH -> R.string.title_login_unified_auth
                     CredentialService.LIBRARY -> R.string.title_login_library
                     CredentialService.WEBVPN -> R.string.title_login_webvpn
+                    CredentialService.CAMPUS_CARD -> R.string.title_login_campus_card
                     else -> R.string.title_login_jiaowu
                 }
             )
@@ -480,18 +507,6 @@ private fun ServiceCard(
 ) {
     val service = state.service
     SettingsCard(title = serviceName(service)) {
-        // 一卡通：未接入占位
-        if (service == CredentialService.CAMPUS_CARD) {
-            SettingTile(
-                icon = serviceIcon(service),
-                title = stringResource(R.string.status_not_available),
-                subtitle = stringResource(R.string.desc_campus_card_future),
-                trailingContent = null,
-                onClick = null
-            )
-            return@SettingsCard
-        }
-
         // 账号行：名称可随意修改（与登录身份无关）。
         // WebDAV 的「账号」就是连接用的用户名，由下方 WebDAV 块里的用户名行承担，这里不再重复一行。
         if (service != CredentialService.WEBDAV) {
@@ -529,8 +544,8 @@ private fun ServiceCard(
             }
         )
 
-        // 登录行（WebDAV / 一卡通无登录）
-        if (service != CredentialService.WEBDAV && service != CredentialService.CAMPUS_CARD) {
+        // 登录行（WebDAV 无登录）
+        if (service != CredentialService.WEBDAV) {
             SettingDivider()
             ActionRow(
                 icon = Icons.AutoMirrored.Rounded.Login,
@@ -542,8 +557,8 @@ private fun ServiceCard(
             )
         }
 
-        // 密码行（图书馆无密码；WebDAV 的密码并入下方 WebDAV 块，一卡通已提前返回）
-        if (service != CredentialService.LIBRARY && service != CredentialService.WEBDAV) {
+        // 密码行（图书馆/一卡通无单独密码；WebDAV 的密码并入下方 WebDAV 块）
+        if (service != CredentialService.LIBRARY && service != CredentialService.WEBDAV && service != CredentialService.CAMPUS_CARD) {
             PasswordRow(state = state, onResetPassword = onResetPassword, onClear = onClear)
         }
 

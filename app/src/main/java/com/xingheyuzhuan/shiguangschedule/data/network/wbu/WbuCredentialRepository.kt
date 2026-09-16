@@ -32,7 +32,7 @@ data class ServiceCredentialState(
  */
 @Singleton
 class WbuCredentialRepository @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext val context: Context
 ) {
 
     companion object {
@@ -41,20 +41,30 @@ class WbuCredentialRepository @Inject constructor(
             CredentialService.UNIFIED_AUTH,
             CredentialService.JIAOWU,
             CredentialService.LIBRARY,
-            CredentialService.WEBVPN,
             CredentialService.CAMPUS_CARD,
+            CredentialService.WEBVPN,
         )
     }
 
     fun snapshot(): List<ServiceCredentialState> = WBU_SERVICES.map { service ->
+        val hasToken = when (service) {
+            CredentialService.WEBVPN -> WbuAuthTransport.getTwfid(context).isNotBlank()
+            CredentialService.CAMPUS_CARD -> WbuAuthTransport.getCampusCardAccessToken(context).isNotBlank()
+            else -> false
+        }
+        val tokenVal = when (service) {
+            CredentialService.WEBVPN -> WbuAuthTransport.getTwfid(context)
+            CredentialService.CAMPUS_CARD -> WbuAuthTransport.getCampusCardAccessToken(context)
+            else -> ""
+        }
         ServiceCredentialState(
             service = service,
             accountId = WbuAuthTransport.activeAccount(context, service),
             hasPassword = WbuAuthTransport.hasSavedPassword(context, service),
             hasOwnPassword = WbuAuthTransport.hasOwnPassword(context, service),
             rememberPassword = WbuAuthTransport.isRememberPasswordEnabled(context, service),
-            hasToken = service == CredentialService.WEBVPN && WbuAuthTransport.getTwfid(context).isNotBlank(),
-            tokenValue = if (service == CredentialService.WEBVPN) WbuAuthTransport.getTwfid(context) else "",
+            hasToken = hasToken,
+            tokenValue = tokenVal,
             hasSession = WbuAuthTransport.hasServiceSession(context, service),
         )
     }
@@ -78,6 +88,14 @@ class WbuCredentialRepository @Inject constructor(
      * 某服务的会话凭据（Cookie 名 → 值，如 jw_uf / CASTGC / PHPSESSID），供「高级模式」查看。
      */
     fun sessionCredentials(service: CredentialService): List<Pair<String, String>> {
+        if (service == CredentialService.CAMPUS_CARD) {
+            val out = mutableListOf<Pair<String, String>>()
+            val acc = WbuAuthTransport.getCampusCardAccessToken(context)
+            if (acc.isNotBlank()) out.add("access_token" to acc)
+            val ref = WbuAuthTransport.getCampusCardRefreshToken(context)
+            if (ref.isNotBlank()) out.add("refresh_token" to ref)
+            return out
+        }
         val out = mutableListOf<Pair<String, String>>()
         val raw = WbuAuthTransport.cookieBucketJson(context, service) ?: return out
         runCatching {
@@ -95,6 +113,17 @@ class WbuCredentialRepository @Inject constructor(
     /** 高级模式手动改凭据：改写某服务会话里的某个 Cookie 值。 */
     fun updateSessionCredential(service: CredentialService, name: String, value: String) {
         if (service == CredentialService.WEBVPN) return
+        if (service == CredentialService.CAMPUS_CARD) {
+            when (name) {
+                "access_token" -> WbuAuthTransport.setCampusCardTokens(context, accessToken = value)
+                "refresh_token" -> WbuAuthTransport.setCampusCardTokens(
+                    context,
+                    accessToken = WbuAuthTransport.getCampusCardAccessToken(context),
+                    refreshToken = value
+                )
+            }
+            return
+        }
         WbuAuthTransport.updateServiceCookie(context, service, name, value)
     }
 
@@ -122,14 +151,29 @@ class WbuCredentialRepository @Inject constructor(
         WbuAuthTransport.clearSavedPassword(context, service)
     }
 
-    /** 清除某服务的 token（WebVPN 的 TWFID）。 */
+    /** 清除某服务的 token（WebVPN 的 TWFID，一卡通的 access_token）。 */
     fun clearToken(service: CredentialService) {
-        if (service == CredentialService.WEBVPN) WbuAuthTransport.clearTwfid(context)
+        if (service == CredentialService.WEBVPN) {
+            WbuAuthTransport.clearTwfid(context)
+        } else if (service == CredentialService.CAMPUS_CARD) {
+            WbuAuthTransport.clearCampusCardTokens(context)
+        }
     }
 
-    /** 清除某服务的会话（Cookie 桶）。 */
+    /** 清除某服务的会话（Cookie 桶，或一卡通 Token）。 */
     fun clearSession(service: CredentialService) {
-        WbuAuthTransport.clearServiceSession(context, service)
+        if (service == CredentialService.CAMPUS_CARD) {
+            WbuAuthTransport.clearCampusCardTokens(context)
+        } else {
+            WbuAuthTransport.clearServiceSession(context, service)
+        }
+    }
+
+    /** 清除某服务的全部凭据（密码 + token + 会话）。 */
+    fun clearService(service: CredentialService) {
+        clearPassword(service)
+        clearToken(service)
+        clearSession(service)
     }
 
     /**
@@ -187,6 +231,15 @@ class WbuCredentialRepository @Inject constructor(
                     }
                 }
             }
+            // 一卡通平台：注销 access_token
+            CredentialService.CAMPUS_CARD -> {
+                val token = WbuAuthTransport.getCampusCardAccessToken(context)
+                if (token.isNotBlank()) {
+                    runCatching {
+                        WbuCampusCardClient(context, useVpn = false).logout(token)
+                    }
+                }
+            }
             else -> Unit
         }
     }
@@ -203,13 +256,6 @@ class WbuCredentialRepository @Inject constructor(
                 .build()
             client.newCall(req).execute().use { it.body.string() }
         }
-    }
-
-    /** 清除某服务的全部凭据（密码 + token + 会话）。 */
-    fun clearService(service: CredentialService) {
-        clearPassword(service)
-        clearToken(service)
-        clearSession(service)
     }
 
     fun isAutoVerifyEnabled(): Boolean = WbuAuthTransport.isCredentialAutoVerifyEnabled(context)

@@ -13,6 +13,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
@@ -75,6 +76,14 @@ class CredentialManagementViewModel @Inject constructor(
 
     private val verifyState = MutableStateFlow<Map<CredentialService, VerifyState>>(emptyMap())
     private val refreshTrigger = MutableStateFlow(0)
+
+    /** 一卡通「使用已有统一认证凭据同步」的结果提示（null 表示无提示）。 */
+    private val _campusCardSyncMessage = MutableStateFlow<String?>(null)
+    val campusCardSyncMessage: StateFlow<String?> = _campusCardSyncMessage.asStateFlow()
+
+    fun clearCampusCardSyncMessage() {
+        _campusCardSyncMessage.value = null
+    }
 
     init {
         // 凭据被任何入口改动（登录 / 清除 / TWFID 编辑 / 高级模式改值）都重算本页
@@ -189,10 +198,57 @@ class CredentialManagementViewModel @Inject constructor(
 
     fun setAdvancedMode(enabled: Boolean) = wbuRepository.setAdvancedMode(enabled)
 
-    /** 登录成功后刷新该服务状态并重新核验。 */
+    /** 登录成功后刷新该服务状态并重新核验。若是一卡通服务，顺便以新凭据做一次换票存储。 */
     fun refreshAfterServiceLogin(service: CredentialService) {
-        refreshTrigger.update { it + 1 }
-        verify(service)
+        viewModelScope.launch {
+            if (service == CredentialService.CAMPUS_CARD) {
+                syncCampusCardInternal(silent = true)
+            }
+            refreshTrigger.update { it + 1 }
+            verify(service)
+        }
+    }
+
+    /**
+     * 一卡通「同步」：直接使用已有的统一认证凭据 (CASTGC) 换取一卡通平台令牌。
+     * 不弹登录窗、不重新输入密码；成功后刷新卡片状态，失败时给出提示。
+     */
+    fun syncCampusCardWithExistingCredentials() {
+        viewModelScope.launch {
+            updateVerify(CredentialService.CAMPUS_CARD) { it.copy(verifying = true) }
+            val ok = syncCampusCardInternal(silent = false)
+            refreshTrigger.update { it + 1 }
+            val result = runCatching { verifier.verify(CredentialService.CAMPUS_CARD) }
+                .getOrDefault(SessionState.UNKNOWN)
+            updateVerify(CredentialService.CAMPUS_CARD) { VerifyState(verifying = false, state = result) }
+            if (ok) _campusCardSyncMessage.value = "success"
+        }
+    }
+
+    /** 使用已有统一认证凭据换票并落盘；返回是否成功。 */
+    private suspend fun syncCampusCardInternal(silent: Boolean): Boolean {
+        val ctx = wbuRepository.context
+        val result = runCatching {
+            val client = com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuCampusCardClient(
+                context = ctx,
+                useVpn = false
+            )
+            client.loginWithCasTgc()
+        }
+        return result.fold(
+            onSuccess = { r ->
+                com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport.setCampusCardTokens(
+                    ctx,
+                    r.accessToken,
+                    r.refreshToken
+                )
+                true
+            },
+            onFailure = { e ->
+                if (!silent) _campusCardSyncMessage.value = e.message ?: "failed"
+                false
+            }
+        )
     }
 
     fun verifyAll() {

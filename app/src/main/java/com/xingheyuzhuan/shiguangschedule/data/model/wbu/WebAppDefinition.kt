@@ -8,7 +8,10 @@ import com.xingheyuzhuan.shiguangschedule.R
  */
 enum class WebAppId {
     /** 图书馆座位预约系统 (jsq-v)。 */
-    LIBRARY_SEAT
+    LIBRARY_SEAT,
+
+    /** 一卡通移动服务平台（慧新e校）。 */
+    CAMPUS_CARD
 }
 
 /**
@@ -33,8 +36,15 @@ data class WebAppDefinition(
     val defaultHash: String = "",
     /** 用于判定是否处于主页的 Hash 标记前缀集合。在这些页面触发系统返回键将直接退出容器，而不是在内部回退。 */
     val homeHashMarkers: List<String> = emptyList(),
+    /**
+     * 平台主页的绝对地址。当页面被第三方 H5（如 U净）接管后，返回键将回到此地址，
+     * 避免在其 OAuth 回调链上「回退 → 被重新跳转」形成死循环。
+     */
+    val homeUrl: String? = null,
     /** 默认在 WebVPN 代理时是否包含 `-s` 单机后缀。 */
-    val vpnSingleSuffix: Boolean = true
+    val vpnSingleSuffix: Boolean = true,
+    /** 是否属于外网直连服务（无需校园网环境，也不经由 WebVPN）。 */
+    val directOnly: Boolean = false
 )
 
 /**
@@ -51,10 +61,26 @@ object WebAppCatalog {
         casServiceUrl = "https://libseat.wbu.edu.cn/rem/static/sso/webOAuthRed",
         defaultHash = "#/main/index",
         homeHashMarkers = listOf("#/main/index", "#/main/home"),
-        vpnSingleSuffix = true
+        vpnSingleSuffix = true,
+        directOnly = false
     )
 
-    private val catalog = listOf(LIBRARY_SEAT).associateBy { it.id }
+    val CAMPUS_CARD = WebAppDefinition(
+        id = WebAppId.CAMPUS_CARD,
+        titleRes = R.string.service_campus_card,
+        realOrigin = "http://yktfwpt.wbu.edu.cn",
+        targetHost = "yktfwpt.wbu.edu.cn",
+        appPath = "/plat/",
+        remSsoLoginPath = null,
+        casServiceUrl = "http://yktfwpt.wbu.edu.cn/berserker-auth/cas/oauth2url",
+        defaultHash = "",
+        homeHashMarkers = listOf("shouyeUser", "/plat/shouyeUser"),
+        homeUrl = "http://yktfwpt.wbu.edu.cn/plat/shouyeUser",
+        vpnSingleSuffix = false,
+        directOnly = true
+    )
+
+    private val catalog = listOf(LIBRARY_SEAT, CAMPUS_CARD).associateBy { it.id }
 
     fun find(id: WebAppId): WebAppDefinition? = catalog[id]
 

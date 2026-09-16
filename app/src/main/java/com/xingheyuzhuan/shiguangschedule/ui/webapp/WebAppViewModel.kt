@@ -78,7 +78,8 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update {
             it.copy(
                 definition = def,
-                stage = WebAppStage.ProbingNetwork,
+                // 直连应用（如一卡通）不做校园网检测，直接进入凭据加载阶段
+                stage = if (def.directOnly) WebAppStage.LoadingToken else WebAppStage.ProbingNetwork,
                 probeStatusText = getApplication<Application>().getString(R.string.status_probing_campus_network),
                 needLogin = false
             )
@@ -90,6 +91,13 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
     private fun evaluateNetworkAndProceed(def: WebAppDefinition) {
         viewModelScope.launch {
             val app = getApplication<Application>()
+
+            // 0. 若定义为 directOnly（如一卡通移动服务平台），无需检测校园网或 WebVPN，直接直连加载
+            if (def.directOnly) {
+                proceedWithChannel(def, useVpn = false)
+                return@launch
+            }
+
             val savedUseVpn = WbuSyncEngine.getSavedUseVpn(app) ?: false
 
             if (!savedUseVpn) {
@@ -182,6 +190,9 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
             val transport = WbuAuthTransport.getShared(app, useVpn)
             transport.restoreCookieStore()
 
+            // 已确定通道，进入凭据加载阶段（避免继续显示校园网探测浮层）
+            _uiState.update { it.copy(stage = WebAppStage.LoadingToken) }
+
             // 1. 若使用 WebVPN，必须首先验证 TWFID 是否有效；若失效必须弹窗登录 WebVPN
             if (useVpn) {
                 val twfid = WbuAuthTransport.getTwfid(app)
@@ -237,6 +248,45 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             try {
+                // 特判：一卡通移动服务平台 (CAMPUS_CARD)
+                if (def.id == com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId.CAMPUS_CARD) {
+                    val cardClient = com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuCampusCardClient(app, useVpn = false)
+                    var token = WbuAuthTransport.getCampusCardAccessToken(app)
+                    val tokenValid = if (token.isNotBlank()) cardClient.checkSession(token) else false
+                    if (!tokenValid) {
+                        // 尝试用 refresh_token 刷新（不顶号）
+                        val refreshToken = WbuAuthTransport.getCampusCardRefreshToken(app)
+                        var refreshedOk = false
+                        if (refreshToken.isNotBlank()) {
+                            val refreshed = cardClient.refreshToken(refreshToken)
+                            if (refreshed != null && refreshed.accessToken.isNotBlank()) {
+                                WbuAuthTransport.setCampusCardTokens(app, refreshed.accessToken, refreshed.refreshToken)
+                                token = refreshed.accessToken
+                                refreshedOk = true
+                            }
+                        }
+                        if (!refreshedOk) {
+                            // 重新从 CAS 换票
+                            val loginRes = cardClient.loginWithCasTgc()
+                            WbuAuthTransport.setCampusCardTokens(app, loginRes.accessToken, loginRes.refreshToken)
+                            token = loginRes.accessToken
+                        }
+                    }
+
+                    val launchUrl = cardClient.buildLaunchUrl(token)
+                    _uiState.update {
+                        it.copy(
+                            stage = WebAppStage.ContentReady(
+                                url = launchUrl,
+                                token = token,
+                                useVpn = false
+                            ),
+                            needLogin = false
+                        )
+                    }
+                    return@launch
+                }
+
                 val client = WbuWebAppClient(app, useVpn = useVpn)
                 val token = client.fetchCasCallbackToken(def)
                 val launchUrl = client.buildLaunchUrl(def, token)
@@ -292,8 +342,13 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
     fun onLoginDismissed() {
         _uiState.update { it.copy(needLogin = false) }
         if (_uiState.value.stage !is WebAppStage.ContentReady) {
+            // 直连应用（如一卡通）无校园网选择语义，取消登录即视为无法继续
             _uiState.update {
-                it.copy(stage = WebAppStage.OffCampusChoice)
+                if (_uiState.value.definition?.directOnly == true) {
+                    it.copy(stage = WebAppStage.Error("需要登录统一身份认证后才能使用该服务"))
+                } else {
+                    it.copy(stage = WebAppStage.OffCampusChoice)
+                }
             }
         }
     }

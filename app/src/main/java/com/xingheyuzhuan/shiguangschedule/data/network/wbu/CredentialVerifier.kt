@@ -49,7 +49,7 @@ class CredentialVerifier @Inject constructor(
             CredentialService.JIAOWU -> verifyJiaowu(useVpn)
             CredentialService.LIBRARY -> verifyLibrary(useVpn)
             CredentialService.WEBVPN -> verifyWebVpn()
-            CredentialService.CAMPUS_CARD -> SessionState.NOT_AVAILABLE
+            CredentialService.CAMPUS_CARD -> verifyCampusCard()
             CredentialService.WEBDAV -> verifyWebDav()
         }
     }
@@ -114,6 +114,26 @@ class CredentialVerifier @Inject constructor(
         val transport = WbuAuthTransport.getShared(context, true)
         val valid = WebVpnClient(transport).validateTwfid(twfid)
         return if (valid) SessionState.VALID else SessionState.EXPIRED
+    }
+
+    /** 一卡通：使用 access_token 探测会话有效性；若过期则尝试用 refresh_token 刷新续期（不顶号）。 */
+    private suspend fun verifyCampusCard(): SessionState {
+        val token = WbuAuthTransport.getCampusCardAccessToken(context)
+        if (token.isBlank()) return SessionState.NOT_LOGGED_IN
+        val cardClient = WbuCampusCardClient(context, useVpn = false)
+        val ok = cardClient.checkSession(token)
+        if (ok) return SessionState.VALID
+
+        // 尝试用 refresh_token 续期
+        val refreshToken = WbuAuthTransport.getCampusCardRefreshToken(context)
+        if (refreshToken.isNotBlank()) {
+            val refreshed = cardClient.refreshToken(refreshToken)
+            if (refreshed != null && refreshed.accessToken.isNotBlank()) {
+                WbuAuthTransport.setCampusCardTokens(context, refreshed.accessToken, refreshed.refreshToken)
+                return SessionState.VALID
+            }
+        }
+        return SessionState.EXPIRED
     }
 
     /** WebDAV：连接并确保根目录可访问。 */

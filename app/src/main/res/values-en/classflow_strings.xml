@@ -745,6 +745,12 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="action_qr_scan_retry">Retry</string>
     <string name="qr_scan_tls_prompt">Certificate validation failed. Trust and continue?</string>
 
+    <string name="title_login_campus_card">Sign in to Campus Card</string>
+    <string name="desc_campus_card_app">Balance, transactions, card management and campus utility bills</string>
+    <string name="credential_sync_campus_card_success">Signed in to Campus Card</string>
+    <string name="credential_sync_campus_card_failed">Campus Card sign-in failed: %1$s</string>
+    <string name="webapp_scan_hint">Point the camera at the QR code on the device to scan automatically</string>
+
     <!-- Language settings (upstream sync: language tag array + display name array, empty tag = follow system) -->
     <string-array name="language_tags">
         <item>zh-CN</item>

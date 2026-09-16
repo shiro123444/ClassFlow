@@ -260,6 +260,13 @@ fun SettingsScreen(
                     )
                     SettingDivider()
                     SettingTile(
+                        icon = androidx.compose.material.icons.Icons.Rounded.CreditCard,
+                        title = stringResource(R.string.service_campus_card),
+                        subtitle = stringResource(R.string.desc_campus_card_app),
+                        onClick = { navBridge.navigate(Destination.WebApp(com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId.CAMPUS_CARD.name)) }
+                    )
+                    SettingDivider()
+                    SettingTile(
                         icon = androidx.compose.material.icons.Icons.Rounded.HowToReg,
                         title = stringResource(R.string.item_course_selection),
                         subtitle = stringResource(R.string.desc_course_selection),
