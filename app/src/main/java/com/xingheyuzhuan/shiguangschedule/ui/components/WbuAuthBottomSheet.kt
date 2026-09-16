@@ -160,6 +160,15 @@ fun WbuAuthBottomSheet(
     hideSelectSemesterSwitch: Boolean = false,
     hideImportPreferences: Boolean = false,
     hideNetworkSwitch: Boolean = false,
+    /**
+     * 「仅登录统一认证」场景：本 Sheet 只为拿到/续期统一认证会话（CASTGC），不涉及教务系统与校园网。
+     *
+     * 开启后：
+     * - 「统一认证经过WebVPN」为关：不显示网络访问开关，并强制直连（统一认证走公网）；
+     * - 「统一认证经过WebVPN」为开：显示开关，关闭态文案由「校园网直连」改为「直连」；
+     * - 一律不探测校园网、不显示校园网提示。
+     */
+    unifiedAuthOnly: Boolean = false,
     primaryButtonText: String? = null,
     loadingButtonText: String? = null,
     customLoadingTips: List<String>? = null,
@@ -240,10 +249,20 @@ fun WbuAuthBottomSheet(
             loadingTipIndex = (loadingTipIndex + 1) % loadingTips.size
         }
     }
+    // 「仅登录统一认证」时，统一认证是否经 WebVPN 完全由「统一认证经过WebVPN」决定：
+    // 该设置关闭 => 本次登录无可选项（统一认证只能走公网），隐藏开关并强制直连。
+    val casOnlyForceDirect = unifiedAuthOnly && !idsVpnEnabled
+    val showNetworkSwitch = !hideNetworkSwitch && (!unifiedAuthOnly || idsVpnEnabled)
+    LaunchedEffect(casOnlyForceDirect) {
+        if (casOnlyForceDirect && useVpn) {
+            useVpn = false
+            onUseVpnChange(false)
+        }
+    }
     // 选择校园网直连（非 VPN）时实时探测校园网环境；结果经 campusState 更新提示。
-    // 开启「不检测校园网环境」则跳过探测。
-    LaunchedEffect(useVpn, skipCampusCheck) {
-        if (!useVpn && !skipCampusCheck) WbuNetworkProbe.refresh()
+    // 开启「不检测校园网环境」则跳过探测；仅登录统一认证时校园网与本次登录无关，一律不探测。
+    LaunchedEffect(useVpn, skipCampusCheck, unifiedAuthOnly) {
+        if (!unifiedAuthOnly && !useVpn && !skipCampusCheck) WbuNetworkProbe.refresh()
     }
     // 动态码发送后倒计时；每次开始冷却（cooldownRun 变化）都会重跑（按钮显示重新发送 (Ns)）
     LaunchedEffect(cooldownRun) {
@@ -474,7 +493,7 @@ fun WbuAuthBottomSheet(
             }
             Spacer(modifier = Modifier.height(24.dp))
             // 校园网/VPN 切换
-            if (!hideNetworkSwitch) {
+            if (showNetworkSwitch) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = if (useVpn) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.48f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
@@ -503,7 +522,14 @@ fun WbuAuthBottomSheet(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (useVpn) stringResource(R.string.label_webvpn_access) else stringResource(R.string.label_campus_network_direct),
+                            // 仅登录统一认证时关闭态不是「校园网直连」：统一认证走公网即可，与校园网无关
+                            text = if (useVpn) {
+                                stringResource(R.string.label_webvpn_access)
+                            } else if (unifiedAuthOnly) {
+                                stringResource(R.string.label_direct_connection)
+                            } else {
+                                stringResource(R.string.label_campus_network_direct)
+                            },
                             style = MaterialTheme.typography.titleMedium,
                             color = if (useVpn) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimaryContainer
                         )
@@ -523,8 +549,8 @@ fun WbuAuthBottomSheet(
             }
             }
             // 校园网环境提示（仅直连模式显示）：检测中 / 未检测到；检测到校园网则不显示。
-            // 开启「不检测校园网环境」时不探测、也不显示该提示。
-            if (!useVpn && !skipCampusCheck && campus != true) {
+            // 开启「不检测校园网环境」时不探测、也不显示该提示；仅登录统一认证时与校园网无关，同样不显示。
+            if (!unifiedAuthOnly && !useVpn && !skipCampusCheck && campus != true) {
                 val (hintText, hintColor) = when (campus) {
                     null -> stringResource(R.string.status_detecting_campus_network) to MaterialTheme.colorScheme.onSurfaceVariant
                     else -> stringResource(R.string.warn_no_campus_suggest_webvpn) to MaterialTheme.colorScheme.error
@@ -821,12 +847,12 @@ fun WbuAuthBottomSheet(
                         }
                     )
                     // 只展示会影响本次登录的选项：
-                    // - ids 走 WebVPN：本次走统一认证（或已处于 WebVPN 模式）时才相关
+                    // - ids 走 WebVPN：本次走统一认证（或已处于 WebVPN 模式 / 仅登录统一认证）时才相关
                     // - 二维码走 WebVPN：仅二维码登录时相关
                     // - HTTPS WebVPN：仅 WebVPN 模式时相关
                     val loginUsesCas =
                         authMode == WbuAuthMode.UNIFIED_CAS || defaultAuthMode == WbuAuthMode.UNIFIED_CAS
-                    val showIdsVpnToggle = loginUsesCas || useVpn
+                    val showIdsVpnToggle = loginUsesCas || useVpn || unifiedAuthOnly
                     val showQrVpnToggle = method == WbuLoginMethod.QR
                     val showHttpsVpnToggle = useVpn
                     if (showIdsVpnToggle) {

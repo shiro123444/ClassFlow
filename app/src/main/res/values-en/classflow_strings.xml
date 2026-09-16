@@ -148,6 +148,7 @@ Latest: %2$s</string>
     <string name="label_slide_to_verify">Slide right to solve puzzle</string>
     <string name="title_select_login_method">Select Login Method</string>
     <string name="label_campus_network_direct">Campus Direct</string>
+    <string name="label_direct_connection">Direct</string>
     <string name="desc_campus_network_direct">For on-campus Wi-Fi / wired network</string>
     <string name="label_webvpn_access">WebVPN (Remote)</string>
     <string name="desc_webvpn_access">For off-campus access via VPN</string>
@@ -544,6 +545,7 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="err_webvpn_connect_failed">WebVPN connection failed. Please check network and retry.</string>
     <string name="err_auto_login_failed_check_creds">Auto login failed. Please check account or password.</string>
     <string name="err_campus_direct_failed">Campus direct connection failed. Ensure you are on campus network.</string>
+    <string name="err_unified_auth_direct_failed">Direct unified-auth connection failed. Check your network and retry.</string>
     <string name="err_login_failed_check_creds">Login failed. Please check student ID or password.</string>
     <string name="err_get_login_params_failed">Failed to retrieve login parameters. Please retry.</string>
     <string name="err_otp_login_failed">SMS code login failed. Please check your verification code.</string>
@@ -706,6 +708,8 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="item_qr_scan">Scan QR code</string>
     <string name="desc_qr_scan">Scan the unified-auth login QR code to confirm sign-in on your computer</string>
     <string name="title_qr_scan">Scan</string>
+    <string name="a11y_qr_scan_photo">Read a QR code from an image</string>
+    <string name="qr_scan_photo_no_code">No QR code found in the image</string>
     <string name="a11y_qr_scan_engine">Scanning engine</string>
     <string name="qr_scan_engine_mlkit">ML Kit (default)</string>
     <string name="qr_scan_engine_zxing">ZXing (fallback)</string>

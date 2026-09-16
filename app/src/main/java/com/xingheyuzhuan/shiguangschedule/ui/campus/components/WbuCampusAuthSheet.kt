@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AuthForm
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.DynamicCodeSendResult
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.IdsCasClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.LocalLoginFailure
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.QrStatus
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaData
@@ -91,6 +92,15 @@ fun WbuCampusAuthSheet(
     onSyncWithCredentials: (() -> Unit)? = null,
     showSyncButton: Boolean = true,
     hideNetworkSwitch: Boolean = false,
+    /**
+     * 「仅登录统一认证」场景（账号与凭据页统一认证卡 / 扫一扫页）：
+     * 本 Sheet 只为拿到或续期统一认证会话（CASTGC），不涉及教务系统与校园网。
+     *
+     * - 「统一认证经过WebVPN」关闭：不显示网络开关、强制直连，也不校验 WebVPN 与校园网；
+     * - 「统一认证经过WebVPN」开启：开关可用（关闭态文案为「直连」），开启时先校验 WebVPN；
+     * - 三种登录方式都不再尝试登录教务系统，也不改写全局「网络接入模式」偏好。
+     */
+    unifiedAuthOnly: Boolean = false,
     dismissOnSuccess: Boolean = true,
     externalLoading: Boolean = false,
     externalStatusMessage: String = "",
@@ -108,7 +118,15 @@ fun WbuCampusAuthSheet(
     var statusMessage by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
     var initialUseVpn by remember {
-        mutableStateOf(if (forceDirectCampus) false else (WbuSyncEngine.getSavedUseVpn(context) ?: false))
+        mutableStateOf(
+            when {
+                forceDirectCampus -> false
+                // 仅登录统一认证：是否经 WebVPN 由「统一认证经过WebVPN」决定
+                // （该设置关闭时开关不显示，并由 Sheet 强制直连）
+                unifiedAuthOnly -> IdsCasClient.getIdsViaWebVpn(context)
+                else -> WbuSyncEngine.getSavedUseVpn(context) ?: false
+            }
+        )
     }
 
     var dynamicPrep by remember { mutableStateOf<AuthForm?>(null) }
@@ -392,7 +410,7 @@ fun WbuCampusAuthSheet(
             statusText = context.getString(R.string.status_qr_fetching)
         )
         scope.launch {
-            val session = engine.startQrLogin("CAMPUS_QR")
+            val session = engine.startQrLogin("CAMPUS_QR", unifiedAuthOnly)
             if (session == null) {
                 qrState = QrUiState(
                     qrContent = null,
@@ -420,6 +438,7 @@ fun WbuCampusAuthSheet(
                                 val qrOk = engine.completeQrLogin(
                                     session = session,
                                     flowTag = "${flowTagPrefix}_QR",
+                                    unifiedAuthOnly = unifiedAuthOnly,
                                     vpnPasswordProvider = {
                                         val d = CompletableDeferred<String?>()
                                         withContext(Dispatchers.Main) {
@@ -443,7 +462,7 @@ fun WbuCampusAuthSheet(
                                 )
                                 isLoading = false
                                 if (qrOk) {
-                                    if (!forceDirectCampus) WbuSyncEngine.setSavedUseVpn(context, useVpn)
+                                    if (!forceDirectCampus && !unifiedAuthOnly) WbuSyncEngine.setSavedUseVpn(context, useVpn)
                                     onLoginSuccess()
                                     if (dismissOnSuccess) onDismiss()
                                 } else {
@@ -509,7 +528,9 @@ fun WbuCampusAuthSheet(
         },
         onUseVpnChange = {
             initialUseVpn = it
-            if (!forceDirectCampus) WbuSyncEngine.setSavedUseVpn(context, it)
+            // 仅登录统一认证时该开关只描述「本次统一认证是否经 WebVPN」，
+            // 不写全局「网络接入模式」，避免影响教务/图书馆等校园服务的接入方式
+            if (!forceDirectCampus && !unifiedAuthOnly) WbuSyncEngine.setSavedUseVpn(context, it)
         },
         qrState = qrState,
         isLoading = isLoading || externalLoading,
@@ -523,6 +544,7 @@ fun WbuCampusAuthSheet(
         hideSelectSemesterSwitch = hideSelectSemesterSwitch,
         hideImportPreferences = hideImportPreferences,
         hideNetworkSwitch = forceDirectCampus || hideNetworkSwitch,
+        unifiedAuthOnly = unifiedAuthOnly,
         primaryButtonText = primaryButtonText ?: stringResource(R.string.action_confirm_login),
         loadingButtonText = loadingButtonText ?: stringResource(R.string.status_logging_in),
         customLoadingTips = scenarioTips,
@@ -540,7 +562,49 @@ fun WbuCampusAuthSheet(
                     val engine = newEngine(useVpn)
                     activeVpnEngine = engine
 
-                    val ok = if (useVpn) {
+                    val ok = if (unifiedAuthOnly) {
+                        // 仅登录统一认证：只为拿到/续期 CASTGC，全程不登录教务系统。
+                        // 经 WebVPN 时先用已输入的统一认证密码打通门禁；未输入则弹 WebVPN 密码窗。
+                        var casVpnPassword: String? = null
+                        if (useVpn && pwd.isBlank()) {
+                            val d = CompletableDeferred<String?>()
+                            withContext(Dispatchers.Main) {
+                                vpnPasswordDeferred = d
+                            }
+                            casVpnPassword = d.await()
+                            if (casVpnPassword.isNullOrBlank()) {
+                                isLoading = false
+                                statusMessage = ""
+                                return@launch
+                            }
+                        }
+                        engine.loginUnifiedAuthOnly(
+                            studentId = sid,
+                            password = pwd,
+                            viaWebVpn = useVpn,
+                            flowTag = "${flowTagPrefix}_CAS",
+                            vpnPasswordProvider = { casVpnPassword ?: pwd },
+                            smsCodeProvider = { maskedPhone, isStillValid, sendInterval, promptText ->
+                                val deferred = CompletableDeferred<String?>()
+                                withContext(Dispatchers.Main) {
+                                    smsError = null
+                                    smsVerifying = false
+                                    smsDeferred = deferred
+                                    smsDialogPhone = maskedPhone
+                                    smsDialogIsStillValid = isStillValid
+                                    smsDialogSendInterval = sendInterval
+                                    smsDialogPromptText = promptText
+                                }
+                                deferred.await()
+                            },
+                            captchaProvider = { captcha ->
+                                val def = CompletableDeferred<SliderCaptchaResult?>()
+                                captchaDeferred = def
+                                captchaDialogData = captcha
+                                def.await() ?: SliderCaptchaResult.Cancel
+                            }
+                        )
+                    } else if (useVpn) {
                         // 如果是教务系统密码模式且无有效 TWFID，先弹窗索取 WebVPN/统一认证密码打通门禁
                         // 若开启了 requireUnifiedCas，该统一认证密码后续也将用于获取 CASTGC，无需重复询问
                         var customVpnPassword: String? = null
@@ -664,6 +728,10 @@ fun WbuCampusAuthSheet(
                                 engine.lastLocalLoginNetworkError && useVpn ->
                                     context.getString(R.string.err_webvpn_connect_failed)
 
+                                // 仅登录统一认证的直连不依赖校园网，不能提示「请确认已连接校园网」
+                                engine.lastLocalLoginNetworkError && unifiedAuthOnly ->
+                                    context.getString(R.string.err_unified_auth_direct_failed)
+
                                 engine.lastLocalLoginNetworkError ->
                                     context.getString(R.string.err_campus_direct_failed)
 
@@ -686,7 +754,7 @@ fun WbuCampusAuthSheet(
                     errorMessage = ""
                     val engine = newEngine(useVpn)
                     activeVpnEngine = engine
-                    val prep = dynamicPrep ?: engine.obtainDynamicCodeForm("${flowTagPrefix}_DYNAMIC")
+                    val prep = dynamicPrep ?: engine.obtainDynamicCodeForm("${flowTagPrefix}_DYNAMIC", unifiedAuthOnly)
                     if (prep == null) {
                         isLoading = false
                         errorMessage = "无法获取登录参数，请重试"
@@ -697,6 +765,7 @@ fun WbuCampusAuthSheet(
                         code = code,
                         prep = prep,
                         flowTag = "${flowTagPrefix}_DYNAMIC",
+                        unifiedAuthOnly = unifiedAuthOnly,
                         vpnPasswordProvider = {
                             val d = CompletableDeferred<String?>()
                             withContext(Dispatchers.Main) {
@@ -720,7 +789,7 @@ fun WbuCampusAuthSheet(
                     )
                     isLoading = false
                     if (res.success) {
-                        if (!forceDirectCampus) WbuSyncEngine.setSavedUseVpn(context, useVpn)
+                        if (!forceDirectCampus && !unifiedAuthOnly) WbuSyncEngine.setSavedUseVpn(context, useVpn)
                         onLoginSuccess()
                         if (dismissOnSuccess) onDismiss()
                     } else {
@@ -738,6 +807,7 @@ fun WbuCampusAuthSheet(
             val result = engine.sendDynamicCode(
                 studentId = sid.trim(),
                 flowTag = "${flowTagPrefix}_DYNAMIC",
+                unifiedAuthOnly = unifiedAuthOnly,
                 captchaProvider = { captcha ->
                     val def = CompletableDeferred<SliderCaptchaResult?>()
                     captchaDeferred = def

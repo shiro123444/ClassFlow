@@ -1,6 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.campus.qrscan
 
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.QrScanEngine
@@ -12,12 +13,14 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /** 扫码失败类型。 */
@@ -53,6 +56,9 @@ sealed interface QrScanUiState {
     data class Failed(val kind: QrScanError) : QrScanUiState
 }
 
+/** 取景期间的一次性提示（含相册选图路径）。 */
+enum class QrTransientNotice { NOT_CAS_QR, PHOTO_NO_CODE }
+
 /**
  * 扫一扫（扫码端）逻辑：以本机已有的统一认证会话替 PC/其它端确认登录。
  *
@@ -72,8 +78,12 @@ class QrScanViewModel @Inject constructor(
     val state: StateFlow<QrScanUiState> = _state.asStateFlow()
 
     /** 取景期间的一次性提示（如「不是统一认证二维码」），不中断取景。 */
-    private val _transientError = MutableStateFlow<QrScanError?>(null)
-    val transientError: StateFlow<QrScanError?> = _transientError.asStateFlow()
+    private val _transientNotice = MutableStateFlow<QrTransientNotice?>(null)
+    val transientNotice: StateFlow<QrTransientNotice?> = _transientNotice.asStateFlow()
+
+    /** 相册选图解码中（用于禁用入口并显示进度）。 */
+    private val _photoBusy = MutableStateFlow(false)
+    val photoBusy: StateFlow<Boolean> = _photoBusy.asStateFlow()
 
     /** WebVPN 证书校验异常询问（与登录 Sheet 同一条链路）。 */
     private val _tlsPrompt = MutableStateFlow<String?>(null)
@@ -112,7 +122,32 @@ class QrScanViewModel @Inject constructor(
     /** 相机解码到一段二维码原文。 */
     fun onCodeDecoded(raw: String) {
         if (_state.value !is QrScanUiState.Scanning) return
+        submitDecoded(raw)
+    }
 
+    /**
+     * 从相册选图解码：不依赖相机权限，因此 Scanning/NeedLogin/Failed 都可以直接用，
+     * 只有「确认中 / 已完成」这两步不接受中途换一张图。
+     */
+    fun onPhotoPicked(uri: Uri) {
+        val current = _state.value
+        if (current is QrScanUiState.Confirming || current is QrScanUiState.Success) return
+
+        viewModelScope.launch {
+            _photoBusy.value = true
+            val raw = withContext(Dispatchers.IO) {
+                QrImageDecoder.decode(context, uri, _scanEngine.value)
+            }
+            _photoBusy.value = false
+
+            // 用户主动选图：允许重复提交同一张（否则失败后重选会被去重逻辑挡掉）
+            handledUuid = null
+            if (raw.isNullOrBlank()) notifyPhotoNoCode() else submitDecoded(raw)
+        }
+    }
+
+    /** 解析并送入扫码流程（相机与相册共用）。 */
+    private fun submitDecoded(raw: String) {
         val uuid = CasQrLink.parseUuid(raw)
         if (uuid == null) {
             notifyRejected()
@@ -150,7 +185,7 @@ class QrScanViewModel @Inject constructor(
     /** 重新扫描（重扫/重试）。 */
     fun rescan() {
         handledUuid = null
-        _transientError.value = null
+        _transientNotice.value = null
         transientJob?.cancel()
         _state.value = if (engine.hasUnifiedAuthSession()) QrScanUiState.Scanning else QrScanUiState.NeedLogin
     }
@@ -177,15 +212,24 @@ class QrScanViewModel @Inject constructor(
         tlsDeferred?.complete(allow)
     }
 
+    /** 相机每帧都会回调，扫描非统一认证码时用它节流提示。 */
     private fun notifyRejected() {
         val now = System.currentTimeMillis()
         if (now - lastRejectNoticeAt < 2000L) return
         lastRejectNoticeAt = now
-        _transientError.value = QrScanError.NOT_CAS_QR
+        showNotice(QrTransientNotice.NOT_CAS_QR)
+    }
+
+    private fun notifyPhotoNoCode() {
+        showNotice(QrTransientNotice.PHOTO_NO_CODE)
+    }
+
+    private fun showNotice(notice: QrTransientNotice) {
+        _transientNotice.value = notice
         transientJob?.cancel()
         transientJob = viewModelScope.launch {
             delay(2000)
-            _transientError.value = null
+            _transientNotice.value = null
         }
     }
 }

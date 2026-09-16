@@ -162,6 +162,7 @@
     <string name="label_slide_to_verify">向右滑动填充拼图</string>
     <string name="title_select_login_method">选择登录方式</string>
     <string name="label_campus_network_direct">校园网直连</string>
+    <string name="label_direct_connection">直连</string>
     <string name="desc_campus_network_direct">适用于在校园内连接校园网</string>
     <string name="label_webvpn_access">WebVPN 访问</string>
     <string name="desc_webvpn_access">适用于校外通过VPN访问</string>
@@ -541,6 +542,7 @@
     <string name="err_webvpn_connect_failed">WebVPN 连接失败，请检查网络后重试</string>
     <string name="err_auto_login_failed_check_creds">自动登录失败，请检查账号或密码</string>
     <string name="err_campus_direct_failed">校园网直连失败，请确认已连接校园网</string>
+    <string name="err_unified_auth_direct_failed">直连统一认证失败，请检查网络后重试</string>
     <string name="err_login_failed_check_creds">登录失败，请检查学号或密码后重试</string>
     <string name="err_get_login_params_failed">无法获取登录参数，请重试</string>
     <string name="err_otp_login_failed">动态码登录失败，请检查验证码</string>
@@ -703,6 +705,8 @@
     <string name="item_qr_scan">扫一扫</string>
     <string name="desc_qr_scan">扫描统一认证登录二维码，确认电脑端登录</string>
     <string name="title_qr_scan">扫一扫</string>
+    <string name="a11y_qr_scan_photo">从图片中识别二维码</string>
+    <string name="qr_scan_photo_no_code">图片里没找到二维码</string>
     <string name="a11y_qr_scan_engine">扫描引擎</string>
     <string name="qr_scan_engine_mlkit">ML Kit（默认）</string>
     <string name="qr_scan_engine_zxing">ZXing（备用）</string>

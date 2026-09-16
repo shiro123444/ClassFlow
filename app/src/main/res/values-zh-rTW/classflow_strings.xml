@@ -146,6 +146,7 @@
     <string name="label_slide_to_verify">向右滑動填充拼圖</string>
     <string name="title_select_login_method">選擇登入方式</string>
     <string name="label_campus_network_direct">校園網直連</string>
+    <string name="label_direct_connection">直連</string>
     <string name="desc_campus_network_direct">適用於在校園內連線校園網路</string>
     <string name="label_webvpn_access">WebVPN 存取</string>
     <string name="desc_webvpn_access">適用於校外透過VPN存取</string>
@@ -544,6 +545,7 @@
     <string name="err_webvpn_connect_failed">WebVPN 連線失敗，請檢查網路後重試</string>
     <string name="err_auto_login_failed_check_creds">自動登入失敗，請檢查帳號或密碼</string>
     <string name="err_campus_direct_failed">校園網直連失敗，請確認已連線校園網路</string>
+    <string name="err_unified_auth_direct_failed">直連統一認證失敗，請檢查網路後重試</string>
     <string name="err_login_failed_check_creds">登入失敗，請檢查學號或密碼後重試</string>
     <string name="err_get_login_params_failed">無法獲取登入參數，請重試</string>
     <string name="err_otp_login_failed">動態碼登入失敗，請檢查驗證碼</string>
@@ -706,6 +708,8 @@
     <string name="item_qr_scan">掃一掃</string>
     <string name="desc_qr_scan">掃描統一認證登入二維碼，確認電腦端登入</string>
     <string name="title_qr_scan">掃一掃</string>
+    <string name="a11y_qr_scan_photo">從圖片中辨識二維碼</string>
+    <string name="qr_scan_photo_no_code">圖片裡沒找到二維碼</string>
     <string name="a11y_qr_scan_engine">掃描引擎</string>
     <string name="qr_scan_engine_mlkit">ML Kit（預設）</string>
     <string name="qr_scan_engine_zxing">ZXing（備用）</string>

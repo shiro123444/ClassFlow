@@ -444,6 +444,8 @@ fun CredentialManagementScreen(
             showSyncButton = !hideSync,
             // WebVPN 卡的登录本身就是走 WebVPN，不提供「WebVPN 访问 / 校园网直连」开关
             hideNetworkSwitch = svc == CredentialService.WEBVPN,
+            // 统一认证卡只登录统一认证：不校验校园网、不登录教务、网络开关随「统一认证经过WebVPN」显隐
+            unifiedAuthOnly = svc == CredentialService.UNIFIED_AUTH,
             tipsScenario = when (svc) {
                 CredentialService.LIBRARY -> WbuAuthTipsScenario.LIBRARY
                 CredentialService.UNIFIED_AUTH, CredentialService.WEBVPN -> WbuAuthTipsScenario.IDENTITY

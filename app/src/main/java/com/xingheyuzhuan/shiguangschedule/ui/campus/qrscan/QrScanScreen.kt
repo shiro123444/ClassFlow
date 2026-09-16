@@ -8,6 +8,7 @@ import android.net.Uri
 import android.provider.Settings
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -29,11 +30,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -71,11 +74,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -98,10 +103,14 @@ import com.google.zxing.common.HybridBinarizer
 import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.QrScanEngine
+import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import java.util.concurrent.Executors
 
 private const val TAG = "QrScanScreen"
+
+/** 取景框边长上限：Pad/大屏上不再无限放大。 */
+private val MAX_FRAME_SIDE = 320.dp
 
 /**
  * 扫一扫：以本机已登录的统一认证会话，确认其它端（PC）展示的登录二维码。
@@ -117,9 +126,10 @@ fun QrScanScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val state by viewModel.state.collectAsState()
-    val transientError by viewModel.transientError.collectAsState()
+    val transientNotice by viewModel.transientNotice.collectAsState()
     val tlsPrompt by viewModel.tlsPrompt.collectAsState()
     val scanEngine by viewModel.scanEngine.collectAsState()
+    val photoBusy by viewModel.photoBusy.collectAsState()
 
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -133,6 +143,11 @@ fun QrScanScreen(
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted -> hasCameraPermission = granted }
+
+    // 系统 Photo Picker：不需要任何存储/媒体权限
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri -> uri?.let(viewModel::onPhotoPicked) }
 
     LaunchedEffect(Unit) {
         if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
@@ -180,6 +195,29 @@ fun QrScanScreen(
                     }
                 },
                 actions = {
+                    // 相册选图（放在 ⋮ 左边）
+                    IconButton(
+                        onClick = {
+                            photoPicker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        enabled = !photoBusy
+                    ) {
+                        if (photoBusy) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.White
+                            )
+                        } else {
+                            Icon(
+                                Icons.Rounded.PhotoLibrary,
+                                contentDescription = stringResource(R.string.a11y_qr_scan_photo),
+                                tint = Color.White
+                            )
+                        }
+                    }
                     Box {
                         IconButton(onClick = { showEngineMenu = true }) {
                             Icon(
@@ -213,7 +251,8 @@ fun QrScanScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
+                    // 不透明黑：横屏下工具栏不会透出相机画面，始终是一根清晰的黑条
+                    containerColor = Color.Black,
                     titleContentColor = Color.White
                 )
             )
@@ -224,34 +263,64 @@ fun QrScanScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (!hasCameraPermission) {
+            // 状态卡的实测尺寸（px）：取景框排在它上方的剩余区域，避免被卡片挡住
+            var panelSize by remember { mutableStateOf(IntSize.Zero) }
+            val scanning = state is QrScanUiState.Scanning
+            val showPermissionPrompt = !hasCameraPermission && scanning
+
+            if (hasCameraPermission) {
+                QrCameraPreview(
+                    engine = scanEngine,
+                    scanning = scanning,
+                    onQrCode = viewModel::onCodeDecoded,
+                    modifier = Modifier.fillMaxSize()
+                )
+                if (scanning) {
+                    ScanFrameOverlay(reservedBottom = panelSize.height.toFloat())
+                }
+            }
+
+            // 一次性提示做成顶部浮层：不参与状态卡测量，扫到非统一认证码时不会顶动取景框
+            val notice = transientNotice
+            if (notice != null) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 12.dp)
+                ) {
+                    Text(
+                        text = noticeText(notice),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                    )
+                }
+            }
+
+            if (showPermissionPrompt) {
                 PermissionPanel(
                     onRequest = { permissionLauncher.launch(Manifest.permission.CAMERA) },
                     onOpenSettings = { openAppSettings(context) }
                 )
             } else {
-                QrCameraPreview(
-                    engine = scanEngine,
-                    scanning = state is QrScanUiState.Scanning,
-                    onQrCode = viewModel::onCodeDecoded,
-                    modifier = Modifier.fillMaxSize()
-                )
-
-                if (state is QrScanUiState.Scanning) {
-                    ScanFrameOverlay()
-                }
-
+                // 相册选图 / 登录 / 确认都不依赖相机，权限被拒时也要能看到状态卡。
+                // 横竖屏统一贴在底部居中：取景框始终在它上方的剩余区域居中，行为可预期。
                 StatePanel(
                     state = state,
-                    transientError = transientError,
                     onConfirm = viewModel::confirm,
                     onRescan = viewModel::rescan,
                     onLogin = { showAuthSheet = true },
                     onDone = { navBridge.popBackStack() },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
+                        // onSizeChanged 放在 padding 之前：量到的是含外边距的占位，
+                        // 取景框不会压到卡片边缘
+                        .onSizeChanged { panelSize = it }
                         .padding(horizontal = 20.dp)
-                        .padding(bottom = 32.dp)
+                        .padding(bottom = 24.dp)
+                        .widthIn(max = 420.dp)
                 )
             }
         }
@@ -265,6 +334,10 @@ fun QrScanScreen(
                 viewModel.onLoginSuccess()
             },
             requireUnifiedCas = true,
+            // 扫一扫只为拿到/续期统一认证会话：不校验校园网、不登录教务，网络开关随「统一认证经过WebVPN」显隐
+            unifiedAuthOnly = true,
+            // 轮播文案用统一认证款（该 Sheet 在这里只为拿/续统一认证会话）
+            tipsScenario = WbuAuthTipsScenario.IDENTITY,
             title = stringResource(R.string.title_login_unified_auth)
         )
     }
@@ -470,13 +543,22 @@ private fun ScanEngineMenuItem(
     )
 }
 
-/** 取景框：遮罩挖空 + 白色描边。 */
+/**
+ * 取景框：遮罩挖空 + 白色描边。
+ *
+ * [reservedBottom] 是状态卡占用的空间（px），据此把取景框排进它上方的剩余区域并居中；
+ * 遮罩仍按整屏绘制，避免被占用的那一侧出现没压暗的亮带。
+ */
 @Composable
-private fun ScanFrameOverlay(modifier: Modifier = Modifier) {
+private fun ScanFrameOverlay(
+    reservedBottom: Float = 0f,
+    modifier: Modifier = Modifier
+) {
     Canvas(modifier = modifier.fillMaxSize()) {
-        val side = minOf(size.width, size.height) * 0.68f
+        val freeHeight = (size.height - reservedBottom).coerceAtLeast(0f)
+        val side = (minOf(size.width, freeHeight) * 0.68f).coerceAtMost(MAX_FRAME_SIDE.toPx())
         val left = (size.width - side) / 2f
-        val top = (size.height - side) / 2f
+        val top = (freeHeight - side) / 2f
         val corner = CornerRadius(24.dp.toPx(), 24.dp.toPx())
 
         val mask = Path().apply {
@@ -499,30 +581,13 @@ private fun ScanFrameOverlay(modifier: Modifier = Modifier) {
 @Composable
 private fun StatePanel(
     state: QrScanUiState,
-    transientError: QrScanError?,
     onConfirm: () -> Unit,
     onRescan: () -> Unit,
     onLogin: () -> Unit,
     onDone: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val notice = transientError
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        if (notice != null) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.errorContainer,
-                modifier = Modifier.padding(bottom = 12.dp)
-            ) {
-                Text(
-                    text = scannerErrorText(notice),
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-                )
-            }
-        }
-
         when (state) {
             is QrScanUiState.Scanning -> {
                 Text(
@@ -663,40 +728,52 @@ private fun PermissionPanel(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(
-            imageVector = Icons.Rounded.QrCodeScanner,
-            contentDescription = null,
-            tint = Color.White,
-            modifier = Modifier.size(48.dp)
-        )
-        Spacer(Modifier.height(16.dp))
-        Text(
-            text = stringResource(R.string.qr_scan_permission_title),
-            color = Color.White,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = stringResource(R.string.qr_scan_permission_desc),
-            color = Color.White.copy(alpha = 0.8f),
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(20.dp))
-        Row {
-            Button(onClick = onRequest) {
-                Text(stringResource(R.string.action_qr_scan_grant))
-            }
-            Spacer(Modifier.width(12.dp))
-            TextButton(onClick = onOpenSettings) {
-                Text(
-                    text = stringResource(R.string.action_qr_scan_open_settings),
-                    color = Color.White
-                )
+        // 限宽：Pad/横屏下文案不横跨整屏
+        Column(
+            modifier = Modifier.widthIn(max = 420.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.QrCodeScanner,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(48.dp)
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = stringResource(R.string.qr_scan_permission_title),
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.qr_scan_permission_desc),
+                color = Color.White.copy(alpha = 0.8f),
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(20.dp))
+            Row {
+                Button(onClick = onRequest) {
+                    Text(stringResource(R.string.action_qr_scan_grant))
+                }
+                Spacer(Modifier.width(12.dp))
+                TextButton(onClick = onOpenSettings) {
+                    Text(
+                        text = stringResource(R.string.action_qr_scan_open_settings),
+                        color = Color.White
+                    )
+                }
             }
         }
     }
+}
+
+@Composable
+private fun noticeText(notice: QrTransientNotice): String = when (notice) {
+    QrTransientNotice.NOT_CAS_QR -> stringResource(R.string.qr_scan_err_not_cas)
+    QrTransientNotice.PHOTO_NO_CODE -> stringResource(R.string.qr_scan_photo_no_code)
 }
 
 @Composable

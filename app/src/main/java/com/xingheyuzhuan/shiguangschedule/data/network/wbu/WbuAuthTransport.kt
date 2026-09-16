@@ -259,7 +259,8 @@ internal class WbuAuthTransport(
     /** WebVPN 门户基址。 */
     val vpnBase: String = "https://webvpn.wbu.edu.cn"
 
-    private val idsPublicBase: String = "http://ids.wbu.edu.cn"
+    /** ids 统一认证公网基址（「直连」走这里，与 WebVPN 代理基址相对）。 */
+    val idsPublicBase: String = "http://ids.wbu.edu.cn"
 
     /** 统一认证(CAS) service 目标：支持通过「使用固定service获取ticket」开关定制。 */
     val casServiceTarget: String
@@ -630,6 +631,27 @@ internal class WbuAuthTransport(
             )
         }
         Log.i("WbuAuthTransport", "startNewLoginSession: cleared old cookies and evicted connection pools; manualTwfidPresent=${manualTwfid.isNotEmpty()}")
+    }
+
+    /**
+     * 「只登录统一认证」事务：只重置统一认证(ids)会话，保留教务/图书馆/WebVPN 等既有会话。
+     *
+     * 与 [startNewLoginSession] 的区别：统一认证与其它服务互不影响，一次统一认证登录
+     * 不该顺手把既有的教务/图书馆会话一起清掉。清空前同样先做快照，失败时用
+     * [rollbackNewLoginSession] 还原。
+     */
+    fun startNewUnifiedAuthLoginSession() {
+        pendingSessionSnapshot = snapshotSessions()
+        // 内存 jar 内属于统一认证的 Cookie（CASTGC / ids 域 JSESSIONID）与 ids 落盘桶
+        removeServiceCookies(CredentialService.UNIFIED_AUTH)
+        val key = cookieKeyFor(
+            CredentialService.UNIFIED_AUTH.id,
+            activeAccount(context, CredentialService.UNIFIED_AUTH)
+        )
+        prefs.edit().remove(key).apply()
+        // 清空闲置连接，防止上一次会话的 Keep-Alive 连接被误复用导致 Host 漂移
+        runCatching { client.connectionPool.evictAll() }
+        Log.i("WbuAuthTransport", "startNewUnifiedAuthLoginSession: ids session reset, other services preserved")
     }
 
     /** 从 Android WebView CookieManager 导入 cookies 到 OkHttp cookie jar。 */

@@ -471,13 +471,14 @@ internal class IdsCasClient(
 
     // ------------------- 手机动态码 -------------------
 
-    /** 发送动态码：解析登录页 → 滑块验证 → 发送短信。 */
+    /** 发送动态码：解析登录页 → 滑块验证 → 发送短信。[authBaseOverride] 供「仅登录统一认证 + 直连」强制公网基址。 */
     suspend fun sendDynamicCode(
         studentId: String,
         flowTag: String,
-        captchaProvider: SliderCaptchaProvider?
+        captchaProvider: SliderCaptchaProvider?,
+        authBaseOverride: String? = null
     ): DynamicCodeSendResult = withContext(Dispatchers.IO) {
-        val authBase = transport.idsBase()
+        val authBase = authBaseOverride ?: transport.idsBase()
         val service = URLEncoder.encode(transport.casServiceTarget, "UTF-8")
         val loginUrl = "$authBase/authserver/login?service=$service"
         val form = fetchLoginForm(loginUrl, "phoneFromId") ?: run {
@@ -532,9 +533,13 @@ internal class IdsCasClient(
         }
     }
 
-    /** 仅获取动态码登录表单参数，不发短信。 */
-    suspend fun obtainDynamicCodeForm(flowTag: String, serviceTarget: String? = null): AuthForm? = withContext(Dispatchers.IO) {
-        val authBase = transport.idsBase()
+    /** 仅获取动态码登录表单参数，不发短信。[authBaseOverride] 仅供「仅登录统一认证 + 直连」使用。 */
+    suspend fun obtainDynamicCodeForm(
+        flowTag: String,
+        serviceTarget: String? = null,
+        authBaseOverride: String? = null
+    ): AuthForm? = withContext(Dispatchers.IO) {
+        val authBase = authBaseOverride ?: transport.idsBase()
         val target = serviceTarget ?: transport.casServiceTarget
         val service = URLEncoder.encode(target, "UTF-8")
         fetchLoginForm("$authBase/authserver/login?service=$service", "phoneFromId")
@@ -547,9 +552,10 @@ internal class IdsCasClient(
         prep: AuthForm,
         flowTag: String,
         serviceTarget: String? = null,
-        consumeTicket: Boolean = true
+        consumeTicket: Boolean = true,
+        authBaseOverride: String? = null
     ): CasPasswordLoginResult = withContext(Dispatchers.IO) {
-        val authBase = transport.idsBase()
+        val authBase = authBaseOverride ?: transport.idsBase()
         val target = serviceTarget ?: transport.casServiceTarget
         val service = URLEncoder.encode(target, "UTF-8")
         val postUrl = "$authBase/authserver/login?service=$service"
@@ -581,10 +587,14 @@ internal class IdsCasClient(
 
     // ------------------- 二维码 -------------------
 
-    /** 开始二维码登录：解析 qr 登录页 → 获取 uuid → 生成二维码内容。 */
-    suspend fun startQrLogin(flowTag: String, serviceTarget: String? = null): QrSession? = withContext(Dispatchers.IO) {
+    /** 开始二维码登录：解析 qr 登录页 → 获取 uuid → 生成二维码内容。[authBaseOverride] 供「仅登录统一认证 + 直连」强制公网基址。 */
+    suspend fun startQrLogin(
+        flowTag: String,
+        serviceTarget: String? = null,
+        authBaseOverride: String? = null
+    ): QrSession? = withContext(Dispatchers.IO) {
         runCatching {
-            val authBase = transport.qrBase()
+            val authBase = authBaseOverride ?: transport.qrBase()
             val target = serviceTarget ?: transport.casServiceTarget
             val service = URLEncoder.encode(target, "UTF-8")
             val qrPageUrl = "$authBase/authserver/login?type=qrcode&service=$service"
