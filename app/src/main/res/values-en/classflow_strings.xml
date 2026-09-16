@@ -706,6 +706,9 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="item_qr_scan">Scan QR code</string>
     <string name="desc_qr_scan">Scan the unified-auth login QR code to confirm sign-in on your computer</string>
     <string name="title_qr_scan">Scan</string>
+    <string name="a11y_qr_scan_engine">Scanning engine</string>
+    <string name="qr_scan_engine_mlkit">ML Kit (default)</string>
+    <string name="qr_scan_engine_zxing">ZXing (fallback)</string>
     <string name="qr_scan_hint_align">Align the QR code within the frame</string>
     <string name="qr_scan_permission_title">Camera permission required</string>
     <string name="qr_scan_permission_desc">Scanning needs the camera. Please grant camera access in system settings.</string>

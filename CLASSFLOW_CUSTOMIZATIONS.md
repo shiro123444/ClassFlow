@@ -69,7 +69,7 @@ git diff 3eb39c2 --stat -- app/src/main/java app/src/main/res | sort -t'|' -k2 -
 
 - 凭据存储改造（`WbuAuthTransport.kt`）：key 由旧版扁平名改为「服务类型 × 账号」分桶（`<field>@<service>@<account>`，如 `password@ids@primary`、`cookies@jwxt@primary`），Cookie 按服务归属拆分持久化（运行时内存 jar 仍共用）；旧扁平 key 一次性**复制**迁移（`migrateLegacyCredentialKeysOnce`，`MyApplication` 启动调用），**保留旧数据不删**。新增 `data/model/wbu/CredentialService.kt`（服务枚举）、`WbuCredentialRepository.kt`、`CredentialVerifier.kt`。
 - 登录编排统一（**上游无此结构**）：`ui/campus/components/WbuCampusAuthSheet.kt` 升级为唯一登录编排宿主（WebVPN 门户登录 / 短信 / 滑块 / 二维码 / 证书异常询问 `SslIssueDialog` / 校园网确认回调 / 验证码回退回调 / `flowTagPrefix`），校园服务、课表页、导入弹窗、账号与凭据页共用；`ui/components/SslIssueDialog.kt` 为抽出的公共弹窗；`ui/components/WbuCourseImportSheet.kt` 瘦身为「导入管线 + 学期/重复课程弹窗」。
-- 扫码端（**上游无此结构**）：`ui/campus/qrscan/`（`QrScanScreen` + `QrScanViewModel`）用 CameraX + ML Kit 解码统一认证二维码；`CasQrLink.parseUuid` 解析二维码内 uuid；`IdsCasClient.scanPeerQrCode`/`confirmPeerQrCode`（+ `WbuSyncEngine` 门面）实现「置 2 → 置 1」，身份取自本机 `CASTGC`，未登录按 `206302` 判定。
+- 扫码端（**上游无此结构**）：`ui/campus/qrscan/`（`QrScanScreen` + `QrScanViewModel` + `QrLuminance`）以 CameraX 取景，解码引擎可在 ML Kit 与 ZXing 间切换（右上角菜单，选择存于 `wbu_sync_auth` 的 `qr_scan_engine`，经 `WbuAuthTransport.get/setQrScanEngine`）；`CasQrLink.parseUuid` 解析二维码内 uuid；`IdsCasClient.scanPeerQrCode`/`confirmPeerQrCode`（+ `WbuSyncEngine` 门面）实现「置 2 → 置 1」，身份取自本机 `CASTGC`，未登录按 `206302` 判定。
 
 ### 6. 其他独有/定制
 - `ui/theme/ThemeClassFlow.kt`（Sakura/Afternoon/Evening 色板 + ClassFlowTheme）

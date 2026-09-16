@@ -7,6 +7,7 @@ import android.util.Base64
 import android.util.Log
 import androidx.appcompat.app.AppCompatDelegate
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.QrScanEngine
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -734,6 +735,7 @@ internal class WbuAuthTransport(
         private const val KEY_USE_WEBVIEW_VPN_MANUAL_MODE = "use_webview_vpn_manual_mode"
         private const val KEY_IDS_VIA_WEBVPN = "ids_via_webvpn"
         private const val KEY_QR_VIA_WEBVPN = "qr_via_webvpn"
+        private const val KEY_QR_SCAN_ENGINE = "qr_scan_engine"
         private const val KEY_SEND_ENGLISH_SMS = "send_english_sms"
         private const val KEY_USE_PC_USER_AGENT = "use_pc_user_agent"
         private const val KEY_SKIP_CAMPUS_CHECK = "skip_campus_check"
@@ -1005,6 +1007,22 @@ internal class WbuAuthTransport(
         fun setQrViaWebVpn(context: Context, enabled: Boolean) {
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit().putBoolean(KEY_QR_VIA_WEBVPN, enabled).apply()
+        }
+
+        /** 扫一扫使用的二维码解码引擎（默认 ML Kit，识别不理想时切 ZXing）。 */
+        fun getQrScanEngine(context: Context): QrScanEngine {
+            val name = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(KEY_QR_SCAN_ENGINE, null) ?: return QrScanEngine.DEFAULT
+            return try {
+                QrScanEngine.valueOf(name)
+            } catch (e: Exception) {
+                QrScanEngine.DEFAULT
+            }
+        }
+
+        fun setQrScanEngine(context: Context, engine: QrScanEngine) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putString(KEY_QR_SCAN_ENGINE, engine.name).apply()
         }
 
         fun getUsePcUserAgent(context: Context): Boolean =

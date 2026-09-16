@@ -3,9 +3,11 @@ package com.xingheyuzhuan.shiguangschedule.ui.campus.qrscan
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.QrScanEngine
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.CasQrLink
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.QrConfirmOutcome
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.QrScanOutcome
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -77,6 +79,10 @@ class QrScanViewModel @Inject constructor(
     private val _tlsPrompt = MutableStateFlow<String?>(null)
     val tlsPrompt: StateFlow<String?> = _tlsPrompt.asStateFlow()
 
+    /** 当前解码引擎（持久化，默认 ML Kit）。 */
+    private val _scanEngine = MutableStateFlow(WbuAuthTransport.getQrScanEngine(context))
+    val scanEngine: StateFlow<QrScanEngine> = _scanEngine.asStateFlow()
+
     private var tlsDeferred: CompletableDeferred<Boolean>? = null
     private var transientJob: Job? = null
     private var lastRejectNoticeAt = 0L
@@ -147,6 +153,17 @@ class QrScanViewModel @Inject constructor(
         _transientError.value = null
         transientJob?.cancel()
         _state.value = if (engine.hasUnifiedAuthSession()) QrScanUiState.Scanning else QrScanUiState.NeedLogin
+    }
+
+    /**
+     * 切换解码引擎并持久化；当前处于失败态时立即重扫，
+     * 让用户换引擎后不用再点一次「重试」。
+     */
+    fun selectScanEngine(target: QrScanEngine) {
+        if (target == _scanEngine.value) return
+        _scanEngine.value = target
+        WbuAuthTransport.setQrScanEngine(context, target)
+        if (_state.value is QrScanUiState.Failed) rescan()
     }
 
     /** 登录 Sheet 登录成功后：可能切换了 WebVPN 模式，重建引擎再回到取景。 */

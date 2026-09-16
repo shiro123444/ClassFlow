@@ -706,6 +706,9 @@
     <string name="item_qr_scan">掃一掃</string>
     <string name="desc_qr_scan">掃描統一認證登入二維碼，確認電腦端登入</string>
     <string name="title_qr_scan">掃一掃</string>
+    <string name="a11y_qr_scan_engine">掃描引擎</string>
+    <string name="qr_scan_engine_mlkit">ML Kit（預設）</string>
+    <string name="qr_scan_engine_zxing">ZXing（備用）</string>
     <string name="qr_scan_hint_align">將二維碼放入取景框內</string>
     <string name="qr_scan_permission_title">需要相機權限</string>
     <string name="qr_scan_permission_desc">掃碼需要使用相機，請在系統設定中授予相機權限</string>

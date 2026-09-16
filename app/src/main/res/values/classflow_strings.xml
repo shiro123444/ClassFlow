@@ -703,6 +703,9 @@
     <string name="item_qr_scan">扫一扫</string>
     <string name="desc_qr_scan">扫描统一认证登录二维码，确认电脑端登录</string>
     <string name="title_qr_scan">扫一扫</string>
+    <string name="a11y_qr_scan_engine">扫描引擎</string>
+    <string name="qr_scan_engine_mlkit">ML Kit（默认）</string>
+    <string name="qr_scan_engine_zxing">ZXing（备用）</string>
     <string name="qr_scan_hint_align">将二维码放入取景框内</string>
     <string name="qr_scan_permission_title">需要相机权限</string>
     <string name="qr_scan_permission_desc">扫码需要使用相机，请在系统设置中授予相机权限</string>

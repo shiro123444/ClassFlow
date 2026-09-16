@@ -6,10 +6,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
@@ -33,14 +33,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -84,10 +88,20 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.DecodeHintType
+import com.google.zxing.MultiFormatReader
+import com.google.zxing.NotFoundException
+import com.google.zxing.PlanarYUVLuminanceSource
+import com.google.zxing.common.HybridBinarizer
 import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.R
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.QrScanEngine
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import java.util.concurrent.Executors
+
+private const val TAG = "QrScanScreen"
 
 /**
  * 扫一扫：以本机已登录的统一认证会话，确认其它端（PC）展示的登录二维码。
@@ -105,6 +119,7 @@ fun QrScanScreen(
     val state by viewModel.state.collectAsState()
     val transientError by viewModel.transientError.collectAsState()
     val tlsPrompt by viewModel.tlsPrompt.collectAsState()
+    val scanEngine by viewModel.scanEngine.collectAsState()
 
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -113,6 +128,7 @@ fun QrScanScreen(
         )
     }
     var showAuthSheet by remember { mutableStateOf(false) }
+    var showEngineMenu by remember { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -163,6 +179,39 @@ fun QrScanScreen(
                         )
                     }
                 },
+                actions = {
+                    Box {
+                        IconButton(onClick = { showEngineMenu = true }) {
+                            Icon(
+                                Icons.Rounded.MoreVert,
+                                contentDescription = stringResource(R.string.a11y_qr_scan_engine),
+                                tint = Color.White
+                            )
+                        }
+                        // 解码引擎切换：ML Kit 识别不理想时改用 ZXing 备用
+                        DropdownMenu(
+                            expanded = showEngineMenu,
+                            onDismissRequest = { showEngineMenu = false }
+                        ) {
+                            ScanEngineMenuItem(
+                                engine = QrScanEngine.ML_KIT,
+                                selected = scanEngine == QrScanEngine.ML_KIT,
+                                onSelect = {
+                                    showEngineMenu = false
+                                    viewModel.selectScanEngine(QrScanEngine.ML_KIT)
+                                }
+                            )
+                            ScanEngineMenuItem(
+                                engine = QrScanEngine.ZXING,
+                                selected = scanEngine == QrScanEngine.ZXING,
+                                onSelect = {
+                                    showEngineMenu = false
+                                    viewModel.selectScanEngine(QrScanEngine.ZXING)
+                                }
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color.Transparent,
                     titleContentColor = Color.White
@@ -182,6 +231,7 @@ fun QrScanScreen(
                 )
             } else {
                 QrCameraPreview(
+                    engine = scanEngine,
                     scanning = state is QrScanUiState.Scanning,
                     onQrCode = viewModel::onCodeDecoded,
                     modifier = Modifier.fillMaxSize()
@@ -242,6 +292,7 @@ fun QrScanScreen(
 /** 相机预览 + 二维码解码；[scanning] 为 false 时保留预览但停止分析（画面即冻结在最后一帧）。 */
 @Composable
 private fun QrCameraPreview(
+    engine: QrScanEngine,
     scanning: Boolean,
     onQrCode: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -253,7 +304,12 @@ private fun QrCameraPreview(
     }
     val executor = remember { Executors.newSingleThreadExecutor() }
     val currentOnQrCode by rememberUpdatedState(onQrCode)
-    val analyzer = remember { QrCodeAnalyzer { raw -> currentOnQrCode(raw) } }
+    val analyzer = remember(engine) { createQrAnalyzer(engine) { raw -> currentOnQrCode(raw) } }
+
+    // 换引擎即换分析器：释放上一个（ML Kit 的 client 需要 close）
+    DisposableEffect(analyzer) {
+        onDispose { analyzer.close() }
+    }
 
     var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     LaunchedEffect(Unit) {
@@ -266,7 +322,7 @@ private fun QrCameraPreview(
 
     AndroidView(factory = { previewView }, modifier = modifier)
 
-    DisposableEffect(cameraProvider, lifecycleOwner, scanning) {
+    DisposableEffect(cameraProvider, lifecycleOwner, scanning, analyzer) {
         val provider = cameraProvider
         if (provider != null) {
             val preview = Preview.Builder().build().also {
@@ -302,18 +358,25 @@ private fun QrCameraPreview(
     }
 
     DisposableEffect(Unit) {
-        onDispose {
-            analyzer.close()
-            executor.shutdown()
-        }
+        onDispose { executor.shutdown() }
     }
 }
 
-/** ML Kit 二维码解码；每帧处理完必须 close，否则前端会停止出帧。 */
-@OptIn(ExperimentalGetImage::class)
-private class QrCodeAnalyzer(
+/** 可切换/可释放的二维码分析器。 */
+private interface QrAnalyzer : ImageAnalysis.Analyzer {
+    fun close() {}
+}
+
+private fun createQrAnalyzer(engine: QrScanEngine, onQrCode: (String) -> Unit): QrAnalyzer =
+    when (engine) {
+        QrScanEngine.ML_KIT -> MlKitQrAnalyzer(onQrCode)
+        QrScanEngine.ZXING -> ZxingQrAnalyzer(onQrCode)
+    }
+
+/** ML Kit 解码；每帧处理完必须 close，否则前端会停止出帧。 */
+private class MlKitQrAnalyzer(
     private val onQrCode: (String) -> Unit
-) : ImageAnalysis.Analyzer {
+) : QrAnalyzer {
 
     private val scanner = BarcodeScanning.getClient(
         BarcodeScannerOptions.Builder()
@@ -335,7 +398,76 @@ private class QrCodeAnalyzer(
             .addOnCompleteListener { imageProxy.close() }
     }
 
-    fun close() = scanner.close()
+    override fun close() = scanner.close()
+}
+
+/**
+ * ZXing 解码（备用引擎）：Y 平面 → 亮度矩阵 → 转正 → 二值化 → QR 解码。
+ * 每帧处理完必须 close，否则前端会停止出帧。
+ */
+private class ZxingQrAnalyzer(
+    private val onQrCode: (String) -> Unit
+) : QrAnalyzer {
+
+    private val reader = MultiFormatReader()
+    private val hints = mapOf(
+        DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE),
+        // 备用引擎按「宁可慢也要认出」取舍
+        DecodeHintType.TRY_HARDER to true
+    )
+
+    override fun analyze(imageProxy: ImageProxy) {
+        try {
+            val plane = imageProxy.planes.firstOrNull() ?: return
+            val y = QrLuminance.copyPlane(
+                buffer = plane.buffer,
+                width = imageProxy.width,
+                height = imageProxy.height,
+                rowStride = plane.rowStride,
+                pixelStride = plane.pixelStride
+            )
+            val luma = QrLuminance.rotate(
+                data = y,
+                width = imageProxy.width,
+                height = imageProxy.height,
+                degrees = imageProxy.imageInfo.rotationDegrees
+            )
+            val source = PlanarYUVLuminanceSource(
+                luma.data, luma.width, luma.height, 0, 0, luma.width, luma.height, false
+            )
+            val bitmap = BinaryBitmap(HybridBinarizer(source))
+            reader.decode(bitmap, hints)?.text?.takeIf { it.isNotBlank() }?.let(onQrCode)
+        } catch (e: NotFoundException) {
+            // 本帧没有可识别的二维码：正常情况
+        } catch (e: Exception) {
+            Log.w(TAG, "ZXing 解码异常", e)
+        } finally {
+            imageProxy.close()
+        }
+    }
+}
+
+/** 引擎切换菜单项。 */
+@Composable
+private fun ScanEngineMenuItem(
+    engine: QrScanEngine,
+    selected: Boolean,
+    onSelect: () -> Unit
+) {
+    DropdownMenuItem(
+        text = {
+            Text(
+                stringResource(
+                    when (engine) {
+                        QrScanEngine.ML_KIT -> R.string.qr_scan_engine_mlkit
+                        QrScanEngine.ZXING -> R.string.qr_scan_engine_zxing
+                    }
+                )
+            )
+        },
+        leadingIcon = { RadioButton(selected = selected, onClick = null) },
+        onClick = onSelect
+    )
 }
 
 /** 取景框：遮罩挖空 + 白色描边。 */
