@@ -110,13 +110,22 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-/** 原生扫码请求：区分「平台扫码页回填」与「wx 桩桥接回调」两种来源。 */
+/** 原生扫码请求：区分「平台扫码页回填」、「wx 桩桥接回调」、「新中新/水控桥接回调」。 */
 private sealed interface ScanRequest {
     /** 来自平台 `/plat/scan?redirectUrl=...`：扫完把结果以 `scanResult` 拼回该地址。 */
     data class Redirect(val redirectUrl: String) : ScanRequest
 
     /** 来自注入的 `wx` 桩：扫完通过 `window.__cfScanResolve(callbackId, result)` 回调页面。 */
     data class Bridge(val callbackId: String) : ScanRequest
+
+    /** 来自 `em.scanQRCode`（TjtcApp 协议）：扫完通过 `window.__cfEmScanResolve(callbackId, result)` 回调页面。 */
+    data class EmBridge(val callbackId: String) : ScanRequest
+
+    /** 来自 `JsAgent.startScan`（SynATP 协议）：扫完通过 `window[callbackName]({ code: 200, data: { qrCodeUTF: result } })` 回调。 */
+    data class JsAgent(val callbackName: String) : ScanRequest
+
+    /** 来自 `AndroidFunc.SynJSNative` / `invokeNativeMethod`：扫完通过 `window[callbackName](result)` 回调页面。 */
+    data class AndroidFunc(val callbackName: String) : ScanRequest
 }
 
 /**
@@ -228,6 +237,73 @@ private const val WX_STUB_JS = """
   }
   cfDefineWx('wx');
   cfDefineWx('jWeixin');
+
+  // -------------------------------------------------------------
+  // 新中新生活服务 / 智能控水 多协议原生扫码桥接入（研究笔记第 18 节）
+  // -------------------------------------------------------------
+
+  // 1. window.em 桩（TjtcApp 协议，被 applications/lifeService 与 yktxyyy:5001 共同支持）
+  if (!window.__cfEmStubInstalled) {
+    window.__cfEmStubInstalled = true;
+    window.__cfEmScanCallbacks = window.__cfEmScanCallbacks || {};
+    var emShim = window.em || {};
+    emShim.scanQRCode = function(opts) {
+      opts = opts || {};
+      var cbId = 'cfemscan_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      window.__cfEmScanCallbacks[cbId] = opts;
+      try {
+        if (window.CFWebAppBridge && window.CFWebAppBridge.scanQRCodeEm) {
+          window.CFWebAppBridge.scanQRCodeEm(cbId);
+        } else if (window.CFWebAppBridge && window.CFWebAppBridge.scanQRCode) {
+          window.CFWebAppBridge.scanQRCode(cbId);
+        }
+      } catch (e) {
+        delete window.__cfEmScanCallbacks[cbId];
+        if (opts.fail) { try { opts.fail(e); } catch (e2) {} }
+      }
+    };
+    window.__cfEmScanResolve = function(cbId, result) {
+      var opts = (window.__cfEmScanCallbacks || {})[cbId];
+      if (!opts) return;
+      delete window.__cfEmScanCallbacks[cbId];
+      if (result === null || result === undefined || result === '') {
+        if (opts.fail) { try { opts.fail({ errMsg: 'scanQRCode:cancel' }); } catch (e) {} }
+      } else {
+        if (opts.success) {
+          try {
+            // TjtcApp 既传 resultStr 也传整个对象，同时满足 lifeService 的 res 与 yktxyyy 的 res.resultStr
+            opts.success({ resultStr: String(result), text: String(result) });
+          } catch (e) {}
+        }
+      }
+      if (opts.complete) { try { opts.complete(); } catch (e) {} }
+    };
+    try {
+      Object.defineProperty(window, 'em', {
+        configurable: true,
+        get: function() { return emShim; },
+        set: function(v) { if (v && typeof v === 'object') { Object.assign(emShim, v); } }
+      });
+    } catch (e) {
+      window.em = emShim;
+    }
+  }
+
+  // 2. window.JsAgent 桩（SynATP 协议，applications/lifeService 在 SynATP 模式下调用）
+  if (!window.JsAgent) {
+    window.JsAgent = {
+      startScan: function(callbackName) {
+        var cb = callbackName || 'scanCallback';
+        try {
+          if (window.CFWebAppBridge && window.CFWebAppBridge.scanQRCodeJsAgent) {
+            window.CFWebAppBridge.scanQRCodeJsAgent(cb);
+          }
+        } catch (e) {
+          console.error('JsAgent.startScan error:', e);
+        }
+      }
+    };
+  }
 })();
 """
 
@@ -375,6 +451,9 @@ fun WebAppScreen(
                     onSessionExpired = { showAuthSheet = true },
                     onInterceptScan = { redirectUrl -> scanRequest = ScanRequest.Redirect(redirectUrl) },
                     onBridgeScan = { callbackId -> scanRequest = ScanRequest.Bridge(callbackId) },
+                    onEmScan = { callbackId -> scanRequest = ScanRequest.EmBridge(callbackId) },
+                    onJsAgentScan = { callbackName -> scanRequest = ScanRequest.JsAgent(callbackName) },
+                    onAndroidFuncScan = { callbackName -> scanRequest = ScanRequest.AndroidFunc(callbackName) },
                     onWebViewReady = { webViewInstance = it }
                 )
             }
@@ -461,12 +540,51 @@ fun WebAppScreen(
             QrScannerOverlay(
                 onDismiss = {
                     val webView = webViewInstance
-                    if (request is ScanRequest.Bridge && webView != null) {
-                        // 取消：回调 null 触发 U净 的 fail 分支
-                        webView.evaluateJavascript(
-                            "window.__cfScanResolve(${JSONObject.quote(request.callbackId)}, null);",
-                            null
-                        )
+                    if (webView != null) {
+                        when (request) {
+                            is ScanRequest.Bridge -> {
+                                // 取消：回调 null 触发 U净 的 fail 分支
+                                webView.evaluateJavascript(
+                                    "window.__cfScanResolve(${JSONObject.quote(request.callbackId)}, null);",
+                                    null
+                                )
+                            }
+                            is ScanRequest.EmBridge -> {
+                                webView.evaluateJavascript(
+                                    "window.__cfEmScanResolve(${JSONObject.quote(request.callbackId)}, null);",
+                                    null
+                                )
+                            }
+                            is ScanRequest.JsAgent -> {
+                                val callback = request.callbackName.ifBlank { "scanCallback" }
+                                webView.evaluateJavascript(
+                                    """
+                                    (function() {
+                                        var cb = window[${JSONObject.quote(callback)}];
+                                        if (typeof cb === 'function') {
+                                            try { cb({ code: 500, msg: '用户取消' }); } catch (e) {}
+                                        }
+                                    })();
+                                    """.trimIndent(),
+                                    null
+                                )
+                            }
+                            is ScanRequest.AndroidFunc -> {
+                                val callback = request.callbackName.ifBlank { "scanCallback" }
+                                webView.evaluateJavascript(
+                                    """
+                                    (function() {
+                                        var cb = window[${JSONObject.quote(callback)}];
+                                        if (typeof cb === 'function') {
+                                            try { cb(null); } catch (e) {}
+                                        }
+                                    })();
+                                    """.trimIndent(),
+                                    null
+                                )
+                            }
+                            is ScanRequest.Redirect -> { /* 页面跳转类取消无需主动注入 */ }
+                        }
                     }
                     scanRequest = null
                 },
@@ -486,6 +604,44 @@ fun WebAppScreen(
                             is ScanRequest.Bridge -> {
                                 val js = "window.__cfScanResolve(${JSONObject.quote(request.callbackId)}, ${JSONObject.quote(rawResult)});"
                                 Log.i("WebAppScreen", "Resolving wx stub scan result")
+                                webView.evaluateJavascript(js, null)
+                            }
+
+                            is ScanRequest.EmBridge -> {
+                                val js = "window.__cfEmScanResolve(${JSONObject.quote(request.callbackId)}, ${JSONObject.quote(rawResult)});"
+                                Log.i("WebAppScreen", "Resolving em stub scan result")
+                                webView.evaluateJavascript(js, null)
+                            }
+
+                            is ScanRequest.JsAgent -> {
+                                val callback = request.callbackName.ifBlank { "scanCallback" }
+                                val js = """
+                                    (function() {
+                                        var cb = window[${JSONObject.quote(callback)}];
+                                        if (typeof cb === 'function') {
+                                            try {
+                                                cb({ code: 200, data: { qrCodeUTF: ${JSONObject.quote(rawResult)} } });
+                                            } catch (e) {}
+                                        }
+                                    })();
+                                """.trimIndent()
+                                Log.i("WebAppScreen", "Resolving JsAgent scan result: $callback")
+                                webView.evaluateJavascript(js, null)
+                            }
+
+                            is ScanRequest.AndroidFunc -> {
+                                val callback = request.callbackName.ifBlank { "scanCallback" }
+                                val js = """
+                                    (function() {
+                                        var cb = window[${JSONObject.quote(callback)}];
+                                        if (typeof cb === 'function') {
+                                            try { cb(${JSONObject.quote(rawResult)}); } catch (e) {}
+                                        } else if (typeof window.scanCallback === 'function') {
+                                            try { window.scanCallback(${JSONObject.quote(rawResult)}); } catch (e2) {}
+                                        }
+                                    })();
+                                """.trimIndent()
+                                Log.i("WebAppScreen", "Resolving AndroidFunc scan result: $callback")
                                 webView.evaluateJavascript(js, null)
                             }
                         }
@@ -556,6 +712,9 @@ private fun FullScreenWebContent(
     onSessionExpired: () -> Unit,
     onInterceptScan: (redirectUrl: String) -> Unit,
     onBridgeScan: (callbackId: String) -> Unit,
+    onEmScan: (callbackId: String) -> Unit,
+    onJsAgentScan: (callbackName: String) -> Unit,
+    onAndroidFuncScan: (callbackName: String) -> Unit,
     onWebViewReady: (WebView) -> Unit
 ) {
     val context = LocalContext.current
@@ -595,6 +754,17 @@ private fun FullScreenWebContent(
     val defaultUserAgent = remember { WebSettings.getDefaultUserAgent(context) }
     // 一卡通平台 / U净 场景启用 wx 桩与原生桥（避免影响其它网页应用）
     val enableScanBridge = definition?.id == WebAppId.CAMPUS_CARD
+    val customUserAgent = remember(defaultUserAgent, enableScanBridge) {
+        // 当为一卡通平台时，追加 "SynATP E-Mobile" 使得：
+        // 1. 新中新扩展应用（applications/lifeService）识别为 SynATP / TjtcApp，解锁原生扫码；
+        // 2. 独立控水（yktxyyy.wbu.edu.cn:5001）识别为 TjtcApp，解锁 em.scanQRCode 原生扫码；
+        // 3. 绝不追加 Synjones-E-Campus，保证 sessionStorage.agentType 保持为 "h5"，彻底避免"安卓模块未授权（12）"！
+        if (enableScanBridge && !defaultUserAgent.contains("SynATP")) {
+            "$defaultUserAgent SynATP E-Mobile"
+        } else {
+            defaultUserAgent
+        }
+    }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
     val webView = remember {
@@ -615,7 +785,7 @@ private fun FullScreenWebContent(
             settings.allowFileAccess = true
             settings.textZoom = 100
             settings.cacheMode = WebSettings.LOAD_DEFAULT
-            settings.userAgentString = defaultUserAgent
+            settings.userAgentString = customUserAgent
             settings.mediaPlaybackRequiresUserGesture = false
 
             setLayerType(WebView.LAYER_TYPE_HARDWARE, null)
@@ -633,13 +803,23 @@ private fun FullScreenWebContent(
                 }
             }
 
-            // 原生桥：供注入的 wx 桩调用扫码与外跳支付
+            // 原生桥：供注入的 wx 桩、em 桩、JsAgent 以及 AndroidFunc 调用扫码与外跳支付
             if (enableScanBridge) {
                 addJavascriptInterface(
                     object {
                         @JavascriptInterface
                         fun scanQRCode(callbackId: String) {
                             mainHandler.post { onBridgeScan(callbackId) }
+                        }
+
+                        @JavascriptInterface
+                        fun scanQRCodeEm(callbackId: String) {
+                            mainHandler.post { onEmScan(callbackId) }
+                        }
+
+                        @JavascriptInterface
+                        fun scanQRCodeJsAgent(callbackName: String) {
+                            mainHandler.post { onJsAgentScan(callbackName) }
                         }
 
                         @JavascriptInterface
@@ -664,6 +844,47 @@ private fun FullScreenWebContent(
                         }
                     },
                     "CFWebAppBridge"
+                )
+
+                // 注入 AndroidFunc（支持传统水控或备用 SynJSNative 协议，不诱发 agentType 改变）
+                addJavascriptInterface(
+                    object {
+                        @JavascriptInterface
+                        fun SynJSNative(jsonStr: String?): String {
+                            Log.d("WebAppScreen", "AndroidFunc.SynJSNative invoked: $jsonStr")
+                            if (jsonStr.isNullOrBlank()) return ""
+                            try {
+                                val json = JSONObject(jsonStr)
+                                val primaryKey = json.optString("primaryKey")
+                                val callback = json.optString("callback").ifBlank { "scanCallback" }
+                                if (primaryKey.contains("scan", ignoreCase = true)) {
+                                    mainHandler.post {
+                                        onAndroidFuncScan(callback)
+                                    }
+                                    return JSONObject().apply {
+                                        put("code", 200)
+                                        put("message", "success")
+                                    }.toString()
+                                }
+                            } catch (e: Exception) {
+                                Log.w("WebAppScreen", "Failed to parse SynJSNative JSON", e)
+                            }
+                            return ""
+                        }
+
+                        @JavascriptInterface
+                        fun invokeNativeMethod(methodName: String?, param: String? = null): String {
+                            Log.d("WebAppScreen", "AndroidFunc.invokeNativeMethod invoked: $methodName, param: $param")
+                            val callback = if (!methodName.isNullOrBlank() && !methodName.contains("invoke", ignoreCase = true)) {
+                                methodName
+                            } else "scanCallback"
+                            mainHandler.post {
+                                onAndroidFuncScan(callback)
+                            }
+                            return "success"
+                        }
+                    },
+                    "AndroidFunc"
                 )
             }
 
