@@ -18,10 +18,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
+
+private const val TAG = "QrScanViewModel"
 
 /** 扫码失败类型。 */
 enum class QrScanError {
@@ -59,6 +62,11 @@ sealed interface QrScanUiState {
 /** 取景期间的一次性提示（含相册选图路径）。 */
 enum class QrTransientNotice { NOT_CAS_QR, PHOTO_NO_CODE }
 
+sealed interface QrScanEvent {
+    data class NavigateToWater(val cd: String) : QrScanEvent
+    data class NavigateToWasher(val initialUrl: String?, val pendingAutoScan: String) : QrScanEvent
+}
+
 /**
  * 扫一扫（扫码端）逻辑：以本机已有的统一认证会话替 PC/其它端确认登录。
  *
@@ -93,12 +101,31 @@ class QrScanViewModel @Inject constructor(
     private val _scanEngine = MutableStateFlow(WbuAuthTransport.getQrScanEngine(context))
     val scanEngine: StateFlow<QrScanEngine> = _scanEngine.asStateFlow()
 
+    /** 扫码分流事件（跳转原生饮水机 / 跳转洗衣机 WebApp）。 */
+    private val _scanEvent = kotlinx.coroutines.flow.MutableSharedFlow<QrScanEvent>(extraBufferCapacity = 8)
+    val scanEvent: kotlinx.coroutines.flow.SharedFlow<QrScanEvent> = _scanEvent.asSharedFlow()
+
+    /** 吹风机暂不支持一卡通扫码对话框。 */
+    private val _hairdryerPrompt = MutableStateFlow(false)
+    val hairdryerPrompt: StateFlow<Boolean> = _hairdryerPrompt.asStateFlow()
+
+    /** 洗衣机核验中状态。 */
+    private val _washerLoading = MutableStateFlow(false)
+    val washerLoading: StateFlow<Boolean> = _washerLoading.asStateFlow()
+
+    /** 洗衣机设备离线提示。 */
+    private val _washerOffline = MutableStateFlow(false)
+    val washerOffline: StateFlow<Boolean> = _washerOffline.asStateFlow()
+
     private var tlsDeferred: CompletableDeferred<Boolean>? = null
     private var transientJob: Job? = null
     private var lastRejectNoticeAt = 0L
 
     /** 已成功送入扫描流程的 uuid，避免相机高频回调重复触发。 */
     private var handledUuid: String? = null
+
+    /** 已处理过的 U净 二维码原文，避免相机高频回调重复触发。 */
+    private var handledUjing: String? = null
 
     init {
         attachSslHandler(engine)
@@ -121,6 +148,10 @@ class QrScanViewModel @Inject constructor(
 
     /** 相机解码到一段二维码原文。 */
     fun onCodeDecoded(raw: String) {
+        android.util.Log.i(TAG, "Decoded: ${raw.take(160)}")
+        // U净 设备码优先识别：不依赖统一认证登录态（登录由目标页自行处理），
+        // 因此即使当前处于 NeedLogin 状态也能正常分流。
+        if (handleUjingIfMatched(raw)) return
         if (_state.value !is QrScanUiState.Scanning) return
         submitDecoded(raw)
     }
@@ -148,22 +179,93 @@ class QrScanViewModel @Inject constructor(
 
     /** 解析并送入扫码流程（相机与相册共用）。 */
     private fun submitDecoded(raw: String) {
-        val uuid = CasQrLink.parseUuid(raw)
-        if (uuid == null) {
+        val casUuid = CasQrLink.parseUuid(raw)
+        if (casUuid == null) {
+            if (handleUjingIfMatched(raw)) return
             notifyRejected()
             return
         }
-        if (uuid == handledUuid) return
-        handledUuid = uuid
+        if (casUuid == handledUuid) return
+        handledUuid = casUuid
 
         viewModelScope.launch {
-            when (engine.scanPeerQrCode(uuid)) {
-                QrScanOutcome.SCANNED -> _state.value = QrScanUiState.Scanned(uuid)
+            when (engine.scanPeerQrCode(casUuid)) {
+                QrScanOutcome.SCANNED -> _state.value = QrScanUiState.Scanned(casUuid)
                 QrScanOutcome.NEED_LOGIN -> _state.value = QrScanUiState.NeedLogin
                 QrScanOutcome.EXPIRED -> _state.value = QrScanUiState.Failed(QrScanError.EXPIRED)
                 QrScanOutcome.ERROR -> _state.value = QrScanUiState.Failed(QrScanError.NETWORK)
             }
         }
+    }
+
+    /**
+     * U净 贴纸 / 设备二维码分流。命中返回 true。
+     */
+    private fun handleUjingIfMatched(raw: String): Boolean {
+        val ujing = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.parse(raw) ?: return false
+        if (raw == handledUjing) return true
+        handledUjing = raw
+        android.util.Log.i(TAG, "Ujing QR matched: $ujing")
+
+        when (ujing) {
+            is com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.Result.Water -> {
+                _scanEvent.tryEmit(QrScanEvent.NavigateToWater(ujing.cd))
+            }
+
+            is com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.Result.Hairdryer -> {
+                _hairdryerPrompt.value = true
+            }
+
+            is com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.Result.Washer -> {
+                handleWasher(ujing)
+            }
+        }
+        return true
+    }
+
+    private fun handleWasher(washer: com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.Result.Washer) {
+        viewModelScope.launch {
+            _washerLoading.value = true
+            val encodedRaw = runCatching { java.net.URLEncoder.encode(washer.raw, "UTF-8") }.getOrDefault(washer.raw)
+            try {
+                val cardClient = com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuCampusCardClient(context, useVpn = false)
+                val ujingClient = com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuUjingClient(context, cardClient)
+                val token = cardClient.ensureValidAccessToken()
+                ujingClient.connect(token, appId = com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuUjingClient.WASHER_APP_ID)
+                val result = ujingClient.scanWasherCode(washer.raw)
+                _washerLoading.value = false
+
+                if (!result.online) {
+                    _washerOffline.value = true
+                } else {
+                    val launchUrl = cardClient.resolveAppLaunchUrl(com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuUjingClient.WASHER_APP_ID, token)
+                    val separator = if (launchUrl?.contains("?") == true) "&" else "?"
+                    val initialUrl = if (launchUrl != null) "${launchUrl}${separator}scanResult=$encodedRaw" else null
+                    _scanEvent.emit(QrScanEvent.NavigateToWasher(initialUrl = initialUrl, pendingAutoScan = washer.raw))
+                }
+            } catch (e: Exception) {
+                _washerLoading.value = false
+                android.util.Log.w(TAG, "Washer scan failed, fallback to direct open", e)
+                val cardClient = com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuCampusCardClient(context, useVpn = false)
+                val token = runCatching { cardClient.ensureValidAccessToken() }.getOrNull()
+                val launchUrl = if (token != null) cardClient.resolveAppLaunchUrl(com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuUjingClient.WASHER_APP_ID, token) else null
+                val separator = if (launchUrl?.contains("?") == true) "&" else "?"
+                val initialUrl = if (launchUrl != null) "${launchUrl}${separator}scanResult=$encodedRaw" else null
+                _scanEvent.emit(QrScanEvent.NavigateToWasher(initialUrl = initialUrl, pendingAutoScan = washer.raw))
+            }
+        }
+    }
+
+    fun dismissHairdryerDialog() {
+        _hairdryerPrompt.value = false
+        handledUjing = null
+        handledUuid = null
+    }
+
+    fun dismissWasherOfflineDialog() {
+        _washerOffline.value = false
+        handledUjing = null
+        handledUuid = null
     }
 
     /** 确认登录（PC 端状态置 1）。 */
@@ -185,6 +287,7 @@ class QrScanViewModel @Inject constructor(
     /** 重新扫描（重扫/重试）。 */
     fun rescan() {
         handledUuid = null
+        handledUjing = null
         _transientNotice.value = null
         transientJob?.cancel()
         _state.value = if (engine.hasUnifiedAuthSession()) QrScanUiState.Scanning else QrScanUiState.NeedLogin

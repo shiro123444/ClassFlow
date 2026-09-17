@@ -74,7 +74,14 @@ sealed interface Destination : NavKey {
 
     @Serializable
     data class WebApp(
-        val appId: String
+        val appId: String,
+        val initialTargetUrl: String? = null,
+        val pendingAutoScan: String? = null
+    ) : Destination
+
+    @Serializable
+    data class UjingWater(
+        val cd: String
     ) : Destination
 
     @Serializable

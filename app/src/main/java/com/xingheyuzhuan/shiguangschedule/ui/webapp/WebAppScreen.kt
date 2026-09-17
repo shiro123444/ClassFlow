@@ -148,6 +148,15 @@ private const val WX_STUB_JS = """
   };
   shim.scanQRCode = function (opts) {
     opts = opts || {};
+    if (window.__cfAutoScan) {
+      var autoRes = String(window.__cfAutoScan);
+      window.__cfAutoScan = null;
+      setTimeout(function () {
+        if (opts.success) { try { opts.success({ resultStr: autoRes, errMsg: 'scanQRCode:ok' }); } catch (e) {} }
+        if (opts.complete) { try { opts.complete({ errMsg: 'scanQRCode:ok' }); } catch (e2) {} }
+      }, 0);
+      return;
+    }
     var cbId = 'cfscan_' + Date.now() + '_' + Math.random().toString(36).slice(2);
     window.__cfScanCallbacks[cbId] = opts;
     try {
@@ -236,6 +245,8 @@ private const val WX_STUB_JS = """
 fun WebAppScreen(
     navBridge: NavBridge,
     appId: String,
+    initialTargetUrl: String? = null,
+    pendingAutoScan: String? = null,
     viewModel: WebAppViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -247,8 +258,8 @@ fun WebAppScreen(
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var scanRequest by remember { mutableStateOf<ScanRequest?>(null) }
 
-    LaunchedEffect(appId) {
-        viewModel.start(appId)
+    LaunchedEffect(appId, initialTargetUrl) {
+        viewModel.start(appId, initialTargetUrl)
     }
 
     if (uiState.needLogin || showAuthSheet) {
@@ -276,14 +287,28 @@ fun WebAppScreen(
         if (webView != null) {
             val currentUrl = webView.url.orEmpty()
             val def = uiState.definition
-            val home = def?.homeUrl
-            if (!home.isNullOrBlank() && isThirdPartyHomeRoute(currentUrl, def)) {
-                // U净 washer-h5 的 `#/home`（OAuth 回调落地页）在 WebView 历史里回退会被
-                // `parseUrlV2` 重新跳回 authorize，形成死循环；仅此页按返回键时直接回平台主页，
-                // 其余第三方页面仍走正常的 WebView 历史回退。
-                Log.i("WebAppScreen", "Back on third-party home route, returning to platform home: $home")
-                webView.loadUrl(home)
-            } else if (!isAtHomeRoute(currentUrl, def) && webView.canGoBack()) {
+            val isDeepLinked = !initialTargetUrl.isNullOrBlank() || !pendingAutoScan.isNullOrBlank()
+
+            if (isDeepLinked) {
+                // 全局扫码直达场景：用户扫码直接进入洗衣/洗烘程序选择页（programV2 / reserveV2）。
+                // 在程序选择页、扫码异常页（scanError）或落地首页（home）按返回键直接退出容器回 ClassFlow，
+                // 彻底解决在第三方 OAuth 历史链与自动跳转逻辑间卡住「退不出去」的问题。
+                if (isThirdPartyEntryRoute(currentUrl, def)) {
+                    Log.i("WebAppScreen", "Back on deep-linked third-party entry route ($currentUrl), exiting to ClassFlow")
+                    navBridge.popBackStack()
+                    return@BackHandler
+                }
+            } else {
+                // 普通平台门户浏览场景：按之前要求，仅在 #/home 时跳回平台主页
+                val home = def?.homeUrl
+                if (!home.isNullOrBlank() && isThirdPartyHomeRoute(currentUrl, def)) {
+                    Log.i("WebAppScreen", "Back on third-party home route, returning to platform home: $home")
+                    webView.loadUrl(home)
+                    return@BackHandler
+                }
+            }
+
+            if (!isAtHomeRoute(currentUrl, def) && webView.canGoBack()) {
                 webView.goBack()
             } else {
                 navBridge.popBackStack()
@@ -345,6 +370,7 @@ fun WebAppScreen(
                     useVpn = stage.useVpn,
                     definition = uiState.definition,
                     platformToken = stage.token,
+                    pendingAutoScan = pendingAutoScan,
                     onSslError = { handler, error -> sslErrorState = Pair(handler, error) },
                     onSessionExpired = { showAuthSheet = true },
                     onInterceptScan = { redirectUrl -> scanRequest = ScanRequest.Redirect(redirectUrl) },
@@ -503,6 +529,21 @@ private fun isThirdPartyHomeRoute(currentUrl: String, def: WebAppDefinition?): B
     return hash == "/home" || hash.startsWith("/home/")
 }
 
+/**
+ * 判断当前是否处于第三方 H5（如 U净 洗衣机）扫码直达的起始/入口路由。
+ * 包括：程序选择页 (`#/programV2`, `#/reserveV2`)、首页 (`#/home`)、扫码异常页 (`#/scanError`)、或根路由。
+ * 用户在这些由全局扫码直达的界面按返回键时直接退出 WebApp 容器并返回 ClassFlow。
+ */
+private fun isThirdPartyEntryRoute(currentUrl: String, def: WebAppDefinition?): Boolean {
+    if (currentUrl.isBlank() || currentUrl == "about:blank") return true
+    val host = runCatching { Uri.parse(currentUrl).host }.getOrNull() ?: return true
+    if (def != null && host.equals(def.targetHost, ignoreCase = true)) return false
+
+    val hash = currentUrl.substringAfter("#", "").substringBefore('?')
+    val entryRoutes = listOf("/programV2", "/reserveV2", "/home", "/scanError", "/createorder")
+    return hash.isBlank() || hash == "/" || entryRoutes.any { hash == it || hash.startsWith("$it/") }
+}
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun FullScreenWebContent(
@@ -510,6 +551,7 @@ private fun FullScreenWebContent(
     useVpn: Boolean,
     definition: WebAppDefinition?,
     platformToken: String?,
+    pendingAutoScan: String? = null,
     onSslError: (SslErrorHandler, SslError) -> Unit,
     onSessionExpired: () -> Unit,
     onInterceptScan: (redirectUrl: String) -> Unit,
@@ -536,6 +578,8 @@ private fun FullScreenWebContent(
             }
         }
     }
+
+    var autoScanConsumed by remember(pendingAutoScan) { mutableStateOf(false) }
 
     val fileChooserLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -697,6 +741,18 @@ private fun FullScreenWebContent(
                     // document 早期注入 wx 桩（幂等），保证 U净 扫码/支付桥可用
                     if (enableScanBridge) {
                         view?.evaluateJavascript(WX_STUB_JS, null)
+                        if (!pendingAutoScan.isNullOrBlank() && !autoScanConsumed) {
+                            autoScanConsumed = true
+                            val autoJs = """
+                                (function() {
+                                    window.__cfAutoScan = ${JSONObject.quote(pendingAutoScan)};
+                                    try {
+                                        sessionStorage.setItem('scanResult', ${JSONObject.quote(pendingAutoScan)});
+                                    } catch (e) {}
+                                })();
+                            """.trimIndent()
+                            view?.evaluateJavascript(autoJs, null)
+                        }
                     }
                 }
 
@@ -705,6 +761,18 @@ private fun FullScreenWebContent(
                     // 兜底再注入一次（部分机型 onPageStarted 时 JS 上下文尚未就绪）
                     if (enableScanBridge) {
                         view?.evaluateJavascript(WX_STUB_JS, null)
+                        if (!pendingAutoScan.isNullOrBlank() && !autoScanConsumed) {
+                            autoScanConsumed = true
+                            val autoJs = """
+                                (function() {
+                                    window.__cfAutoScan = ${JSONObject.quote(pendingAutoScan)};
+                                    try {
+                                        sessionStorage.setItem('scanResult', ${JSONObject.quote(pendingAutoScan)});
+                                    } catch (e) {}
+                                })();
+                            """.trimIndent()
+                            view?.evaluateJavascript(autoJs, null)
+                        }
                     }
                 }
 

@@ -24,6 +24,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,17 +58,45 @@ fun QrScanScreen(
     val tlsPrompt by viewModel.tlsPrompt.collectAsState()
     val scanEngine by viewModel.scanEngine.collectAsState()
     val photoBusy by viewModel.photoBusy.collectAsState()
+    val hairdryerPrompt by viewModel.hairdryerPrompt.collectAsState()
+    val washerOffline by viewModel.washerOffline.collectAsState()
+    val washerLoading by viewModel.washerLoading.collectAsState()
 
     var showAuthSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.scanEvent.collect { event ->
+            when (event) {
+                is QrScanEvent.NavigateToWater -> {
+                    navBridge.replace(com.xingheyuzhuan.shiguangschedule.Destination.UjingWater(event.cd))
+                }
+                is QrScanEvent.NavigateToWasher -> {
+                    navBridge.replace(
+                        com.xingheyuzhuan.shiguangschedule.Destination.WebApp(
+                            appId = com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId.CAMPUS_CARD.name,
+                            initialTargetUrl = event.initialUrl,
+                            pendingAutoScan = event.pendingAutoScan
+                        )
+                    )
+                }
+            }
+        }
+    }
 
     // 系统 Photo Picker：不需要任何存储/媒体权限
     val photoPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri -> uri?.let(viewModel::onPhotoPicked) }
 
-    val scanning = state is QrScanUiState.Scanning
+    // NeedLogin 时也保持解码：U净 设备码不依赖统一认证登录态，需随时可扫；
+    // 统一认证二维码在 NeedLogin 下会被 ViewModel 忽略。
+    val scanning = state is QrScanUiState.Scanning || state is QrScanUiState.NeedLogin
     val notice = transientNotice
-    val noticeString = if (notice != null) noticeText(notice) else null
+    val noticeString = when {
+        washerLoading -> stringResource(R.string.ujing_washer_checking)
+        notice != null -> noticeText(notice)
+        else -> null
+    }
 
     // 与网页应用扫码共用同一套圆图标 UI（顶部渐变遮罩 + 圆形关闭/相册/引擎按钮）
     QrScannerScaffold(
@@ -130,6 +159,32 @@ fun QrScanScreen(
             dismissButton = {
                 TextButton(onClick = { viewModel.resolveTlsPrompt(false) }) {
                     Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
+    if (hairdryerPrompt) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissHairdryerDialog() },
+            title = { Text(stringResource(R.string.dialog_ujing_hairdryer_title)) },
+            text = { Text(stringResource(R.string.dialog_ujing_hairdryer_message)) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.dismissHairdryerDialog() }) {
+                    Text(stringResource(R.string.action_confirm))
+                }
+            }
+        )
+    }
+
+    if (washerOffline) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissWasherOfflineDialog() },
+            title = { Text(stringResource(R.string.dialog_ujing_washer_offline_title)) },
+            text = { Text(stringResource(R.string.dialog_ujing_washer_offline_message)) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.dismissWasherOfflineDialog() }) {
+                    Text(stringResource(R.string.action_confirm))
                 }
             }
         )

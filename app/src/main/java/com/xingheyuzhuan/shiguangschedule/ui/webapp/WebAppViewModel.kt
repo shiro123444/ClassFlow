@@ -59,6 +59,7 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
     val uiState: StateFlow<WebAppUiState> = _uiState.asStateFlow()
 
     private var currentAppId: String? = null
+    private var overrideTargetUrl: String? = null
 
     /**
      * 启动加载流程：
@@ -67,8 +68,9 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
      * 3. 决定网络策略；
      * 4. 换取 Token 并打开。
      */
-    fun start(appId: String) {
+    fun start(appId: String, initialTargetUrl: String? = null) {
         currentAppId = appId
+        overrideTargetUrl = initialTargetUrl
         val def = WebAppCatalog.findByIdString(appId)
         if (def == null) {
             _uiState.update { it.copy(stage = WebAppStage.Error("未知网页应用: $appId")) }
@@ -251,29 +253,8 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
                 // 特判：一卡通移动服务平台 (CAMPUS_CARD)
                 if (def.id == com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId.CAMPUS_CARD) {
                     val cardClient = com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuCampusCardClient(app, useVpn = false)
-                    var token = WbuAuthTransport.getCampusCardAccessToken(app)
-                    val tokenValid = if (token.isNotBlank()) cardClient.checkSession(token) else false
-                    if (!tokenValid) {
-                        // 尝试用 refresh_token 刷新（不顶号）
-                        val refreshToken = WbuAuthTransport.getCampusCardRefreshToken(app)
-                        var refreshedOk = false
-                        if (refreshToken.isNotBlank()) {
-                            val refreshed = cardClient.refreshToken(refreshToken)
-                            if (refreshed != null && refreshed.accessToken.isNotBlank()) {
-                                WbuAuthTransport.setCampusCardTokens(app, refreshed.accessToken, refreshed.refreshToken)
-                                token = refreshed.accessToken
-                                refreshedOk = true
-                            }
-                        }
-                        if (!refreshedOk) {
-                            // 重新从 CAS 换票
-                            val loginRes = cardClient.loginWithCasTgc()
-                            WbuAuthTransport.setCampusCardTokens(app, loginRes.accessToken, loginRes.refreshToken)
-                            token = loginRes.accessToken
-                        }
-                    }
-
-                    val launchUrl = cardClient.buildLaunchUrl(token)
+                    val token = cardClient.ensureValidAccessToken()
+                    val launchUrl = overrideTargetUrl ?: cardClient.buildLaunchUrl(token)
                     _uiState.update {
                         it.copy(
                             stage = WebAppStage.ContentReady(

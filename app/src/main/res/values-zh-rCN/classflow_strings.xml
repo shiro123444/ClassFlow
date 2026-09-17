@@ -736,6 +736,7 @@
     <string name="qr_scan_success_title">登录已确认</string>
     <string name="qr_scan_success_desc">电脑端已完成登录</string>
     <string name="action_qr_scan_done">完成</string>
+    <string name="action_continue_scan">继续扫码</string>
     <string name="qr_scan_need_login_title">未登录统一认证</string>
     <string name="qr_scan_need_login_desc">扫码确认需要本机已登录统一认证</string>
     <string name="action_qr_scan_login">去登录</string>
@@ -750,6 +751,23 @@
     <string name="credential_sync_campus_card_success">一卡通登录成功</string>
     <string name="credential_sync_campus_card_failed">一卡通登录失败：%1$s</string>
     <string name="webapp_scan_hint">对准设备上的二维码即可自动扫描</string>
+    <string name="title_ujing_water">U净饮水</string>
+    <string name="ujing_water_connecting">正在连接饮水机...</string>
+    <string name="ujing_water_dispensing">正在取水</string>
+    <string name="ujing_water_realtime_connected">长连接实时推送中</string>
+    <string name="ujing_water_order_info">订单明细</string>
+    <string name="ujing_water_hot_amount">热水用量</string>
+    <string name="ujing_water_warm_amount">温水用量</string>
+    <string name="ujing_water_cost">扣费金额</string>
+    <string name="ujing_water_pay_type">支付方式</string>
+    <string name="ujing_water_order_no">订单编号</string>
+    <string name="ujing_water_action_hint">请在饮水机按键接水，接水完毕后将自动结算</string>
+    <string name="ujing_water_finished_title">取水已完成</string>
+    <string name="dialog_ujing_hairdryer_title">提示</string>
+    <string name="dialog_ujing_hairdryer_message">当前吹风机设备不支持一卡通扫码，请使用微信、支付宝、云闪付等扫码\n若信息有误请提交开发者</string>
+    <string name="dialog_ujing_washer_offline_title">设备离线</string>
+    <string name="dialog_ujing_washer_offline_message">该洗衣机设备当前已离线，暂无法下单使用。</string>
+    <string name="ujing_washer_checking">正在核验洗衣机状态...</string>
 
     <!-- 语言设置（上游同步：语言 Tag 数组 + 语言显示名称数组，跟随系统用空 tag 表示） -->
     <string-array name="language_tags">

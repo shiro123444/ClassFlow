@@ -15,6 +15,9 @@ interface NavBridge {
     /** 底栏一级页面切换（清空栈后切换，避免残留二级页面栈） */
     fun navigateToMain(destination: Destination)
 
+    /** 用目标页面替换当前栈顶页面（用于「扫码页 → 结果页」这类不保留返回栈的场景） */
+    fun replace(destination: Destination)
+
     /** 返回上一页 */
     fun popBackStack()
 

@@ -49,6 +49,57 @@ class WbuCampusCardClient(
     )
 
     /**
+     * 确保获取到有效的一卡通平台 access_token。
+     * 1. 检查已保存的 access_token 是否仍有效；
+     * 2. 若失效，优先尝试 refresh_token 刷新（不顶号）；
+     * 3. 若无 refresh_token 或刷新失败，使用统一身份认证 CASTGC 重新换票。
+     */
+    suspend fun ensureValidAccessToken(): String = withContext(Dispatchers.IO) {
+        var token = WbuAuthTransport.getCampusCardAccessToken(context)
+        val tokenValid = if (token.isNotBlank()) checkSession(token) else false
+        if (tokenValid) return@withContext token
+
+        val refreshToken = WbuAuthTransport.getCampusCardRefreshToken(context)
+        if (refreshToken.isNotBlank()) {
+            val refreshed = refreshToken(refreshToken)
+            if (refreshed != null && refreshed.accessToken.isNotBlank()) {
+                WbuAuthTransport.setCampusCardTokens(context, refreshed.accessToken, refreshed.refreshToken)
+                return@withContext refreshed.accessToken
+            }
+        }
+
+        val loginRes = loginWithCasTgc()
+        WbuAuthTransport.setCampusCardTokens(context, loginRes.accessToken, loginRes.refreshToken)
+        loginRes.accessToken
+    }
+
+    /**
+     * 解析平台第三方子应用的真实启动地址（带一次性 ticket 票据）。
+     * 例：appId=59 -> U净饮水机；appId=45 -> U净洗衣机。
+     */
+    suspend fun resolveAppLaunchUrl(appId: Int, accessToken: String): String? = withContext(Dispatchers.IO) {
+        if (accessToken.isBlank()) return@withContext null
+        try {
+            val noRedirectClient = client.newBuilder().followRedirects(false).build()
+            val url = "$BASE_URL/berserker-base/redirect?appId=$appId&loginFrom=h5&synAccessSource=h5&type=app&synjones-auth=$accessToken"
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", transport.authUserAgent())
+                .header("Accept-Language", transport.authAcceptLanguage)
+                .header("synAccessSource", "h5")
+                .get()
+                .build()
+
+            noRedirectClient.newCall(req).execute().use { resp ->
+                resp.header("Location")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "resolveAppLaunchUrl failed for appId=$appId", e)
+            null
+        }
+    }
+
+    /**
      * 校验当前平台 access_token 是否仍然有效（非 401 已经在其他设备登录）。
      */
     suspend fun checkSession(accessToken: String): Boolean = withContext(Dispatchers.IO) {

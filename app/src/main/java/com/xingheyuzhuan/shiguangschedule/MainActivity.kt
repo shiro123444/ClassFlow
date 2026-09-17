@@ -351,6 +351,17 @@ fun AppNavigation(
                 backStack.add(destination)
             }
 
+            override fun replace(destination: Destination) {
+                if (backStack.isEmpty()) {
+                    backStack.add(destination)
+                    return
+                }
+                if (backStack.last() == destination) return
+                // 先移除栈顶，再入栈目标页，保证不会出现「刚入栈就被弹出」
+                backStack.removeAt(backStack.lastIndex)
+                backStack.add(destination)
+            }
+
             override fun popBackStack() {
                 if (backStack.size > 1) {
                     backStack.removeAt(backStack.lastIndex)
@@ -684,7 +695,14 @@ fun AppNavigation(
 
                             is Destination.WebApp -> com.xingheyuzhuan.shiguangschedule.ui.webapp.WebAppScreen(
                                 navBridge = navBridge,
-                                appId = destination.appId
+                                appId = destination.appId,
+                                initialTargetUrl = destination.initialTargetUrl,
+                                pendingAutoScan = destination.pendingAutoScan
+                            )
+
+                            is Destination.UjingWater -> com.xingheyuzhuan.shiguangschedule.ui.campus.ujing.UjingWaterScreen(
+                                cd = destination.cd,
+                                navBridge = navBridge
                             )
 
                             is Destination.AddEditCourse -> AddEditCourseScreen(
