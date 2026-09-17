@@ -4,9 +4,12 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingMqttClient
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuCampusCardClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSessionExpiredException
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuUjingClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -80,33 +83,23 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
         val trimmed = cd.trim()
         if (trimmed.isBlank()) return
 
-        // 1. 同一 ViewModel 实例防重入：已启动且不在初始 Splash 状态，直接跳过
-        if (hasStarted && _uiState.value.stage !is UjingWaterUiStage.Splash) {
-            Log.d(TAG, "start ignored: already started in stage=${_uiState.value.stage::class.simpleName}")
+        // 1. 同一 ViewModel 实例防重入：若正在加载或正在出水中，防止重复触发
+        if (hasStarted && (_uiState.value.stage is UjingWaterUiStage.Active || _uiState.value.stage is UjingWaterUiStage.Loading)) {
+            Log.d(TAG, "start ignored: already active in stage=${_uiState.value.stage::class.simpleName}")
             return
         }
 
-        // 2. 检查跨重建/跨实例的近期会话记录，防止后台切回重建时重复出水
+        // 2. 检查跨重建/跨实例的近期会话记录，防止后台切回重建时重复出水（仅针对未完成的活跃订单）
         val cached = lastSession
         val now = System.currentTimeMillis()
         if (cached != null && cached.cd == trimmed && (now - cached.timestamp < SESSION_VALID_DURATION_MS)) {
-            when (val cachedStage = cached.stage) {
-                is UjingWaterUiStage.Finished -> {
-                    Log.i(TAG, "Restoring finished water session for cd=$trimmed, orderId=${cached.orderId}")
-                    hasStarted = true
-                    currentCd = trimmed
-                    _uiState.update { it.copy(cd = trimmed, stage = cachedStage, needLogin = false) }
-                    return
-                }
-                is UjingWaterUiStage.Active -> {
-                    Log.i(TAG, "Resuming active water session for cd=$trimmed, orderId=${cached.orderId}")
-                    hasStarted = true
-                    currentCd = trimmed
-                    _uiState.update { it.copy(cd = trimmed, stage = cachedStage, needLogin = false) }
-                    startStatusWatch(trimmed, cached.orderId, cached.subject)
-                    return
-                }
-                else -> { /* 其它瞬态不恢复 */ }
+            if (cached.stage is UjingWaterUiStage.Active) {
+                Log.i(TAG, "Resuming active water session for cd=$trimmed, orderId=${cached.orderId}")
+                hasStarted = true
+                currentCd = trimmed
+                _uiState.update { it.copy(cd = trimmed, stage = cached.stage, needLogin = false) }
+                startStatusWatch(trimmed, cached.orderId, cached.subject)
+                return
             }
         }
 
@@ -121,6 +114,17 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    /**
+     * 重新开始打水（用户在取水完成页再次触碰 NFC 或点击继续出水）。
+     */
+    fun restart(cd: String) {
+        clearSession()
+        stopStatusWatch()
+        hasStarted = false
+        _uiState.update { it.copy(stage = UjingWaterUiStage.Splash, needLogin = false) }
+        start(cd)
+    }
+
     private fun executeFlow(cd: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -128,10 +132,23 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
                 _uiState.update { it.copy(stage = UjingWaterUiStage.Loading("正在验证一卡通凭据...")) }
                 val platformToken = runCatching { cardClient.ensureValidAccessToken() }.getOrElse { e ->
                     if (e is WbuSessionExpiredException || e.message?.contains("失效") == true) {
-                        _uiState.update { it.copy(needLogin = true) }
-                        return@launch
+                        // 尝试静默使用已保存的统一认证密码登录
+                        val autoLoginOk = trySilentUnifiedAuthLogin()
+                        if (autoLoginOk) {
+                            // 静默登录成功，再次获取 access_token
+                            runCatching { cardClient.ensureValidAccessToken() }.getOrElse { secondErr ->
+                                Log.w(TAG, "Re-fetch platform token after silent login failed", secondErr)
+                                _uiState.update { it.copy(needLogin = true) }
+                                return@launch
+                            }
+                        } else {
+                            // 无密码或静默登录失败，降级弹起登录 Sheet
+                            _uiState.update { it.copy(needLogin = true) }
+                            return@launch
+                        }
+                    } else {
+                        throw e
                     }
-                    throw e
                 }
 
                 // 2. 建立 U净 会话（换票）
@@ -243,14 +260,9 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
         detail: WbuUjingClient.WaterOrderDetail
     ) {
         stopStatusWatch()
+        clearSession()
+        hasStarted = false
         val finishedStage = UjingWaterUiStage.Finished(subject, detail)
-        lastSession = WaterSession(
-            cd = currentCd,
-            orderId = detail.orderId,
-            subject = subject,
-            stage = finishedStage,
-            timestamp = System.currentTimeMillis()
-        )
         _uiState.update { it.copy(stage = finishedStage) }
     }
 
@@ -312,6 +324,38 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
         pollJob = null
         mqttClient?.stop()
         mqttClient = null
+    }
+
+    /**
+     * 尝试使用已保存的统一认证凭据进行后台静默登录。
+     * 若未保存密码或登录过程需要交互验证（滑块/短信），返回 false。
+     */
+    private suspend fun trySilentUnifiedAuthLogin(): Boolean {
+        val app = getApplication<Application>()
+        val studentId = WbuAuthTransport.getSavedStudentId(app)
+        val password = WbuAuthTransport.getSavedPassword(app, CredentialService.UNIFIED_AUTH)
+
+        if (studentId.isBlank() || password.isNullOrBlank()) {
+            Log.d(TAG, "No saved unified auth credentials found for silent login")
+            return false
+        }
+
+        return try {
+            _uiState.update { it.copy(stage = UjingWaterUiStage.Loading("正在使用已保存凭据登录...")) }
+            val viaWebVpn = WbuAuthTransport.getIdsViaWebVpn(app)
+            val engine = WbuSyncEngine(app, useVpn = viaWebVpn)
+            val success = engine.loginUnifiedAuthOnly(
+                studentId = studentId,
+                password = password,
+                viaWebVpn = viaWebVpn,
+                flowTag = "UJING_WATER_AUTO_AUTH"
+            )
+            Log.i(TAG, "Silent unified auth login result: $success")
+            success
+        } catch (e: Exception) {
+            Log.w(TAG, "Silent unified auth login failed", e)
+            false
+        }
     }
 
     fun onLoginSuccess() {

@@ -763,6 +763,7 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="ujing_water_order_no">Order No.</string>
     <string name="ujing_water_action_hint">Please press button on dispenser to get water. Order will settle automatically when finished.</string>
     <string name="ujing_water_finished_title">Water Dispensing Finished</string>
+    <string name="ujing_water_repeat">Dispense Again</string>
     <string name="dialog_ujing_hairdryer_title">Notice</string>
     <string name="dialog_ujing_hairdryer_message">The current hair dryer does not support campus card scan. Please use WeChat, Alipay, or UnionPay to scan.\nIf this is an error, please report to developer.</string>
     <string name="dialog_ujing_washer_offline_title">Device Offline</string>

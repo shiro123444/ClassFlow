@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
 
     <application
         android:name=".MyApplication"
@@ -51,6 +53,36 @@
             <intent-filter>
                 <action android:name="com.xingheyuzhuan.shiguangschedule.action.QR_SCAN" />
                 <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+
+            <!-- 校园服务 NFC 感应直达入口 (NDEF_DISCOVERED: 饮水机 /w/ 与 洗衣机 /wm/) -->
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/w/" />
+                <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/wm/" />
+                <data android:scheme="http" android:host="${ujingNfcHost}" android:pathPrefix="/w/" />
+                <data android:scheme="http" android:host="${ujingNfcHost}" android:pathPrefix="/wm/" />
+                <!-- 预设校内标准占位域名 -->
+                <data android:scheme="https" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/w/" />
+                <data android:scheme="https" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/wm/" />
+                <data android:scheme="http" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/w/" />
+                <data android:scheme="http" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/wm/" />
+            </intent-filter>
+
+            <!-- 校园服务 DeepLink / 网页链接直达入口 (VIEW) -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/w/" />
+                <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/wm/" />
+                <data android:scheme="http" android:host="${ujingNfcHost}" android:pathPrefix="/w/" />
+                <data android:scheme="http" android:host="${ujingNfcHost}" android:pathPrefix="/wm/" />
+                <data android:scheme="https" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/w/" />
+                <data android:scheme="https" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/wm/" />
+                <data android:scheme="http" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/w/" />
+                <data android:scheme="http" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/wm/" />
             </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"

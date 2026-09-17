@@ -1,7 +1,9 @@
 package com.xingheyuzhuan.shiguangschedule
 
+import android.app.PendingIntent
 import android.content.Intent
-import android.net.Uri
+import android.content.IntentFilter
+import android.nfc.NfcAdapter
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
@@ -173,6 +175,8 @@ class MainActivity : AppCompatActivity() {
     /** 快捷方式入口产生的待处理跳转，由 AppNavigation 消费后清空。 */
     private val pendingDeepLink = MutableStateFlow<Destination?>(null)
 
+    private var nfcAdapter: NfcAdapter? = null
+
     @Inject
     lateinit var appSettingsRepository: AppSettingsRepository
 
@@ -197,6 +201,7 @@ class MainActivity : AppCompatActivity() {
             )
         )
         super.onCreate(savedInstanceState)
+        nfcAdapter = runCatching { NfcAdapter.getDefaultAdapter(this) }.getOrNull()
         // 仅在全新启动时消费一次：重建（旋转/进程恢复）时 intent 仍带着 action，
         // 若照常处理会把用户从返回后的页面再次拉回扫码页
         if (savedInstanceState == null) handleDeepLink(intent)
@@ -236,17 +241,69 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** App 在后台时（singleTask）快捷方式走这里。 */
+    override fun onResume() {
+        super.onResume()
+        enableNfcForegroundDispatch()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        disableNfcForegroundDispatch()
+    }
+
+    private fun enableNfcForegroundDispatch() {
+        val adapter = nfcAdapter ?: return
+        if (!adapter.isEnabled) return
+        try {
+            val intent = Intent(this, javaClass).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val pendingIntent = PendingIntent.getActivity(this, 0, intent, flags)
+            val ndefFilter = IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED).apply {
+                addDataScheme("https")
+                addDataScheme("http")
+            }
+            adapter.enableForegroundDispatch(this, pendingIntent, arrayOf(ndefFilter), null)
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Failed to enable NFC foreground dispatch", e)
+        }
+    }
+
+    private fun disableNfcForegroundDispatch() {
+        val adapter = nfcAdapter ?: return
+        try {
+            adapter.disableForegroundDispatch(this)
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Failed to disable NFC foreground dispatch", e)
+        }
+    }
+
+    /** App 在后台时（singleTask）快捷方式或 NFC 触碰走这里。 */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleDeepLink(intent)
     }
 
-    /** 只识别扫码快捷方式入口；其余 intent（含桌面正常启动）不介入既有启动页逻辑。 */
+    /**
+     * 统一处理外部 Intent 分发：
+     * 1. 桌面长按扫一扫快捷方式入口
+     * 2. NFC 触碰 (NDEF_DISCOVERED) 与外部链接 (VIEW) 校园直达（饮水机 / 洗衣机等）
+     */
     private fun handleDeepLink(intent: Intent?) {
-        if (intent?.action == ACTION_QR_SCAN) {
+        if (intent == null) return
+
+        if (intent.action == ACTION_QR_SCAN) {
             pendingDeepLink.value = Destination.QrScan
+            return
+        }
+
+        val destination = com.xingheyuzhuan.shiguangschedule.data.network.wbu.CampusLinkRouter.extractDestination(intent)
+        if (destination != null) {
+            pendingDeepLink.value = destination
         }
     }
 
@@ -425,7 +482,11 @@ fun AppNavigation(
         if (showOnboarding) return@LaunchedEffect
         val target = deepLinkTarget ?: return@LaunchedEffect
         onDeepLinkConsumed()
-        navBridge.navigate(target)
+        if (backStack.lastOrNull() is Destination.UjingWater && target is Destination.UjingWater) {
+            navBridge.replace(target)
+        } else {
+            navBridge.navigate(target)
+        }
     }
 
     val showcaseStyle = ShowcaseStyle.Default.copy(
@@ -702,6 +763,7 @@ fun AppNavigation(
 
                             is Destination.UjingWater -> com.xingheyuzhuan.shiguangschedule.ui.campus.ujing.UjingWaterScreen(
                                 cd = destination.cd,
+                                scanId = destination.scanId,
                                 navBridge = navBridge
                             )
 

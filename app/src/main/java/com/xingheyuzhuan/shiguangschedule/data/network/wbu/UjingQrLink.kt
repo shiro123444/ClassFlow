@@ -34,20 +34,36 @@ object UjingQrLink {
 
         if (url != null) {
             val host = url.host.lowercase()
-            val path = url.encodedPath.lowercase()
+            val rawPath = url.encodedPath
+            val pathLower = rawPath.lowercase()
 
             // 1. q.ujing.com.cn / 类似域名的 ed / 6d 贴纸
             if (host.contains("ujing")) {
                 val cd = url.queryParameter("cd")?.trim().orEmpty()
-                if (path.contains("/ed/") && cd.isNotBlank()) {
+                if (pathLower.contains("/ed/") && cd.isNotBlank()) {
                     return Result.Water(cd = cd, raw = trimmed)
                 }
-                if (path.contains("/6d/") && cd.isNotBlank()) {
+                if (pathLower.contains("/6d/") && cd.isNotBlank()) {
                     return Result.Hairdryer(cd = cd, raw = trimmed)
                 }
             }
 
-            // 2. 小天鹅洗衣机下载 / 设备二维码
+            // 2. NFC / 校园直达格式: /w/{cd} (饮水机) 与 /wm/{uuid} (洗衣机)
+            val waterPathMatch = Regex("^/w/([a-zA-Z0-9_-]+)", RegexOption.IGNORE_CASE).find(rawPath)
+            if (waterPathMatch != null) {
+                val cd = waterPathMatch.groupValues[1]
+                if (cd.isNotBlank()) return Result.Water(cd = cd, raw = trimmed)
+            }
+            val washerPathMatch = Regex("^/wm/([a-zA-Z0-9_-]+)", RegexOption.IGNORE_CASE).find(rawPath)
+            if (washerPathMatch != null) {
+                val uuid = washerPathMatch.groupValues[1]
+                if (uuid.isNotBlank()) {
+                    val rawUrl = "http://app.littleswan.com/u_download.html?type=Ujing&uuid=$uuid"
+                    return Result.Washer(uuid = uuid, raw = rawUrl)
+                }
+            }
+
+            // 3. 小天鹅洗衣机下载 / 设备二维码
             if (host.contains("littleswan.com") || host.contains("ujing")) {
                 val uuid = url.queryParameter("uuid")?.trim().orEmpty()
                 if (uuid.isNotBlank()) {

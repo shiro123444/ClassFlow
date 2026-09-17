@@ -760,6 +760,7 @@
     <string name="ujing_water_order_no">订单编号</string>
     <string name="ujing_water_action_hint">请在饮水机按键接水，接水完毕后将自动结算</string>
     <string name="ujing_water_finished_title">取水已完成</string>
+    <string name="ujing_water_repeat">再接一杯</string>
     <string name="dialog_ujing_hairdryer_title">提示</string>
     <string name="dialog_ujing_hairdryer_message">当前吹风机设备不支持一卡通扫码，请使用微信、支付宝、云闪付等扫码\n若信息有误请提交开发者</string>
     <string name="dialog_ujing_washer_offline_title">设备离线</string>

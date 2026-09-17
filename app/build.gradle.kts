@@ -32,6 +32,11 @@ android {
         ?: System.getenv("CLASSFLOW_UPDATE_API_URL")
         ?: ""
 
+    val ujingNfcHost: String = (project.findProperty("CLASSFLOW_UJING_NFC_HOST") as? String)
+        ?: localProperties.getProperty("CLASSFLOW_UJING_NFC_HOST")
+        ?: System.getenv("CLASSFLOW_UJING_NFC_HOST")
+        ?: "ujing_test.wbu.edu.cn"
+
     defaultConfig {
         applicationId = "com.shiro.classflow"
         minSdk = 26
@@ -40,6 +45,8 @@ android {
         versionName = "1.1.1"
 
         buildConfigField("String", "UPDATE_API_URL", "\"$updateApiUrl\"")
+        buildConfigField("String", "UJING_NFC_HOST", "\"$ujingNfcHost\"")
+        manifestPlaceholders["ujingNfcHost"] = ujingNfcHost
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

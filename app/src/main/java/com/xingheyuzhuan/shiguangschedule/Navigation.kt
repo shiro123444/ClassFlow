@@ -81,7 +81,8 @@ sealed interface Destination : NavKey {
 
     @Serializable
     data class UjingWater(
-        val cd: String
+        val cd: String,
+        val scanId: Long = 0L
     ) : Destination
 
     @Serializable

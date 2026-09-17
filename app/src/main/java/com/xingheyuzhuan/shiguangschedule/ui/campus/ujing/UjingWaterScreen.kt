@@ -75,16 +75,23 @@ import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthShee
 @Composable
 fun UjingWaterScreen(
     cd: String,
+    scanId: Long = 0L,
     navBridge: NavBridge,
     viewModel: UjingWaterViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var hasStarted by rememberSaveable(cd) { mutableStateOf(false) }
+    var lastHandledScanId by rememberSaveable(cd) { mutableStateOf(-1L) }
 
-    LaunchedEffect(cd) {
-        if (cd.isNotBlank() && !hasStarted) {
-            hasStarted = true
-            viewModel.start(cd)
+    LaunchedEffect(cd, scanId) {
+        if (cd.isNotBlank()) {
+            if (scanId > 0L && scanId != lastHandledScanId) {
+                lastHandledScanId = scanId
+                // NFC 再次刷卡唤醒：直接重新进入出水流程
+                viewModel.restart(cd)
+            } else if (lastHandledScanId == -1L) {
+                lastHandledScanId = scanId
+                viewModel.start(cd)
+            }
         }
     }
 
@@ -142,6 +149,7 @@ fun UjingWaterScreen(
                 is UjingWaterUiStage.Finished -> {
                     FinishedView(
                         stage = stage,
+                        onRepeat = { viewModel.restart(cd) },
                         onDone = {
                             UjingWaterViewModel.clearSession()
                             navBridge.popBackStack()
@@ -215,7 +223,7 @@ private fun SplashScreenView() {
                     contentDescription = stringResource(R.string.title_ujing_water),
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
-                        .size(width = 200.dp, height = 238.dp)
+                        .size(200.dp)
                         .scale(scale)
                 )
                 Spacer(modifier = Modifier.height(16.dp))
@@ -244,7 +252,7 @@ private fun LoadingView(message: String) {
                 painter = painterResource(R.drawable.ujing_water_splash),
                 contentDescription = null,
                 contentScale = ContentScale.Fit,
-                modifier = Modifier.size(width = 120.dp, height = 143.dp)
+                modifier = Modifier.size(120.dp)
             )
             Spacer(modifier = Modifier.height(24.dp))
             CircularProgressIndicator(strokeWidth = 3.dp)
@@ -385,6 +393,7 @@ private fun ActiveDispensingView(
 @Composable
 private fun FinishedView(
     stage: UjingWaterUiStage.Finished,
+    onRepeat: () -> Unit,
     onDone: () -> Unit,
     onContinueScan: () -> Unit
 ) {
@@ -430,6 +439,21 @@ private fun FinishedView(
         Spacer(modifier = Modifier.height(32.dp))
 
         Button(
+            onClick = onRepeat,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.WaterDrop,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(stringResource(R.string.ujing_water_repeat))
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedButton(
             onClick = onDone,
             modifier = Modifier.fillMaxWidth()
         ) {
