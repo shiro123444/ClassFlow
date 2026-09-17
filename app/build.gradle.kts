@@ -41,8 +41,8 @@ android {
         applicationId = "com.shiro.classflow"
         minSdk = 26
         targetSdk = 37
-        versionCode = 17
-        versionName = "1.1.1"
+        versionCode = 18
+        versionName = "1.1.2"
 
         buildConfigField("String", "UPDATE_API_URL", "\"$updateApiUrl\"")
         buildConfigField("String", "UJING_NFC_HOST", "\"$ujingNfcHost\"")
