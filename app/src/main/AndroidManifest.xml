@@ -66,13 +66,6 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/w/" />
                 <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/wm/" />
-                <data android:scheme="http" android:host="${ujingNfcHost}" android:pathPrefix="/w/" />
-                <data android:scheme="http" android:host="${ujingNfcHost}" android:pathPrefix="/wm/" />
-                <!-- 预设校内标准占位域名 -->
-                <data android:scheme="https" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/w/" />
-                <data android:scheme="https" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/wm/" />
-                <data android:scheme="http" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/w/" />
-                <data android:scheme="http" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/wm/" />
             </intent-filter>
 
             <!-- 校园服务 DeepLink / 网页链接直达入口 (VIEW) -->
@@ -82,12 +75,6 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/w/" />
                 <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/wm/" />
-                <data android:scheme="http" android:host="${ujingNfcHost}" android:pathPrefix="/w/" />
-                <data android:scheme="http" android:host="${ujingNfcHost}" android:pathPrefix="/wm/" />
-                <data android:scheme="https" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/w/" />
-                <data android:scheme="https" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/wm/" />
-                <data android:scheme="http" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/w/" />
-                <data android:scheme="http" android:host="ujing_test.wbu.edu.cn" android:pathPrefix="/wm/" />
             </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"
