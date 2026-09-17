@@ -54,6 +54,11 @@
                 <action android:name="com.xingheyuzhuan.shiguangschedule.action.QR_SCAN" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <!-- 桌面长按图标「一卡通」快捷方式入口 -->
+            <intent-filter>
+                <action android:name="com.xingheyuzhuan.shiguangschedule.action.CAMPUS_CARD" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
 
             <!-- 校园服务 NFC 感应直达入口 (NDEF_DISCOVERED: 饮水机 /w/ 与 洗衣机 /wm/) -->
             <intent-filter>

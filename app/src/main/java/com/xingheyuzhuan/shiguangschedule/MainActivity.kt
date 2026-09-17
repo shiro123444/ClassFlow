@@ -170,6 +170,8 @@ class MainActivity : AppCompatActivity() {
     companion object {
         /** 桌面快捷方式「扫一扫」入口 action（见 res/xml/shortcuts.xml）。 */
         const val ACTION_QR_SCAN = "com.xingheyuzhuan.shiguangschedule.action.QR_SCAN"
+        /** 桌面快捷方式「一卡通」入口 action（见 res/xml/shortcuts.xml）。 */
+        const val ACTION_CAMPUS_CARD = "com.xingheyuzhuan.shiguangschedule.action.CAMPUS_CARD"
     }
 
     /** 快捷方式入口产生的待处理跳转，由 AppNavigation 消费后清空。 */
@@ -290,7 +292,7 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 统一处理外部 Intent 分发：
-     * 1. 桌面长按扫一扫快捷方式入口
+     * 1. 桌面长按扫一扫、一卡通快捷方式入口
      * 2. NFC 触碰 (NDEF_DISCOVERED) 与外部链接 (VIEW) 校园直达（饮水机 / 洗衣机等）
      */
     private fun handleDeepLink(intent: Intent?) {
@@ -298,6 +300,13 @@ class MainActivity : AppCompatActivity() {
 
         if (intent.action == ACTION_QR_SCAN) {
             pendingDeepLink.value = Destination.QrScan
+            return
+        }
+
+        if (intent.action == ACTION_CAMPUS_CARD) {
+            pendingDeepLink.value = Destination.WebApp(
+                com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId.CAMPUS_CARD.name
+            )
             return
         }
 

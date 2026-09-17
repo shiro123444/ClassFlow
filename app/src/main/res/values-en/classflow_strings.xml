@@ -715,8 +715,9 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="action_set">Set</string>
     <string name="label_more_settings">More settings</string>
 
-    <!-- QR scan (unified-auth scan-to-login) -->
+    <!-- Desktop shortcuts -->
     <string name="shortcut_short_qr_scan">Scan</string>
+    <string name="shortcut_short_campus_card">Campus Card</string>
     <string name="item_qr_scan">Scan QR code</string>
     <string name="desc_qr_scan">Scan the unified-auth login QR code to confirm sign-in on your computer</string>
     <string name="title_qr_scan">Scan</string>

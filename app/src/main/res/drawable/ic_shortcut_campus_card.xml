@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 一卡通快捷方式图标：自带底色，避免依赖 Launcher 的图标底色（浅/深色桌面均可见）。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 背景圆角底色 -->
+    <path
+        android:fillColor="#FFE4EC"
+        android:pathData="M0,24 A24,24 0 0 1 24,0 H84 A24,24 0 0 1 108,24 V84 A24,24 0 0 1 84,108 H24 A24,24 0 0 1 0,84 Z" />
+
+    <!-- 卡片外框 (圆角矩形: 宽 72, 高 50, 左上 18,29) -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M24,29 H84 A6,6 0 0 1 90,35 V73 A6,6 0 0 1 84,79 H24 A6,6 0 0 1 18,73 V35 A6,6 0 0 1 24,29 Z"
+        android:strokeColor="#D81B60"
+        android:strokeWidth="5" />
+
+    <!-- 磁条 / 顶部分割线 -->
+    <path
+        android:fillColor="#D81B60"
+        android:pathData="M18,40 H90 V47 H18 Z" />
+
+    <!-- 芯片 (左侧小块) -->
+    <path
+        android:fillColor="#D81B60"
+        android:pathData="M26,56 H38 V66 H26 Z" />
+
+    <!-- 卡号横线示意 (右侧双线) -->
+    <path
+        android:fillColor="#D81B60"
+        android:pathData="M44,58 H78 V61 H44 Z" />
+    <path
+        android:fillColor="#D81B60"
+        android:pathData="M44,64 H68 V67 H44 Z" />
+</vector>

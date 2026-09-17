@@ -712,8 +712,9 @@
     <string name="action_set">设置</string>
     <string name="label_more_settings">更多设置</string>
 
-    <!-- 扫一扫（统一认证扫码登录） -->
+    <!-- 桌面长按快捷方式 -->
     <string name="shortcut_short_qr_scan">扫一扫</string>
+    <string name="shortcut_short_campus_card">一卡通</string>
     <string name="item_qr_scan">扫一扫</string>
     <string name="desc_qr_scan">扫描统一认证登录二维码，确认电脑端登录</string>
     <string name="title_qr_scan">扫一扫</string>

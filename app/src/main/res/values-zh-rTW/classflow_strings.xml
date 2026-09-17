@@ -715,8 +715,9 @@
     <string name="action_set">設定</string>
     <string name="label_more_settings">更多設定</string>
 
-    <!-- 掃一掃（統一認證掃碼登入） -->
+    <!-- 桌面長按快捷方式 -->
     <string name="shortcut_short_qr_scan">掃一掃</string>
+    <string name="shortcut_short_campus_card">一卡通</string>
     <string name="item_qr_scan">掃一掃</string>
     <string name="desc_qr_scan">掃描統一認證登入二維碼，確認電腦端登入</string>
     <string name="title_qr_scan">掃一掃</string>
