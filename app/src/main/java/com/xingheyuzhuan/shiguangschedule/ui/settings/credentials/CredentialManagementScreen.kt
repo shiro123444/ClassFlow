@@ -589,7 +589,7 @@ private fun ServiceCard(
                 ActionRow(
                     icon = Icons.Rounded.Key,
                     title = name,
-                    subtitle = value,
+                    subtitle = formatCredentialSubtitle(name, value),
                     actions = {
                         TextButton(onClick = { onEditCredential(name, value) }) {
                             Text(stringResource(R.string.action_edit))
@@ -764,6 +764,13 @@ private fun tokenSubtitle(reveal: Boolean, state: ServiceUiState): String = when
     reveal && state.tokenValue.isNotBlank() -> state.tokenValue
     state.hasToken -> stringResource(R.string.status_saved)
     else -> stringResource(R.string.status_not_saved)
+}
+
+private fun formatCredentialSubtitle(name: String, value: String): String {
+    if ((name == "access_token" || name == "refresh_token") && value.length > 20) {
+        return "${value.take(10)}…${value.takeLast(8)}"
+    }
+    return value
 }
 
 @Composable
