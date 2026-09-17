@@ -49,7 +49,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- 桌面长按图标「扫一扫」快捷方式入口（intent 不写 targetPackage，兼容 dev/prod 两个 flavor 的 applicationId） -->
+            <!-- 桌面长按图标「扫一扫」快捷方式入口（快捷方式已在 dev/prod 的 shortcuts.xml 中显式指定 targetPackage，此处保留 Action 匹配） -->
             <intent-filter>
                 <action android:name="com.xingheyuzhuan.shiguangschedule.action.QR_SCAN" />
                 <category android:name="android.intent.category.DEFAULT" />
