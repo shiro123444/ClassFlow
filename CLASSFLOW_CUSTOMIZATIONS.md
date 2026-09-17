@@ -50,9 +50,9 @@ git diff 3eb39c2 --stat -- app/src/main/java app/src/main/res | sort -t'|' -k2 -
 ### 3. 宿主与导航
 | 文件 | 差异内容 |
 |---|---|
-| `MainActivity.kt` | 悬浮课程时隐藏 Dock（`isFloatingCourseMode`）、onboarding 引导、背景壁纸容器、校园服务路由（成绩/空教室/学业进程/扫一扫）、扫码快捷方式深链（`ACTION_QR_SCAN` + `pendingDeepLink`/`onNewIntent`）、`AppCompatActivity` 宿主（语言切换依赖 AppCompat delegate 生效） |
+| `MainActivity.kt` | 悬浮课程时隐藏 Dock（`isFloatingCourseMode`）、onboarding 引导、背景壁纸容器、校园服务路由（成绩/空教室/学业进程/扫一扫）、桌面快捷方式深链（`ACTION_QR_SCAN` / `ACTION_CAMPUS_CARD` + `pendingDeepLink`/`onNewIntent`）、`AppCompatActivity` 宿主（语言切换依赖 AppCompat delegate 生效） |
 | `Navigation.kt` | `WallpaperAdjust`、`GradeQuery`、`FreeClassroomQuery`、`AcademicProgress`、`CredentialManagement`、`QrScan`、`LanguageSettings` 目的地 |
-| `AndroidManifest.xml` | `CAMERA` 权限；`MainActivity` 追加 `QR_SCAN` intent-filter（不写 `targetPackage`，兼容 dev/prod 两个 applicationId）与 `android.app.shortcuts` meta-data；`AppLocalesMetadataHolderService` + `autoStoreLocales=true`（语言选择持久化，上游同款） |
+| `AndroidManifest.xml` | `CAMERA` 权限；`MainActivity` 追加 `QR_SCAN` 与 `CAMPUS_CARD` intent-filter（与 flavor 独立的 shortcuts.xml 配合定向分发）与 `android.app.shortcuts` meta-data；`AppLocalesMetadataHolderService` + `autoStoreLocales=true`（语言选择持久化，上游同款） |
 | `res/values/themes.xml` | `Theme.ClassFlow` 父主题改为 `Theme.AppCompat.DayNight.NoActionBar` + 透明状态栏 + 关闭 Activity 转场（上游 androidApp 同款；AppCompatActivity 必需） |
 | `ui/components/NavigationComponents.kt` | 液态玻璃 Dock（`BottomNavigationBar`）+ `DockSafeBottomPadding` |
 
@@ -74,7 +74,7 @@ git diff 3eb39c2 --stat -- app/src/main/java app/src/main/res | sort -t'|' -k2 -
 
 ### 6. 其他独有/定制
 - `ui/theme/ThemeClassFlow.kt`（Sakura/Afternoon/Evening 色板 + ClassFlowTheme）
-- 扫一扫快捷方式资源：`res/xml/shortcuts.xml`、`res/drawable/ic_shortcut_qr_scan.xml`（独有文件）
+- 桌面快捷方式资源：`src/dev/res/xml/shortcuts.xml` 与 `src/prod/res/xml/shortcuts.xml`（显式指定 `targetPackage` 与 `targetClass`，消除 dev/prod 共存时的选择弹窗；扫一扫 `qr_scan` + 一卡通 `campus_card`）、`res/drawable/ic_shortcut_qr_scan.xml`、`res/drawable/ic_shortcut_campus_card.xml`（独有文件）
 - 依赖追加：`androidx.camera:camera-{core,camera2,lifecycle,view}` 1.6.2 + `com.google.mlkit:barcode-scanning` 17.3.0（`gradle/libs.versions.toml`、`app/build.gradle.kts`）
 - `ui/settings/themesettings/`、`WallpaperAdjustScreen.kt`、`OnboardingOverlay.kt`
 - widget `*NativeRenderer.kt` 系列（原生渲染，上游部分有对应文件——差异在渲染实现）

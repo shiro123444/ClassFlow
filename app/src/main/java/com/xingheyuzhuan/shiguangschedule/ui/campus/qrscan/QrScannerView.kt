@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -367,6 +368,9 @@ internal fun QrScannerOverlay(
     var handled by remember { mutableStateOf(false) }
     var photoBusy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
+
+    // 拦截返回键：扫码浮层展示时返回键优先关闭浮层，防止透传至底层页面导致路由后退
+    BackHandler { onDismiss() }
 
     // 系统 Photo Picker：不需要任何存储/媒体权限
     val photoPicker = rememberLauncherForActivityResult(

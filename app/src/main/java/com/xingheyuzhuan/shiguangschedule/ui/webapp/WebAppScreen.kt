@@ -338,6 +338,60 @@ fun WebAppScreen(
         viewModel.start(appId, initialTargetUrl)
     }
 
+    val dismissScan = remember(webViewInstance) {
+        {
+            val request = scanRequest
+            val webView = webViewInstance
+            if (request != null && webView != null) {
+                when (request) {
+                    is ScanRequest.Bridge -> {
+                        // 取消：回调 null 触发 U净 的 fail 分支
+                        webView.evaluateJavascript(
+                            "window.__cfScanResolve(${JSONObject.quote(request.callbackId)}, null);",
+                            null
+                        )
+                    }
+                    is ScanRequest.EmBridge -> {
+                        webView.evaluateJavascript(
+                            "window.__cfEmScanResolve(${JSONObject.quote(request.callbackId)}, null);",
+                            null
+                        )
+                    }
+                    is ScanRequest.JsAgent -> {
+                        val callback = request.callbackName.ifBlank { "scanCallback" }
+                        webView.evaluateJavascript(
+                            """
+                            (function() {
+                                var cb = window[${JSONObject.quote(callback)}];
+                                if (typeof cb === 'function') {
+                                    try { cb({ code: 500, msg: '用户取消' }); } catch (e) {}
+                                }
+                            })();
+                            """.trimIndent(),
+                            null
+                        )
+                    }
+                    is ScanRequest.AndroidFunc -> {
+                        val callback = request.callbackName.ifBlank { "scanCallback" }
+                        webView.evaluateJavascript(
+                            """
+                            (function() {
+                                var cb = window[${JSONObject.quote(callback)}];
+                                if (typeof cb === 'function') {
+                                    try { cb(null); } catch (e) {}
+                                }
+                            })();
+                            """.trimIndent(),
+                            null
+                        )
+                    }
+                    is ScanRequest.Redirect -> { /* 页面跳转类取消无需主动注入 */ }
+                }
+            }
+            scanRequest = null
+        }
+    }
+
     if (uiState.needLogin || showAuthSheet) {
         WbuCampusAuthSheet(
             onDismiss = {
@@ -359,6 +413,12 @@ fun WebAppScreen(
 
     // 拦截返回键：主页退出或历史回退
     BackHandler {
+        // 优先关闭正在进行的扫码浮层并通知页面取消，防止按返回键时退回上一页
+        if (scanRequest != null) {
+            dismissScan()
+            return@BackHandler
+        }
+
         val webView = webViewInstance
         if (webView != null) {
             val currentUrl = webView.url.orEmpty()
@@ -538,56 +598,7 @@ fun WebAppScreen(
         // 放在 safeDrawingPadding 之外：取景与顶部渐变遮罩可覆盖状态栏，横竖屏一致
         scanRequest?.let { request ->
             QrScannerOverlay(
-                onDismiss = {
-                    val webView = webViewInstance
-                    if (webView != null) {
-                        when (request) {
-                            is ScanRequest.Bridge -> {
-                                // 取消：回调 null 触发 U净 的 fail 分支
-                                webView.evaluateJavascript(
-                                    "window.__cfScanResolve(${JSONObject.quote(request.callbackId)}, null);",
-                                    null
-                                )
-                            }
-                            is ScanRequest.EmBridge -> {
-                                webView.evaluateJavascript(
-                                    "window.__cfEmScanResolve(${JSONObject.quote(request.callbackId)}, null);",
-                                    null
-                                )
-                            }
-                            is ScanRequest.JsAgent -> {
-                                val callback = request.callbackName.ifBlank { "scanCallback" }
-                                webView.evaluateJavascript(
-                                    """
-                                    (function() {
-                                        var cb = window[${JSONObject.quote(callback)}];
-                                        if (typeof cb === 'function') {
-                                            try { cb({ code: 500, msg: '用户取消' }); } catch (e) {}
-                                        }
-                                    })();
-                                    """.trimIndent(),
-                                    null
-                                )
-                            }
-                            is ScanRequest.AndroidFunc -> {
-                                val callback = request.callbackName.ifBlank { "scanCallback" }
-                                webView.evaluateJavascript(
-                                    """
-                                    (function() {
-                                        var cb = window[${JSONObject.quote(callback)}];
-                                        if (typeof cb === 'function') {
-                                            try { cb(null); } catch (e) {}
-                                        }
-                                    })();
-                                    """.trimIndent(),
-                                    null
-                                )
-                            }
-                            is ScanRequest.Redirect -> { /* 页面跳转类取消无需主动注入 */ }
-                        }
-                    }
-                    scanRequest = null
-                },
+                onDismiss = dismissScan,
                 onScanned = { rawResult ->
                     val webView = webViewInstance
                     scanRequest = null
