@@ -66,6 +66,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CourseGrade
+import com.xingheyuzhuan.shiguangschedule.Destination
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import com.xingheyuzhuan.shiguangschedule.ui.components.DockSafeBottomPadding
 import com.xingheyuzhuan.shiguangschedule.ui.components.NavigationRailWidth
@@ -83,6 +84,7 @@ fun GradeQueryScreen(
 
     if (uiState.needLogin || showLoginDialog) {
         WbuCampusAuthSheet(
+            onNavigateToAccount = { navBridge.navigate(Destination.CredentialManagement) },
             onDismiss = {
                 showLoginDialog = false
                 viewModel.onLoginDismissed()
@@ -90,7 +92,8 @@ fun GradeQueryScreen(
             onLoginSuccess = {
                 showLoginDialog = false
                 viewModel.onLoginSuccess()
-            }
+            },
+            title = stringResource(R.string.title_login_grade)
         )
     }
 

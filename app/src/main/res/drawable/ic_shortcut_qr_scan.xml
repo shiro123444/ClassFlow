@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 扫一扫快捷方式图标：自带底色，避免依赖 Launcher 的图标底色（浅/深色桌面均可见）。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#FFE4EC"
+        android:pathData="M0,24 A24,24 0 0 1 24,0 H84 A24,24 0 0 1 108,24 V84 A24,24 0 0 1 84,108 H24 A24,24 0 0 1 0,84 Z" />
+
+    <!-- 三个定位角 -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M20,20 h24 v24 h-24 z"
+        android:strokeColor="#D81B60"
+        android:strokeWidth="6" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M64,20 h24 v24 h-24 z"
+        android:strokeColor="#D81B60"
+        android:strokeWidth="6" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M20,64 h24 v24 h-24 z"
+        android:strokeColor="#D81B60"
+        android:strokeWidth="6" />
+
+    <!-- 定位点 -->
+    <path
+        android:fillColor="#D81B60"
+        android:pathData="M29,29 h6 v6 h-6 z" />
+    <path
+        android:fillColor="#D81B60"
+        android:pathData="M73,29 h6 v6 h-6 z" />
+    <path
+        android:fillColor="#D81B60"
+        android:pathData="M29,73 h6 v6 h-6 z" />
+
+    <!-- 数据块 -->
+    <path
+        android:fillColor="#D81B60"
+        android:pathData="M52,20 h8 v8 h-8 z" />
+    <path
+        android:fillColor="#D81B60"
+        android:pathData="M20,52 h8 v8 h-8 z" />
+    <path
+        android:fillColor="#D81B60"
+        android:pathData="M64,52 h8 v8 h-8 z" />
+    <path
+        android:fillColor="#D81B60"
+        android:pathData="M76,76 h12 v12 h-12 z" />
+</vector>

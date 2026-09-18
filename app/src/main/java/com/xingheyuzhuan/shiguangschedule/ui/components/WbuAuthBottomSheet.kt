@@ -8,6 +8,7 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.IdsCasClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WebVpnClient
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.DynamicCodeSendResult
 import com.xingheyuzhuan.shiguangschedule.ui.theme.LocalIsDarkTheme
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -49,6 +51,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sms
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
@@ -72,6 +75,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -152,23 +156,53 @@ fun WbuAuthBottomSheet(
     errorMessage: String = "",
     initialStudentId: String = "",
     initialUseVpn: Boolean = false,
+    defaultAuthMode: WbuAuthMode? = null,
     hideSelectSemesterSwitch: Boolean = false,
     hideImportPreferences: Boolean = false,
+    hideNetworkSwitch: Boolean = false,
+    /**
+     * 「仅登录统一认证」场景：本 Sheet 只为拿到/续期统一认证会话（CASTGC），不涉及教务系统与校园网。
+     *
+     * 开启后：
+     * - 「统一认证经过WebVPN」为关：不显示网络访问开关，并强制直连（统一认证走公网）；
+     * - 「统一认证经过WebVPN」为开：显示开关，关闭态文案由「校园网直连」改为「直连」；
+     * - 一律不探测校园网、不显示校园网提示。
+     */
+    unifiedAuthOnly: Boolean = false,
     primaryButtonText: String? = null,
     loadingButtonText: String? = null,
-    customLoadingTips: List<String>? = null
+    customLoadingTips: List<String>? = null,
+    onNavigateToAccount: (() -> Unit)? = null,
+    lockPasswordType: Boolean = false,
+    title: String? = null,
+    onSyncWithCredentials: (() -> Unit)? = null,
+    /** 是否显示右下角双按钮里的「同步」小按钮（未提供 [onSyncWithCredentials] 时为统一认证登录）。 */
+    showSyncButton: Boolean = false,
 ) {
     val isDark = LocalIsDarkTheme.current
     val context = LocalContext.current
-    var rememberPassword by remember { mutableStateOf(WbuAuthTransport.isRememberPasswordEnabled(context)) }
-    var hasSavedPassword by remember { mutableStateOf(WbuAuthTransport.hasSavedPassword(context)) }
+    var authMode by remember {
+        mutableStateOf(defaultAuthMode ?: WbuAuthTransport.getSavedAuthMode(context))
+    }
+    // 记住密码按当前密码类型落到对应服务的槽位（教务系统密码与统一认证密码互不覆盖）
+    val passwordService = if (authMode == WbuAuthMode.JYXT_LEGACY) CredentialService.JIAOWU
+    else CredentialService.UNIFIED_AUTH
+    var rememberPassword by remember { mutableStateOf(WbuAuthTransport.isRememberPasswordEnabled(context, passwordService)) }
+    var hasSavedPassword by remember { mutableStateOf(WbuAuthTransport.hasSavedPassword(context, passwordService)) }
     var isPasswordModified by remember { mutableStateOf(false) }
     var studentId by remember(initialStudentId) { mutableStateOf(initialStudentId) }
     var password by remember {
-        mutableStateOf(if (WbuAuthTransport.hasSavedPassword(context)) "••••••••" else "")
+        mutableStateOf(if (WbuAuthTransport.hasSavedPassword(context, passwordService)) "••••••••" else "")
     }
     var useVpn by remember(initialUseVpn) { mutableStateOf(initialUseVpn) }
-    var authMode by remember { mutableStateOf(WbuAuthTransport.getSavedAuthMode(context)) }
+    // 切换密码类型时刷新该类型自己的「已保存」状态与占位符（用户已在改密码则不动输入框）
+    LaunchedEffect(authMode) {
+        rememberPassword = WbuAuthTransport.isRememberPasswordEnabled(context, passwordService)
+        hasSavedPassword = WbuAuthTransport.hasSavedPassword(context, passwordService)
+        if (!isPasswordModified) {
+            password = if (hasSavedPassword) "••••••••" else ""
+        }
+    }
     var authMenuExpanded by remember { mutableStateOf(false) }
     var panelExpanded by remember { mutableStateOf(false) }
     var idsVpnEnabled by remember { mutableStateOf(IdsCasClient.getIdsViaWebVpn(context)) }
@@ -179,6 +213,10 @@ fun WbuAuthBottomSheet(
     var keepTeacherId by remember { mutableStateOf(WbuSyncEngine.getKeepTeacherId(context)) }
     var keepBuilding by remember { mutableStateOf(WbuSyncEngine.getKeepBuilding(context)) }
     var twfidText by remember { mutableStateOf(WebVpnClient.getTwfid(context)) }
+    // 账号页等其它入口改了 TWFID 时同步过来
+    LaunchedEffect(Unit) {
+        WebVpnClient.credentialChanges.collect { twfidText = WebVpnClient.getTwfid(context) }
+    }
     var useHttpsWebVpn by remember { mutableStateOf(WebVpnClient.getUseHttpsWebVpn(context)) }
     val isZhCN = remember { WbuSyncEngine.isSimplifiedChinese(context) }
     var engSmsEnabled by remember { mutableStateOf(IdsCasClient.getSendEnglishSms(context)) }
@@ -211,10 +249,20 @@ fun WbuAuthBottomSheet(
             loadingTipIndex = (loadingTipIndex + 1) % loadingTips.size
         }
     }
+    // 「仅登录统一认证」时，统一认证是否经 WebVPN 通常由「统一认证经过WebVPN」决定：
+    // 若外部调用方显式指定了 initialUseVpn=true（如网页应用在校外需经 WebVPN 穿透），则允许使用 WebVPN
+    val casOnlyForceDirect = unifiedAuthOnly && !idsVpnEnabled && !initialUseVpn
+    val showNetworkSwitch = !hideNetworkSwitch && (!unifiedAuthOnly || idsVpnEnabled || initialUseVpn)
+    LaunchedEffect(casOnlyForceDirect) {
+        if (casOnlyForceDirect && useVpn) {
+            useVpn = false
+            onUseVpnChange(false)
+        }
+    }
     // 选择校园网直连（非 VPN）时实时探测校园网环境；结果经 campusState 更新提示。
-    // 开启「不检测校园网环境」则跳过探测。
-    LaunchedEffect(useVpn, skipCampusCheck) {
-        if (!useVpn && !skipCampusCheck) WbuNetworkProbe.refresh()
+    // 开启「不检测校园网环境」则跳过探测；仅登录统一认证时校园网与本次登录无关，一律不探测。
+    LaunchedEffect(useVpn, skipCampusCheck, unifiedAuthOnly) {
+        if (!unifiedAuthOnly && !useVpn && !skipCampusCheck) WbuNetworkProbe.refresh()
     }
     // 动态码发送后倒计时；每次开始冷却（cooldownRun 变化）都会重跑（按钮显示重新发送 (Ns)）
     LaunchedEffect(cooldownRun) {
@@ -266,13 +314,16 @@ fun WbuAuthBottomSheet(
     DisposableEffect(rememberPassword) {
         onDispose {
             if (!rememberPassword) {
-                WbuAuthTransport.setRememberPasswordEnabled(context, false)
-                WbuAuthTransport.clearSavedPassword(context)
+                WbuAuthTransport.setRememberPasswordEnabled(context, passwordService, false)
+                WbuAuthTransport.clearSavedPassword(context, passwordService)
             }
         }
     }
+    // 打开即全展开，避免内容过高时停在半展开状态，导致登录后下方的报错信息被遮挡
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
+        sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = 2.dp,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
@@ -298,7 +349,7 @@ fun WbuAuthBottomSheet(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = stringResource(R.string.title_wbu_login),
+                text = title ?: stringResource(R.string.title_wbu_login),
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(bottom = 20.dp)
@@ -348,12 +399,14 @@ fun WbuAuthBottomSheet(
                         authMode = authMode,
                         onAuthModeChange = { newMode ->
                             authMode = newMode
-                            if (rememberPassword) {
+                            // 指定了默认登录方式时（如选课页）不写回全局偏好，避免影响其它页面
+                            if (rememberPassword && defaultAuthMode == null) {
                                 WbuAuthTransport.setSavedAuthMode(context, newMode)
                             }
                         },
                         menuExpanded = authMenuExpanded,
                         onMenuExpandedChange = { authMenuExpanded = it },
+                        lockPasswordType = lockPasswordType,
                         rememberPassword = rememberPassword,
                         onRememberPasswordChange = { checked ->
                             rememberPassword = checked
@@ -363,15 +416,17 @@ fun WbuAuthBottomSheet(
                                     password = ""
                                 }
                             } else {
-                                WbuAuthTransport.setRememberPasswordEnabled(context, true)
-                                WbuAuthTransport.setSavedAuthMode(context, authMode)
+                                WbuAuthTransport.setRememberPasswordEnabled(context, passwordService, true)
+                                if (defaultAuthMode == null) {
+                                    WbuAuthTransport.setSavedAuthMode(context, authMode)
+                                }
                                 val effective = if (hasSavedPassword && !isPasswordModified) {
-                                    WbuAuthTransport.getSavedPassword(context) ?: ""
+                                    WbuAuthTransport.getSavedPassword(context, passwordService) ?: ""
                                 } else {
                                     password
                                 }
                                 if (effective.isNotBlank()) {
-                                    WbuAuthTransport.savePassword(context, effective)
+                                    WbuAuthTransport.savePassword(context, passwordService, effective)
                                     hasSavedPassword = true
                                 }
                             }
@@ -438,6 +493,7 @@ fun WbuAuthBottomSheet(
             }
             Spacer(modifier = Modifier.height(24.dp))
             // 校园网/VPN 切换
+            if (showNetworkSwitch) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = if (useVpn) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.48f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
@@ -466,7 +522,14 @@ fun WbuAuthBottomSheet(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (useVpn) stringResource(R.string.label_webvpn_access) else stringResource(R.string.label_campus_network_direct),
+                            // 仅登录统一认证时关闭态不是「校园网直连」：统一认证走公网即可，与校园网无关
+                            text = if (useVpn) {
+                                stringResource(R.string.label_webvpn_access)
+                            } else if (unifiedAuthOnly) {
+                                stringResource(R.string.label_direct_connection)
+                            } else {
+                                stringResource(R.string.label_campus_network_direct)
+                            },
                             style = MaterialTheme.typography.titleMedium,
                             color = if (useVpn) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimaryContainer
                         )
@@ -484,9 +547,10 @@ fun WbuAuthBottomSheet(
                     )
                 }
             }
+            }
             // 校园网环境提示（仅直连模式显示）：检测中 / 未检测到；检测到校园网则不显示。
-            // 开启「不检测校园网环境」时不探测、也不显示该提示。
-            if (!useVpn && !skipCampusCheck && campus != true) {
+            // 开启「不检测校园网环境」时不探测、也不显示该提示；仅登录统一认证时与校园网无关，同样不显示。
+            if (!unifiedAuthOnly && !useVpn && !skipCampusCheck && campus != true) {
                 val (hintText, hintColor) = when (campus) {
                     null -> stringResource(R.string.status_detecting_campus_network) to MaterialTheme.colorScheme.onSurfaceVariant
                     else -> stringResource(R.string.warn_no_campus_suggest_webvpn) to MaterialTheme.colorScheme.error
@@ -511,18 +575,20 @@ fun WbuAuthBottomSheet(
                         canSubmit,
                         {
                             val effectivePassword = if (hasSavedPassword && !isPasswordModified) {
-                                WbuAuthTransport.getSavedPassword(context) ?: password
+                                WbuAuthTransport.getSavedPassword(context, passwordService) ?: password
                             } else {
                                 password
                             }
                             if (rememberPassword && effectivePassword.isNotBlank()) {
-                                WbuAuthTransport.setRememberPasswordEnabled(context, true)
-                                WbuAuthTransport.savePassword(context, effectivePassword)
-                                WbuAuthTransport.setSavedAuthMode(context, authMode)
+                                WbuAuthTransport.setRememberPasswordEnabled(context, passwordService, true)
+                                WbuAuthTransport.savePassword(context, passwordService, effectivePassword)
+                                if (defaultAuthMode == null) {
+                                    WbuAuthTransport.setSavedAuthMode(context, authMode)
+                                }
                                 hasSavedPassword = true
                             } else if (!rememberPassword) {
-                                WbuAuthTransport.setRememberPasswordEnabled(context, false)
-                                WbuAuthTransport.clearSavedPassword(context)
+                                WbuAuthTransport.setRememberPasswordEnabled(context, passwordService, false)
+                                WbuAuthTransport.clearSavedPassword(context, passwordService)
                                 hasSavedPassword = false
                             }
                             onPasswordLogin(studentId, effectivePassword, useVpn, authMode)
@@ -542,17 +608,7 @@ fun WbuAuthBottomSheet(
                     Triple(label, !busy, { onStartQr(useVpn) })
                 }
             }
-            Button(
-                onClick = { action() },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.82f)
-                ),
-                enabled = enabled && !isLoading
-            ) {
+            val buttonContent: @Composable () -> Unit = {
                 if (isLoading) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(24.dp),
@@ -563,6 +619,65 @@ fun WbuAuthBottomSheet(
                     Text(loadingButtonText ?: stringResource(R.string.status_fetching_schedule), style = MaterialTheme.typography.titleMedium)
                 } else {
                     Text(label, style = MaterialTheme.typography.titleMedium)
+                }
+            }
+            val primaryColors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.82f)
+            )
+            if (showSyncButton) {
+                // 小按钮：默认用统一认证凭据做一次真正的 CAS 登录（不再直接复用当前 Cookie）；
+                // 调用方提供了自定义动作时（如课表页）优先用自定义的。
+                val syncPassword = password
+                    .takeIf { isPasswordModified && it != "••••••••" }
+                    .orEmpty()
+                    .ifBlank { WbuAuthTransport.getSavedPassword(context, CredentialService.UNIFIED_AUTH).orEmpty() }
+                // 双按钮：左「登录同步」(2/3) + 右「统一认证登录」图标 (1/3)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { action() },
+                        modifier = Modifier
+                            .weight(2f)
+                            .fillMaxHeight(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = primaryColors,
+                        enabled = enabled && !isLoading
+                    ) {
+                        buttonContent()
+                    }
+                    Button(
+                        onClick = {
+                            onSyncWithCredentials?.invoke()
+                                ?: onPasswordLogin(studentId, syncPassword, useVpn, WbuAuthMode.UNIFIED_CAS)
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = primaryColors,
+                        enabled = !isLoading
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Sync,
+                            contentDescription = stringResource(R.string.action_sync_short)
+                        )
+                    }
+                }
+            } else {
+                Button(
+                    onClick = { action() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = primaryColors,
+                    enabled = enabled && !isLoading
+                ) {
+                    buttonContent()
                 }
             }
             AnimatedVisibility(visible = isLoading) {
@@ -657,6 +772,24 @@ fun WbuAuthBottomSheet(
                     MethodRow(stringResource(R.string.method_password), WbuLoginMethod.PASSWORD, method, onMethodChange)
                     MethodRow(stringResource(R.string.method_qr), WbuLoginMethod.QR, method, onMethodChange)
                     MethodRow(stringResource(R.string.method_otp), WbuLoginMethod.DYNAMIC_CODE, method, onMethodChange)
+                    if (onNavigateToAccount != null) {
+                        Text(
+                            text = stringResource(R.string.item_credential_management),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.action_go_to_credential_management),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onNavigateToAccount() }
+                                .padding(vertical = 10.dp)
+                        )
+                    }
                     if (!hideImportPreferences) {
                         Text(
                             text = stringResource(R.string.category_import_preferences),
@@ -713,30 +846,45 @@ fun WbuAuthBottomSheet(
                             WbuSyncEngine.setSkipCampusCheck(context, it)
                         }
                     )
-                    ToggleRow(
-                        label = stringResource(R.string.pref_ids_via_webvpn),
-                        checked = idsVpnEnabled,
-                        onCheckedChange = {
-                            idsVpnEnabled = it
-                            IdsCasClient.setIdsViaWebVpn(context, it)
-                        }
-                    )
-                    ToggleRow(
-                        label = stringResource(R.string.pref_qr_with_webvpn),
-                        checked = qrVpnEnabled,
-                        onCheckedChange = {
-                            qrVpnEnabled = it
-                            IdsCasClient.setQrViaWebVpn(context, it)
-                        }
-                    )
-                    ToggleRow(
-                        label = stringResource(R.string.pref_use_https_webvpn),
-                        checked = useHttpsWebVpn,
-                        onCheckedChange = {
-                            useHttpsWebVpn = it
-                            WebVpnClient.setUseHttpsWebVpn(context, it)
-                        }
-                    )
+                    // 只展示会影响本次登录的选项：
+                    // - ids 走 WebVPN：本次走统一认证（或已处于 WebVPN 模式 / 仅登录统一认证）时才相关
+                    // - 二维码走 WebVPN：仅二维码登录时相关
+                    // - HTTPS WebVPN：仅 WebVPN 模式时相关
+                    val loginUsesCas =
+                        authMode == WbuAuthMode.UNIFIED_CAS || defaultAuthMode == WbuAuthMode.UNIFIED_CAS
+                    val showIdsVpnToggle = loginUsesCas || useVpn || unifiedAuthOnly
+                    val showQrVpnToggle = method == WbuLoginMethod.QR
+                    val showHttpsVpnToggle = useVpn
+                    if (showIdsVpnToggle) {
+                        ToggleRow(
+                            label = stringResource(R.string.pref_ids_via_webvpn),
+                            checked = idsVpnEnabled,
+                            onCheckedChange = {
+                                idsVpnEnabled = it
+                                IdsCasClient.setIdsViaWebVpn(context, it)
+                            }
+                        )
+                    }
+                    if (showQrVpnToggle) {
+                        ToggleRow(
+                            label = stringResource(R.string.pref_qr_with_webvpn),
+                            checked = qrVpnEnabled,
+                            onCheckedChange = {
+                                qrVpnEnabled = it
+                                IdsCasClient.setQrViaWebVpn(context, it)
+                            }
+                        )
+                    }
+                    if (showHttpsVpnToggle) {
+                        ToggleRow(
+                            label = stringResource(R.string.pref_use_https_webvpn),
+                            checked = useHttpsWebVpn,
+                            onCheckedChange = {
+                                useHttpsWebVpn = it
+                                WebVpnClient.setUseHttpsWebVpn(context, it)
+                            }
+                        )
+                    }
                     OutlinedTextField(
                         value = twfidText,
                         onValueChange = {
@@ -805,6 +953,7 @@ private fun PasswordInput(
     onAuthModeChange: (WbuAuthMode) -> Unit,
     menuExpanded: Boolean,
     onMenuExpandedChange: (Boolean) -> Unit,
+    lockPasswordType: Boolean = false,
     rememberPassword: Boolean,
     onRememberPasswordChange: (Boolean) -> Unit,
     enabled: Boolean
@@ -814,6 +963,17 @@ private fun PasswordInput(
         onValueChange = onValueChange,
         label = { Text(if (authMode == WbuAuthMode.JYXT_LEGACY) stringResource(R.string.label_jwxt_password) else stringResource(R.string.label_cas_password)) },
         leadingIcon = {
+            if (lockPasswordType) {
+                Box(
+                    modifier = Modifier.size(48.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = null
+                    )
+                }
+            } else {
             Box(
                 modifier = Modifier.size(48.dp),
                 contentAlignment = Alignment.Center
@@ -855,6 +1015,7 @@ private fun PasswordInput(
                         }
                     )
                 }
+            }
             }
         },
         trailingIcon = {

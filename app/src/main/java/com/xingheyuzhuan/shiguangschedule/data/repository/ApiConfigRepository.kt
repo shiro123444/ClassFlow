@@ -22,6 +22,13 @@ import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Singleton
 
+/** 账号页展示用：WebDAV 已落盘的信息（不要求密码能解密，地址可单独配置）。 */
+data class WebDavStoredInfo(
+    val baseUrl: String = "",
+    val username: String = "",
+    val hasPassword: Boolean = false,
+)
+
 /**
  * 全局 API 配置持久化中心仓库
  */
@@ -89,6 +96,61 @@ class ApiConfigRepository @Inject constructor(
             preferences[ApiKeys.WebDav.ROOT_PATH] = config.rootPath.trim()
             preferences[ApiKeys.WebDav.ENCRYPTED_PASSWORD] = cryptoResult.encryptedData
             preferences[ApiKeys.WebDav.CRYPTO_IV] = cryptoResult.iv
+        }
+    }
+
+    /**
+     * 原始落盘信息（地址 / 用户名 / 是否存过密码）：不要求密码可解密，
+     * 因为 [webDavConfigFlow] 要求四项俱全才返回配置，没填完就等于「未配置」。
+     */
+    val webDavStoredInfoFlow: Flow<WebDavStoredInfo> = dataStore.data.map { preferences ->
+        WebDavStoredInfo(
+            baseUrl = preferences[ApiKeys.WebDav.BASE_URL].orEmpty(),
+            username = preferences[ApiKeys.WebDav.USERNAME].orEmpty(),
+            hasPassword = !preferences[ApiKeys.WebDav.ENCRYPTED_PASSWORD].isNullOrBlank(),
+        )
+    }
+
+    /** 仅更新服务器地址：其它字段还没配也能独立保存；传空串即清除地址。 */
+    suspend fun saveWebDavBaseUrl(url: String) {
+        val trimmed = url.trim()
+        dataStore.edit { preferences ->
+            if (trimmed.isEmpty()) {
+                preferences.remove(ApiKeys.WebDav.BASE_URL)
+            } else {
+                preferences[ApiKeys.WebDav.BASE_URL] = trimmed
+            }
+        }
+    }
+
+    /** 仅更新用户名：其它字段还没配也能独立保存；传空串即清除。 */
+    suspend fun saveWebDavUsername(name: String) {
+        val trimmed = name.trim()
+        dataStore.edit { preferences ->
+            if (trimmed.isEmpty()) {
+                preferences.remove(ApiKeys.WebDav.USERNAME)
+            } else {
+                preferences[ApiKeys.WebDav.USERNAME] = trimmed
+            }
+        }
+    }
+
+    /** 仅更新密码：不依赖已有配置。 */
+    suspend fun saveWebDavPassword(password: String) {
+        val cryptoResult = encrypt(password) ?: return
+        dataStore.edit { preferences ->
+            preferences[ApiKeys.WebDav.ENCRYPTED_PASSWORD] = cryptoResult.encryptedData
+            preferences[ApiKeys.WebDav.CRYPTO_IV] = cryptoResult.iv
+        }
+    }
+
+    /**
+     * 仅清除 WebDAV 密码，保留服务器地址、用户名与根路径。
+     */
+    suspend fun clearWebDavPassword() {
+        dataStore.edit { preferences ->
+            preferences.remove(ApiKeys.WebDav.ENCRYPTED_PASSWORD)
+            preferences.remove(ApiKeys.WebDav.CRYPTO_IV)
         }
     }
 

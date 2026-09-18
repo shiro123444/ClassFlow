@@ -72,6 +72,8 @@
     <string name="desc_open_source_licenses">View software licenses and compliance info</string>
     <string name="title_user_group">ClassFlow User Group</string>
     <string name="desc_user_group">Join the QQ group to chat with peers</string>
+    <string name="title_series_products_group">Product Series QQ Group</string>
+    <string name="desc_series_products_group">Join the QQ group to chat with peers</string>
     <string name="desc_feedback_github">Submit issues on GitHub</string>
     <string name="item_auto_check_update">Auto-check Updates</string>
     <string name="desc_auto_check_update">Silently check for new versions on startup</string>
@@ -148,6 +150,7 @@ Latest: %2$s</string>
     <string name="label_slide_to_verify">Slide right to solve puzzle</string>
     <string name="title_select_login_method">Select Login Method</string>
     <string name="label_campus_network_direct">Campus Direct</string>
+    <string name="label_direct_connection">Direct</string>
     <string name="desc_campus_network_direct">For on-campus Wi-Fi / wired network</string>
     <string name="label_webvpn_access">WebVPN (Remote)</string>
     <string name="desc_webvpn_access">For off-campus access via VPN</string>
@@ -205,7 +208,7 @@ Overwriting will replace all current courses.</string>
     <string name="format_resend_cooldown">Resend (%1$ds)</string>
     <string name="action_resend_code">Resend</string>
     <string name="action_get_code">Get Code</string>
-    <string name="action_one_tap_sync">One-Tap Sync</string>
+    <string name="action_one_tap_sync">Sign-in sync</string>
     <string name="action_login">Login</string>
     <string name="action_regenerate">Regenerate</string>
     <string name="action_refresh_qr">Refresh QR</string>
@@ -292,6 +295,12 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="tip_campus_connecting_securely">Connecting to academic system securely...</string>
     <string name="tip_campus_syncing_records">Syncing campus and academic records...</string>
     <string name="tip_campus_finalizing_data">Parsing data, almost ready...</string>
+    <string name="tip_library_connecting_securely">Securing your library connection...</string>
+    <string name="tip_library_verifying_reader">Verifying your reader session...</string>
+    <string name="tip_library_preparing_data">Preparing loans and lookup data...</string>
+    <string name="tip_identity_connecting">Connecting to unified sign-in...</string>
+    <string name="tip_identity_verifying">Verifying your identity and access...</string>
+    <string name="tip_identity_preparing_session">Preparing your campus session...</string>
     <string name="status_detecting_campus_network">Detecting campus network...</string>
     <string name="warn_no_campus_suggest_webvpn">Not on campus network; WebVPN recommended</string>
     <string name="a11y_login_qr_code">Login QR Code</string>
@@ -445,11 +454,50 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="status_completed_tag">Done</string>
     <string name="status_studying_tag">Taking</string>
     <string name="status_uncompleted_tag">Plan</string>
+    <string name="tag_exam_single">Exam</string>
+    <string name="tag_inspect_single">Test</string>
+    <string name="filter_exam_mode_all">All Modes</string>
+    <string name="filter_exam_mode_exam">Exam Only</string>
+    <string name="filter_exam_mode_inspect">Test Only</string>
+    <string name="title_course_archive">Course Archive</string>
+    <string name="section_course_basic">Course Overview</string>
+    <string name="section_course_credits_score">Credits &amp; Grades</string>
+    <string name="section_course_schedule_exam">Semester &amp; Exam Status</string>
+    <string name="field_course_code">Course Code</string>
+    <string name="field_course_name">Course Name</string>
+    <string name="field_college">Department</string>
+    <string name="field_category">Category</string>
+    <string name="field_nature">Nature</string>
+    <string name="field_attribute">Attribute</string>
+    <string name="field_course_type">Course Type</string>
+    <string name="field_course_belonging">Course Belonging</string>
+    <string name="field_is_credit_earned">Credit Earned</string>
+    <string name="field_exam_type">Assessment Mode</string>
+    <string name="field_plan_credit">Plan Credits</string>
+    <string name="field_rpxf">Program Credits</string>
+    <string name="field_earned_credit">Earned Credits</string>
+    <string name="field_score">Best Grade</string>
+    <string name="field_gpa">Grade Point (GPA)</string>
+    <string name="field_status">Study Status</string>
+    <string name="field_allowed_semester">Allowed Term</string>
+    <string name="field_grade_semester">Recorded Term</string>
+    <string name="field_study_nature">Study Nature</string>
+    <string name="field_is_makeup">Makeup Exam</string>
+    <string name="field_special_grade">Special Grade Flag</string>
+    <string name="field_remark">Remarks / Description</string>
+    <string name="format_credits_val">%1$s Credits</string>
+    <string name="format_score_val">%1$s pts</string>
 
     <!-- Library Borrowing Module -->
     <string name="item_library_borrow">Library Borrowing</string>
     <string name="desc_library_borrow">Active borrows, one-tap renewal &amp; borrowing history</string>
     <string name="title_library_borrow">Library</string>
+    <string name="item_library_seat">Library Seat Booking</string>
+    <string name="desc_library_seat">Seat booking, floor plans, check-ins and live status</string>
+    <string name="title_library_seat">Library Seat Booking</string>
+    <string name="status_fetching_webapp_token">Fetching unified authentication token...</string>
+    <string name="title_load_failed">Page Load Failed</string>
+    <string name="action_exit">Exit</string>
     <string name="loading_library_data">Connecting to library system...</string>
     <string name="default_reader_name">Reader</string>
     <string name="tab_current_borrows">Current Borrows</string>
@@ -505,6 +553,7 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="err_webvpn_connect_failed">WebVPN connection failed. Please check network and retry.</string>
     <string name="err_auto_login_failed_check_creds">Auto login failed. Please check account or password.</string>
     <string name="err_campus_direct_failed">Campus direct connection failed. Ensure you are on campus network.</string>
+    <string name="err_unified_auth_direct_failed">Direct unified-auth connection failed. Check your network and retry.</string>
     <string name="err_login_failed_check_creds">Login failed. Please check student ID or password.</string>
     <string name="err_get_login_params_failed">Failed to retrieve login parameters. Please retry.</string>
     <string name="err_otp_login_failed">SMS code login failed. Please check your verification code.</string>
@@ -528,10 +577,214 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="status_probing_campus_network">Detecting campus network environment...</string>
     <string name="status_campus_detected_connecting">Campus network detected. Connecting directly...</string>
     <string name="status_not_campus_routing_webvpn">Not on campus network. Routing via WebVPN...</string>
+    <string name="title_off_campus_detected">Not on Campus Network</string>
+    <string name="desc_off_campus_detected">Campus Wi-Fi or wired network not detected. WebVPN access is recommended.</string>
+    <string name="hint_off_campus_choose_access">Please select an access method:</string>
+    <string name="status_probing_campus_after_vpn_fail">WebVPN session expired, probing campus network...</string>
     <string name="hint_choose_access_method_direct">Or choose an access method directly:</string>
     <string name="label_campus_direct_on_campus">Campus Direct (On-campus)</string>
     <string name="desc_campus_direct_guide">Connected to school Wi-Fi or ethernet</string>
     <string name="label_webvpn_off_campus">WebVPN (Off-campus)</string>
     <string name="desc_webvpn_guide">Using mobile data or home broadband</string>
     <string name="toast_session_saved_no_relogin">Session saved. Future syncs require no re-login.</string>
+
+    <!-- Course selection -->
+    <string name="item_course_selection">Course Selection</string>
+    <string name="desc_course_selection">Enroll / drop courses (campus network only)</string>
+    <string name="title_course_selection">Course Selection</string>
+    <string name="cs_disclaimer_title">Read Before Use</string>
+    <string name="cs_disclaimer_untested">This feature has not been fully tested yet. Feedback and bug reports are welcome.</string>
+    <string name="cs_disclaimer_campus_only">Currently available on the campus network only. Off-campus access and WebVPN are not supported yet.</string>
+    <string name="cs_disclaimer_body">This feature calls your school\'s academic system APIs directly. Enroll and drop actions are written to the real academic system and are subject to your school\'s rules (capacity, time conflicts, credit limits, batch open windows, etc.).\n\nPlease note:\n1. This feature is for personal study use only; do not use it commercially or in violation of any rules;\n2. Any consequence caused by network issues, API changes, or misoperation is solely your responsibility;\n3. The final result is subject to your school\'s academic system. Please verify after each operation.</string>
+    <string name="cs_disclaimer_agree">Agree and Continue</string>
+    <string name="cs_disclaimer_agree_countdown">Agree (%1$d)</string>
+    <string name="cs_disclaimer_disagree">Disagree</string>
+    <string name="cs_tab_classes">Available</string>
+    <string name="cs_tab_selected">Enrolled</string>
+    <string name="cs_search_hint">Course name / teacher</string>
+    <string name="cs_filter_full">Hide full</string>
+    <string name="cs_filter_conflict">Hide conflicts</string>
+    <string name="cs_empty_no_batch">No course selection batch is currently open</string>
+    <string name="cs_loading_campus_hint">Loading… Please make sure you are connected to the campus network</string>
+    <string name="cs_empty_classes">No available class in this batch</string>
+    <string name="cs_empty_selected">No enrolled course yet</string>
+    <string name="cs_unsupported_batch">Not supported yet</string>
+    <string name="format_cs_quota">%1$s/%2$s</string>
+    <string name="cs_tag_full">Full</string>
+    <string name="cs_tag_conflict">Time conflict</string>
+    <string name="cs_tag_partial_conflict">Partial conflict</string>
+    <string name="cs_tag_selected">Enrolled</string>
+    <string name="cs_tag_waitlist">Waitlisted</string>
+    <string name="cs_action_select">Enroll</string>
+    <string name="cs_action_drop">Drop</string>
+    <string name="cs_action_enroll">Sign up</string>
+    <string name="cs_action_cancel_enroll">Cancel sign-up</string>
+    <string name="cs_action_waitlist">Waitlist</string>
+    <string name="cs_action_cancel_waitlist">Cancel waitlist</string>
+    <string name="cs_confirm_select_title">Confirm enrollment</string>
+    <string name="cs_confirm_select_msg">Enroll in \"%1$s\"?</string>
+    <string name="cs_confirm_drop_title">Confirm drop</string>
+    <string name="cs_confirm_drop_msg">Drop \"%1$s\"?</string>
+    <string name="cs_confirm_ok">OK</string>
+    <string name="cs_op_success">Success</string>
+    <string name="cs_op_failed">Failed: %1$s</string>
+    <string name="cs_detail_title">Class Details</string>
+    <string name="cs_detail_class_time">Class time</string>
+    <string name="cs_detail_quota">Enrolled / capacity</string>
+    <string name="cs_detail_campus">Campus</string>
+    <string name="cs_detail_jxms">Teaching mode</string>
+    <string name="cs_detail_jxbzc">Class composition</string>
+    <string name="cs_detail_bz">Remark</string>
+    <string name="cs_retake_pick_course">Select a course to retake</string>
+
+    <!-- Course selection mock test mode -->
+    <string name="cs_mock_badge">MOCK</string>
+    <string name="cs_mock_enabled">Mock test mode enabled</string>
+    <string name="cs_mock_disabled">Mock test mode disabled</string>
+    <string name="cs_mock_banner">Mock test mode: data is simulated locally and never written to the academic system</string>
+    <string name="cs_mock_exit">Exit Mock</string>
+
+    <!-- Account & Credentials -->
+    <string name="item_credential_management">Credentials</string>
+    <string name="desc_credential_management">View, verify and clear saved passwords and sessions</string>
+    <string name="title_credential_management">Credentials</string>
+    <string name="section_credential_verify">Verification</string>
+    <string name="item_auto_verify">Auto-verify sessions</string>
+    <string name="desc_auto_verify">Verify each service session online when entering; when off, only local status is shown</string>
+    <string name="action_verify_now">Verify now</string>
+    <string name="desc_verify_now">Manually verify all services\' sessions</string>
+    <string name="service_unified_auth">Unified Auth</string>
+    <string name="service_jiaowu">Academic System</string>
+    <string name="service_library">Library</string>
+    <string name="service_webvpn">WebVPN</string>
+    <string name="service_campus_card">Campus Card</string>
+    <string name="service_webdav">WebDAV</string>
+    <string name="desc_campus_card_future">Not integrated yet — coming soon</string>
+    <string name="label_credential_account">Account</string>
+    <string name="item_session">Session</string>
+    <string name="item_password">Password</string>
+    <string name="item_twfid">TWFID</string>
+    <string name="label_new_password">New password</string>
+    <string name="label_webdav_server">Server URL</string>
+    <string name="label_webdav_username">Username</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_clear_all_webdav">Clear configuration</string>
+    <string name="desc_clear_all_webdav">Removes URL, username and password</string>
+    <string name="status_saved">Saved</string>
+    <string name="status_not_saved">Not saved</string>
+    <string name="status_follow_unified_auth">Follows Unified Auth</string>
+    <string name="status_verifying">Verifying…</string>
+    <string name="status_session_valid">Session valid</string>
+    <string name="status_session_expired">Expired</string>
+    <string name="status_not_logged_in">Not logged in</string>
+    <string name="status_not_available">Not available</string>
+    <string name="status_session_unknown">Unknown</string>
+    <string name="status_not_verified">Not verified</string>
+    <string name="dialog_reset_password_title">Reset %1$s password</string>
+    <string name="dialog_clear_confirm_title">Confirm clear</string>
+    <string name="msg_clear_password_confirm">Clear the saved password for [%1$s]? You will need to enter it again next time.</string>
+    <string name="msg_clear_token_confirm">Clear the gateway token for [%1$s]?</string>
+    <string name="msg_clear_session_confirm">Clear the current session for [%1$s]? This will attempt to log out on the server and clear local credentials; related features will require re-login.</string>
+    <string name="msg_clear_all_confirm">Clear all credentials (password, token and session) for [%1$s]? This will attempt to log out on the server first.</string>
+    <string name="action_edit">Edit</string>
+    <string name="label_advanced_mode">Advanced</string>
+    <string name="status_not_set_account">Not set</string>
+    <string name="label_account_name">Name</string>
+    <string name="dialog_rename_account_title">Rename account</string>
+    <string name="dialog_edit_twfid_title">Edit TWFID</string>
+    <string name="item_session_credentials">Session credentials</string>
+    <string name="status_no_credentials">No credentials</string>
+    <string name="item_webvpn_mode">Use WebVPN</string>
+    <string name="desc_webvpn_mode">Enable when off-campus; login and sync go through WebVPN</string>
+    <string name="item_login">Sign in</string>
+    <string name="desc_login_service">Sign in again to refresh this service\'s authorization</string>
+    <string name="err_no_valid_credentials">No valid credentials. Please use "Sign-in sync" to log in first.</string>
+    <string name="err_need_unified_auth_session">No valid unified-auth session yet. Please sign in once with your unified-auth password.</string>
+    <string name="action_go_to_credential_management">Go to Account &amp; Credentials</string>
+    <string name="action_sync_short">Sync</string>
+
+    <!-- Login sheet titles (per invoking scenario) -->
+    <string name="title_login_unified_auth">Unified Auth Sign-in</string>
+    <string name="title_login_jiaowu">Academic System Sign-in</string>
+    <string name="title_login_library">Library Sign-in</string>
+    <string name="title_login_webvpn">WebVPN Sign-in</string>
+    <string name="title_login_course_selection">Course Selection Sign-in</string>
+    <string name="title_login_free_classroom">Free Classroom Sign-in</string>
+    <string name="title_login_grade">Grade Query Sign-in</string>
+    <string name="title_login_academic">Academic Progress Sign-in</string>
+    <string name="action_set">Set</string>
+    <string name="label_more_settings">More settings</string>
+
+    <!-- Desktop shortcuts -->
+    <string name="shortcut_short_qr_scan">Scan</string>
+    <string name="shortcut_short_campus_card">Campus Card</string>
+    <string name="item_qr_scan">Scan QR code</string>
+    <string name="desc_qr_scan">Scan the unified-auth login QR code to confirm sign-in on your computer</string>
+    <string name="title_qr_scan">Scan</string>
+    <string name="a11y_qr_scan_photo">Read a QR code from an image</string>
+    <string name="qr_scan_photo_no_code">No QR code found in the image</string>
+    <string name="a11y_qr_scan_engine">Scanning engine</string>
+    <string name="qr_scan_engine_mlkit">ML Kit (default)</string>
+    <string name="qr_scan_engine_zxing">ZXing (fallback)</string>
+    <string name="qr_scan_hint_align">Align the QR code within the frame</string>
+    <string name="qr_scan_permission_title">Camera permission required</string>
+    <string name="qr_scan_permission_desc">Scanning needs the camera. Please grant camera access in system settings.</string>
+    <string name="action_qr_scan_grant">Grant permission</string>
+    <string name="action_qr_scan_open_settings">Open system settings</string>
+    <string name="qr_scan_scanned_title">Scanned</string>
+    <string name="qr_scan_confirm_hint">Confirming will sign your account in on the computer</string>
+    <string name="qr_scan_confirming">Confirming…</string>
+    <string name="action_qr_scan_confirm">Confirm sign-in</string>
+    <string name="action_qr_scan_rescan">Scan again</string>
+    <string name="qr_scan_success_title">Sign-in confirmed</string>
+    <string name="qr_scan_success_desc">The computer is now signed in</string>
+    <string name="action_qr_scan_done">Done</string>
+    <string name="action_continue_scan">Scan Again</string>
+    <string name="qr_scan_need_login_title">Not signed in to unified auth</string>
+    <string name="qr_scan_need_login_desc">This device must be signed in to unified auth before confirming</string>
+    <string name="action_qr_scan_login">Sign in</string>
+    <string name="qr_scan_err_not_cas">Not a unified-auth login QR code. Keep scanning.</string>
+    <string name="qr_scan_err_expired">This QR code has expired. Refresh it on your computer.</string>
+    <string name="qr_scan_err_network">Network error. Please try again.</string>
+    <string name="action_qr_scan_retry">Retry</string>
+    <string name="qr_scan_tls_prompt">Certificate validation failed. Trust and continue?</string>
+
+    <string name="title_login_campus_card">Sign in to Campus Card</string>
+    <string name="desc_campus_card_app">Balance, transactions, card management and campus utility bills</string>
+    <string name="credential_sync_campus_card_success">Signed in to Campus Card</string>
+    <string name="credential_sync_campus_card_failed">Campus Card sign-in failed: %1$s</string>
+    <string name="webapp_scan_hint">Point the camera at the QR code on the device to scan automatically</string>
+    <string name="title_ujing_water">Ujing Water Dispenser</string>
+    <string name="ujing_water_connecting">Connecting to water dispenser...</string>
+    <string name="ujing_water_dispensing">Dispensing water</string>
+    <string name="ujing_water_realtime_connected">Real-time status connected</string>
+    <string name="ujing_water_order_info">Order Details</string>
+    <string name="ujing_water_hot_amount">Hot Water</string>
+    <string name="ujing_water_warm_amount">Warm Water</string>
+    <string name="ujing_water_cost">Cost</string>
+    <string name="ujing_water_pay_type">Payment Method</string>
+    <string name="ujing_water_order_no">Order No.</string>
+    <string name="ujing_water_action_hint">Please press button on dispenser to get water. Order will settle automatically when finished.</string>
+    <string name="ujing_water_finished_title">Water Dispensing Finished</string>
+    <string name="ujing_water_repeat">Dispense Again</string>
+    <string name="dialog_ujing_hairdryer_title">Notice</string>
+    <string name="dialog_ujing_hairdryer_message">The current hair dryer does not support campus card scan. Please use WeChat, Alipay, or UnionPay to scan.\nIf this is an error, please report to developer.</string>
+    <string name="dialog_ujing_washer_offline_title">Device Offline</string>
+    <string name="dialog_ujing_washer_offline_message">The washing machine is currently offline and unavailable.</string>
+    <string name="ujing_washer_checking">Checking washing machine status...</string>
+    <string name="ujing_alipay_not_installed">No app found to handle Alipay request</string>
+
+    <!-- Language settings (upstream sync: language tag array + display name array, empty tag = follow system) -->
+    <string-array name="language_tags">
+        <item>zh-CN</item>
+        <item>zh-TW</item>
+        <item>en</item>
+    </string-array>
+
+    <string-array name="language_names">
+        <item>Simplified Chinese</item>
+        <item>Traditional Chinese</item>
+        <item>English</item>
+    </string-array>
+
 </resources>

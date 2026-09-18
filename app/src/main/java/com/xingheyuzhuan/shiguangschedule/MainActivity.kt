@@ -1,11 +1,15 @@
 package com.xingheyuzhuan.shiguangschedule
 
+import android.app.PendingIntent
+import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
+import android.nfc.NfcAdapter
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
 import dagger.hilt.android.AndroidEntryPoint
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -111,6 +115,8 @@ import com.xingheyuzhuan.shiguangschedule.ui.components.AppDownloadProgressDialo
 import com.xingheyuzhuan.shiguangschedule.ui.components.AppUpdateFoundDialog
 import com.xingheyuzhuan.shiguangschedule.ui.components.InstallPermissionPromptDialog
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 import com.xingheyuzhuan.shiguangschedule.data.model.AppSettingsModel
@@ -129,15 +135,19 @@ import com.xingheyuzhuan.shiguangschedule.ui.schedule.WeeklyScheduleScreen
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.list.AdapterSelectionScreen
 import com.xingheyuzhuan.shiguangschedule.ui.campus.academic.AcademicProgressScreen
 import com.xingheyuzhuan.shiguangschedule.ui.campus.classroom.FreeClassroomScreen
+import com.xingheyuzhuan.shiguangschedule.ui.campus.courseselection.CourseSelectionScreen
 import com.xingheyuzhuan.shiguangschedule.ui.campus.grade.GradeQueryScreen
+import com.xingheyuzhuan.shiguangschedule.ui.campus.qrscan.QrScanScreen
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.list.SchoolSelectionListScreen
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.web.WebViewScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.SettingsScreen
+import com.xingheyuzhuan.shiguangschedule.ui.settings.additional.LanguageSettingScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.additional.MoreOptionsScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.additional.OpenSourceLicensesScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.backup.BackupScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.contribution.ContributionScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.conversion.CourseTableConversionScreen
+import com.xingheyuzhuan.shiguangschedule.ui.settings.credentials.CredentialManagementScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.course.AddEditCourseScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.coursemanagement.CourseInstanceListScreen
 import com.xingheyuzhuan.shiguangschedule.ui.settings.coursemanagement.CourseNameListScreen
@@ -156,7 +166,19 @@ import com.xingheyuzhuan.shiguangschedule.ui.today.TodayScheduleScreen
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
+
+    companion object {
+        /** 桌面快捷方式「扫一扫」入口 action（见 res/xml/shortcuts.xml）。 */
+        const val ACTION_QR_SCAN = "com.xingheyuzhuan.shiguangschedule.action.QR_SCAN"
+        /** 桌面快捷方式「一卡通」入口 action（见 res/xml/shortcuts.xml）。 */
+        const val ACTION_CAMPUS_CARD = "com.xingheyuzhuan.shiguangschedule.action.CAMPUS_CARD"
+    }
+
+    /** 快捷方式入口产生的待处理跳转，由 AppNavigation 消费后清空。 */
+    private val pendingDeepLink = MutableStateFlow<Destination?>(null)
+
+    private var nfcAdapter: NfcAdapter? = null
 
     @Inject
     lateinit var appSettingsRepository: AppSettingsRepository
@@ -182,6 +204,10 @@ class MainActivity : ComponentActivity() {
             )
         )
         super.onCreate(savedInstanceState)
+        nfcAdapter = runCatching { NfcAdapter.getDefaultAdapter(this) }.getOrNull()
+        // 仅在全新启动时消费一次：重建（旋转/进程恢复）时 intent 仍带着 action，
+        // 若照常处理会把用户从返回后的页面再次拉回扫码页
+        if (savedInstanceState == null) handleDeepLink(intent)
         enableHighRefreshRate()
         setContent {
             val settings by appSettingsRepository.getAppSettings()
@@ -207,12 +233,122 @@ class MainActivity : ComponentActivity() {
                         StartScreen.COURSE_SCHEDULE -> Destination.CourseSchedule
                         StartScreen.TODAY_SCHEDULE -> Destination.TodaySchedule
                     },
+                    pendingDeepLink = pendingDeepLink,
+                    onDeepLinkConsumed = { pendingDeepLink.value = null },
                     courseConversionRepository = courseConversionRepository,
                     courseTableRepository = courseTableRepository,
                     timeSlotRepository = timeSlotRepository,
                     appSettingsRepository = appSettingsRepository
                 )
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        enableNfcForegroundDispatch()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        disableNfcForegroundDispatch()
+    }
+
+    private fun enableNfcForegroundDispatch() {
+        val adapter = nfcAdapter ?: return
+        if (!adapter.isEnabled) return
+        try {
+            val intent = Intent(this, javaClass).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val pendingIntent = PendingIntent.getActivity(this, 0, intent, flags)
+            val ndefFilter = IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED).apply {
+                addDataScheme("https")
+                addDataScheme("http")
+            }
+            adapter.enableForegroundDispatch(this, pendingIntent, arrayOf(ndefFilter), null)
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Failed to enable NFC foreground dispatch", e)
+        }
+    }
+
+    private fun disableNfcForegroundDispatch() {
+        val adapter = nfcAdapter ?: return
+        try {
+            adapter.disableForegroundDispatch(this)
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Failed to disable NFC foreground dispatch", e)
+        }
+    }
+
+    /** App 在后台时（singleTask）快捷方式或 NFC 触碰走这里。 */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleDeepLink(intent)
+    }
+
+    /**
+     * 统一处理外部 Intent 分发：
+     * 1. 桌面长按扫一扫、一卡通快捷方式入口
+     * 2. NFC 触碰 (NDEF_DISCOVERED) 与外部链接 (VIEW) 校园直达（饮水机 / 洗衣机等）
+     */
+    private fun handleDeepLink(intent: Intent?) {
+        if (intent == null) return
+
+        if (intent.action == ACTION_QR_SCAN) {
+            pendingDeepLink.value = Destination.QrScan
+            return
+        }
+
+        if (intent.action == ACTION_CAMPUS_CARD) {
+            pendingDeepLink.value = Destination.WebApp(
+                com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId.CAMPUS_CARD.name
+            )
+            return
+        }
+
+        val hairdryer = com.xingheyuzhuan.shiguangschedule.data.network.wbu.CampusLinkRouter.extractHairdryer(intent)
+        if (hairdryer != null) {
+            val scheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayScheme(hairdryer.cd)
+            val ulinkUrl = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayUrl(hairdryer.cd)
+            val nfcScheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerNfcScheme(hairdryer.cd)
+            val explicitIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
+                setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching {
+                startActivity(explicitIntent)
+            }.getOrElse {
+                val genericIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                runCatching {
+                    startActivity(genericIntent)
+                }.getOrElse {
+                    val nfcIntent = Intent(NfcAdapter.ACTION_NDEF_DISCOVERED, Uri.parse(nfcScheme)).apply {
+                        setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    runCatching {
+                        startActivity(nfcIntent)
+                    }.getOrElse {
+                        val ulinkIntent = Intent(Intent.ACTION_VIEW, Uri.parse(ulinkUrl)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        runCatching { startActivity(ulinkIntent) }
+                    }
+                }
+            }
+            return
+        }
+
+        val destination = com.xingheyuzhuan.shiguangschedule.data.network.wbu.CampusLinkRouter.extractDestination(intent)
+        if (destination != null) {
+            pendingDeepLink.value = destination
         }
     }
 
@@ -236,6 +372,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppNavigation(
     startDestination: Destination,
+    pendingDeepLink: StateFlow<Destination?>,
+    onDeepLinkConsumed: () -> Unit,
     courseConversionRepository: CourseConversionRepository,
     courseTableRepository: CourseTableRepository,
     timeSlotRepository: TimeSlotRepository,
@@ -315,6 +453,17 @@ fun AppNavigation(
                 backStack.add(destination)
             }
 
+            override fun replace(destination: Destination) {
+                if (backStack.isEmpty()) {
+                    backStack.add(destination)
+                    return
+                }
+                if (backStack.last() == destination) return
+                // 先移除栈顶，再入栈目标页，保证不会出现「刚入栈就被弹出」
+                backStack.removeAt(backStack.lastIndex)
+                backStack.add(destination)
+            }
+
             override fun popBackStack() {
                 if (backStack.size > 1) {
                     backStack.removeAt(backStack.lastIndex)
@@ -369,6 +518,19 @@ fun AppNavigation(
             currentIndex == 4 && currentDestination !is Destination.Settings -> {
                 navBridge.navigateToMain(Destination.Settings)
             }
+        }
+    }
+
+    // 快捷方式入口：等引导流程结束后再消费，避免被 onboarding 覆盖
+    val deepLinkTarget by pendingDeepLink.collectAsState()
+    LaunchedEffect(deepLinkTarget, showOnboarding) {
+        if (showOnboarding) return@LaunchedEffect
+        val target = deepLinkTarget ?: return@LaunchedEffect
+        onDeepLinkConsumed()
+        if (backStack.lastOrNull() is Destination.UjingWater && target is Destination.UjingWater) {
+            navBridge.replace(target)
+        } else {
+            navBridge.navigate(target)
         }
     }
 
@@ -609,8 +771,12 @@ fun AppNavigation(
                             Destination.FreeClassroomQuery -> FreeClassroomScreen(navBridge = navBridge)
                             Destination.AcademicProgress -> AcademicProgressScreen(navBridge = navBridge)
                             Destination.LibraryBorrow -> com.xingheyuzhuan.shiguangschedule.ui.campus.library.LibraryScreen(navBridge = navBridge)
+                            Destination.CredentialManagement -> CredentialManagementScreen(navBridge = navBridge)
+                            Destination.CourseSelection -> CourseSelectionScreen(navBridge = navBridge)
+                            Destination.QrScan -> QrScanScreen(navBridge = navBridge)
                             Destination.UpdateRepo -> UpdateRepoScreen(navBridge = navBridge)
                             Destination.NotificationSettings -> NotificationSettingsScreen(onBack = navBridge::popBackStack)
+                            Destination.LanguageSettings -> LanguageSettingScreen(onBack = navBridge::popBackStack)
                             Destination.ThemeSettings -> ThemeSettingsScreen(onBack = navBridge::popBackStack)
                             Destination.BackupAndRestore -> BackupScreen(onBack = navBridge::popBackStack)
 
@@ -631,6 +797,19 @@ fun AppNavigation(
                                 courseTableRepository = courseTableRepository,
                                 timeSlotRepository = timeSlotRepository,
                                 appSettingsRepository = appSettingsRepository
+                            )
+
+                            is Destination.WebApp -> com.xingheyuzhuan.shiguangschedule.ui.webapp.WebAppScreen(
+                                navBridge = navBridge,
+                                appId = destination.appId,
+                                initialTargetUrl = destination.initialTargetUrl,
+                                pendingAutoScan = destination.pendingAutoScan
+                            )
+
+                            is Destination.UjingWater -> com.xingheyuzhuan.shiguangschedule.ui.campus.ujing.UjingWaterScreen(
+                                cd = destination.cd,
+                                scanId = destination.scanId,
+                                navBridge = navBridge
                             )
 
                             is Destination.AddEditCourse -> AddEditCourseScreen(

@@ -86,6 +86,8 @@
     <string name="desc_open_source_licenses">查看许可证与合规信息</string>
     <string name="title_user_group">ClassFlow 用户群</string>
     <string name="desc_user_group">加入QQ群与同学交流</string>
+    <string name="title_series_products_group">系列产品群</string>
+    <string name="desc_series_products_group">加入QQ群与同学交流</string>
     <string name="desc_feedback_github">前往 GitHub 提交 Issue</string>
     <string name="item_auto_check_update">自动检查更新</string>
     <string name="desc_auto_check_update">启动应用时静默检查是否有新版本</string>
@@ -162,6 +164,7 @@
     <string name="label_slide_to_verify">向右滑动填充拼图</string>
     <string name="title_select_login_method">选择登录方式</string>
     <string name="label_campus_network_direct">校园网直连</string>
+    <string name="label_direct_connection">直连</string>
     <string name="desc_campus_network_direct">适用于在校园内连接校园网</string>
     <string name="label_webvpn_access">WebVPN 访问</string>
     <string name="desc_webvpn_access">适用于校外通过VPN访问</string>
@@ -219,7 +222,7 @@
     <string name="format_resend_cooldown">重新发送 (%1$ds)</string>
     <string name="action_resend_code">重新发送</string>
     <string name="action_get_code">获取验证码</string>
-    <string name="action_one_tap_sync">一键全自动同步</string>
+    <string name="action_one_tap_sync">登录同步</string>
     <string name="action_login">登录</string>
     <string name="action_regenerate">重新生成</string>
     <string name="action_refresh_qr">刷新二维码</string>
@@ -289,6 +292,12 @@
     <string name="tip_campus_connecting_securely">正在建立教务安全通信通道...</string>
     <string name="tip_campus_syncing_records">正在获取校园与学业数据...</string>
     <string name="tip_campus_finalizing_data">数据解析整理中，马上就好...</string>
+    <string name="tip_library_connecting_securely">正在建立图书馆安全通道...</string>
+    <string name="tip_library_verifying_reader">正在校验读者会话...</string>
+    <string name="tip_library_preparing_data">正在准备借阅与查询数据...</string>
+    <string name="tip_identity_connecting">正在连接统一身份认证...</string>
+    <string name="tip_identity_verifying">正在校验身份与门禁...</string>
+    <string name="tip_identity_preparing_session">正在准备校园服务会话...</string>
     <string name="status_detecting_campus_network">正在检测校园网...</string>
     <string name="warn_no_campus_suggest_webvpn">未检测到校园网，建议使用 WebVPN</string>
     <string name="a11y_login_qr_code">登录二维码</string>
@@ -442,11 +451,50 @@
     <string name="status_completed_tag">已修</string>
     <string name="status_studying_tag">修读中</string>
     <string name="status_uncompleted_tag">未修</string>
+    <string name="tag_exam_single">试</string>
+    <string name="tag_inspect_single">查</string>
+    <string name="filter_exam_mode_all">全部考核</string>
+    <string name="filter_exam_mode_exam">仅考试</string>
+    <string name="filter_exam_mode_inspect">仅考查</string>
+    <string name="title_course_archive">课程档案</string>
+    <string name="section_course_basic">课程基础与属性归属</string>
+    <string name="section_course_credits_score">学分与考核成绩</string>
+    <string name="section_course_schedule_exam">学期进程与考务状态</string>
+    <string name="field_course_code">课程编号</string>
+    <string name="field_course_name">课程名称</string>
+    <string name="field_college">开课院系</string>
+    <string name="field_category">课程类别</string>
+    <string name="field_nature">课程性质</string>
+    <string name="field_attribute">课程属性</string>
+    <string name="field_course_type">课程类型</string>
+    <string name="field_course_belonging">课程归属</string>
+    <string name="field_is_credit_earned">是否获得学分</string>
+    <string name="field_exam_type">考核方式</string>
+    <string name="field_plan_credit">计划学分</string>
+    <string name="field_rpxf">人培学分</string>
+    <string name="field_earned_credit">获得学分</string>
+    <string name="field_score">最高成绩</string>
+    <string name="field_gpa">单科绩点</string>
+    <string name="field_status">修读状态</string>
+    <string name="field_allowed_semester">允许修读学期</string>
+    <string name="field_grade_semester">成绩学年学期</string>
+    <string name="field_study_nature">修读性质</string>
+    <string name="field_is_makeup">是否补考</string>
+    <string name="field_special_grade">特殊成绩标志</string>
+    <string name="field_remark">备注 / 成绩说明</string>
+    <string name="format_credits_val">%1$s 学分</string>
+    <string name="format_score_val">%1$s 分</string>
 
     <!-- 图书馆借阅模块 -->
     <string name="item_library_borrow">图书馆借阅</string>
     <string name="desc_library_borrow">当前在借图书、一键续借、借阅历史足迹</string>
     <string name="title_library_borrow">图书馆借阅</string>
+    <string name="item_library_seat">图书馆座位预约</string>
+    <string name="desc_library_seat">在线座位预约、楼层选座、签到与使用状态</string>
+    <string name="title_library_seat">图书馆座位预约</string>
+    <string name="status_fetching_webapp_token">正在获取统一身份认证访问凭证...</string>
+    <string name="title_load_failed">页面加载失败</string>
+    <string name="action_exit">退出</string>
     <string name="loading_library_data">正在连接图书馆系统...</string>
     <string name="default_reader_name">读者</string>
     <string name="tab_current_borrows">当前在借</string>
@@ -502,6 +550,7 @@
     <string name="err_webvpn_connect_failed">WebVPN 连接失败，请检查网络后重试</string>
     <string name="err_auto_login_failed_check_creds">自动登录失败，请检查账号或密码</string>
     <string name="err_campus_direct_failed">校园网直连失败，请确认已连接校园网</string>
+    <string name="err_unified_auth_direct_failed">直连统一认证失败，请检查网络后重试</string>
     <string name="err_login_failed_check_creds">登录失败，请检查学号或密码后重试</string>
     <string name="err_get_login_params_failed">无法获取登录参数，请重试</string>
     <string name="err_otp_login_failed">动态码登录失败，请检查验证码</string>
@@ -525,10 +574,214 @@
     <string name="status_probing_campus_network">正在探测校园网络环境...</string>
     <string name="status_campus_detected_connecting">已检测到校园网，正在直连教务系统...</string>
     <string name="status_not_campus_routing_webvpn">未处于校园网，正在通过 WebVPN 接入...</string>
+    <string name="title_off_campus_detected">未处于校园网</string>
+    <string name="desc_off_campus_detected">当前未连接校园 Wi-Fi 或校内网络，校外访问建议使用 WebVPN 接入。</string>
+    <string name="hint_off_campus_choose_access">请选择网络接入方式：</string>
+    <string name="status_probing_campus_after_vpn_fail">WebVPN 门禁已失效，正在探测校园网...</string>
     <string name="hint_choose_access_method_direct">也可直接选择接入方式 (跳过检测)：</string>
     <string name="label_campus_direct_on_campus">校园网直连 (校内)</string>
     <string name="desc_campus_direct_guide">连接了学校 Wi-Fi 或有线网络</string>
     <string name="label_webvpn_off_campus">WebVPN 访问 (校外)</string>
     <string name="desc_webvpn_guide">在校外使用手机流量或家庭宽带</string>
     <string name="toast_session_saved_no_relogin">会话已保存，后续同步无需重新登录</string>
+
+    <!-- 学生选课 -->
+    <string name="item_course_selection">学生选课</string>
+    <string name="desc_course_selection">教务选课 / 退课，仅支持校园网环境</string>
+    <string name="title_course_selection">学生选课</string>
+    <string name="cs_disclaimer_title">使用前请阅读</string>
+    <string name="cs_disclaimer_untested">本功能尚未经过充分测试，欢迎反馈问题与建议</string>
+    <string name="cs_disclaimer_campus_only">当前仅支持校园网（校内网络）环境使用，校外 / WebVPN 暂不可用</string>
+    <string name="cs_disclaimer_body">本功能直接调用学校教务系统接口，选课 / 退课结果会真实写入教务系统，并受学校选课规则（容量、时间冲突、学分上限、批次开放时间等）约束。\n\n请注意：\n1. 本功能仅供个人学习使用，请勿用于任何商业或违规用途；\n2. 因网络波动、接口调整或操作失误导致的一切后果由使用者自行承担；\n3. 最终结果以学校教务系统为准，请在操作后自行核对。</string>
+    <string name="cs_disclaimer_agree">同意并继续</string>
+    <string name="cs_disclaimer_agree_countdown">同意（%1$d）</string>
+    <string name="cs_disclaimer_disagree">不同意</string>
+    <string name="cs_tab_classes">可选课程</string>
+    <string name="cs_tab_selected">已选课程</string>
+    <string name="cs_search_hint">课程名称 / 教师</string>
+    <string name="cs_filter_full">过滤已满</string>
+    <string name="cs_filter_conflict">过滤冲突</string>
+    <string name="cs_empty_no_batch">当前没有开放的选课批次</string>
+    <string name="cs_loading_campus_hint">正在加载，请确保已连接校园网</string>
+    <string name="cs_empty_classes">该批次暂无可选教学班</string>
+    <string name="cs_empty_selected">暂无已选课程</string>
+    <string name="cs_unsupported_batch">暂不支持</string>
+    <string name="format_cs_quota">%1$s/%2$s</string>
+    <string name="cs_tag_full">已满</string>
+    <string name="cs_tag_conflict">时间冲突</string>
+    <string name="cs_tag_partial_conflict">部分冲突</string>
+    <string name="cs_tag_selected">已选</string>
+    <string name="cs_tag_waitlist">已候补</string>
+    <string name="cs_action_select">选课</string>
+    <string name="cs_action_drop">退课</string>
+    <string name="cs_action_enroll">报名</string>
+    <string name="cs_action_cancel_enroll">取消报名</string>
+    <string name="cs_action_waitlist">候补</string>
+    <string name="cs_action_cancel_waitlist">取消候补</string>
+    <string name="cs_confirm_select_title">确认选课</string>
+    <string name="cs_confirm_select_msg">确定选择「%1$s」？</string>
+    <string name="cs_confirm_drop_title">确认退课</string>
+    <string name="cs_confirm_drop_msg">确定退掉「%1$s」？</string>
+    <string name="cs_confirm_ok">确定</string>
+    <string name="cs_op_success">操作成功</string>
+    <string name="cs_op_failed">操作失败：%1$s</string>
+    <string name="cs_detail_title">教学班详情</string>
+    <string name="cs_detail_class_time">上课时间</string>
+    <string name="cs_detail_quota">选课人数 / 额度</string>
+    <string name="cs_detail_campus">开课校区</string>
+    <string name="cs_detail_jxms">教学模式</string>
+    <string name="cs_detail_jxbzc">教学班组成</string>
+    <string name="cs_detail_bz">备注</string>
+    <string name="cs_retake_pick_course">请选择要重修的课程</string>
+
+    <!-- 选课 Mock 测试模式 -->
+    <string name="cs_mock_badge">MOCK</string>
+    <string name="cs_mock_enabled">已进入 Mock 测试模式</string>
+    <string name="cs_mock_disabled">已退出 Mock 测试模式</string>
+    <string name="cs_mock_banner">Mock 测试模式：数据为本地模拟，不会写入教务系统</string>
+    <string name="cs_mock_exit">退出 Mock</string>
+
+    <!-- 账号与凭据管理 -->
+    <string name="item_credential_management">账号与凭据</string>
+    <string name="desc_credential_management">查看、验证与清理登录密码和会话</string>
+    <string name="title_credential_management">账号与凭据</string>
+    <string name="section_credential_verify">验证</string>
+    <string name="item_auto_verify">自动验证会话</string>
+    <string name="desc_auto_verify">进入本页时自动联网核验各服务的登录态；关闭后仅显示本地状态</string>
+    <string name="action_verify_now">立即验证</string>
+    <string name="desc_verify_now">手动核验全部服务的会话有效性</string>
+    <string name="service_unified_auth">统一认证</string>
+    <string name="service_jiaowu">教务系统</string>
+    <string name="service_library">图书馆</string>
+    <string name="service_webvpn">WebVPN</string>
+    <string name="service_campus_card">一卡通</string>
+    <string name="service_webdav">WebDAV</string>
+    <string name="desc_campus_card_future">该服务尚未接入，敬请期待</string>
+    <string name="label_credential_account">账号</string>
+    <string name="item_session">会话</string>
+    <string name="item_password">密码</string>
+    <string name="item_twfid">TWFID</string>
+    <string name="label_new_password">新密码</string>
+    <string name="label_webdav_server">服务器地址</string>
+    <string name="label_webdav_username">用户名</string>
+    <string name="action_clear">清除</string>
+    <string name="action_clear_all_webdav">清除全部配置</string>
+    <string name="desc_clear_all_webdav">移除地址、用户名与密码</string>
+    <string name="status_saved">已保存</string>
+    <string name="status_not_saved">未保存</string>
+    <string name="status_follow_unified_auth">跟随统一认证</string>
+    <string name="status_verifying">验证中…</string>
+    <string name="status_session_valid">会话有效</string>
+    <string name="status_session_expired">已失效</string>
+    <string name="status_not_logged_in">未登录</string>
+    <string name="status_not_available">未接入</string>
+    <string name="status_session_unknown">无法判定</string>
+    <string name="status_not_verified">未验证</string>
+    <string name="dialog_reset_password_title">重设%1$s密码</string>
+    <string name="dialog_clear_confirm_title">确认清除</string>
+    <string name="msg_clear_password_confirm">确定清除【%1$s】保存的密码？清除后下次登录需重新输入。</string>
+    <string name="msg_clear_token_confirm">确定清除【%1$s】的网关通行证？</string>
+    <string name="msg_clear_session_confirm">确定清除【%1$s】的当前会话？将尝试退出登录并清除本地凭据，相关功能需重新登录。</string>
+    <string name="msg_clear_all_confirm">确定清除【%1$s】的全部凭据（密码、token 与会话）？将尝试退出登录后再清除。</string>
+    <string name="action_edit">编辑</string>
+    <string name="label_advanced_mode">高级</string>
+    <string name="status_not_set_account">未设置</string>
+    <string name="label_account_name">名称</string>
+    <string name="dialog_rename_account_title">修改账号名称</string>
+    <string name="dialog_edit_twfid_title">编辑 TWFID</string>
+    <string name="item_session_credentials">会话凭据</string>
+    <string name="status_no_credentials">无凭据</string>
+    <string name="item_webvpn_mode">使用 WebVPN</string>
+    <string name="desc_webvpn_mode">校外访问时开启；登录与同步将经过 WebVPN 门禁</string>
+    <string name="item_login">登录</string>
+    <string name="desc_login_service">重新登录以更新该服务的授权状态</string>
+    <string name="err_no_valid_credentials">无有效凭据，请先用「登录同步」完成登录</string>
+    <string name="err_need_unified_auth_session">尚无有效统一认证凭据，请先用统一认证密码登录一次</string>
+    <string name="action_go_to_credential_management">前往账号与凭据</string>
+    <string name="action_sync_short">同步</string>
+
+    <!-- 登录 Sheet 标题（随唤起场景） -->
+    <string name="title_login_unified_auth">统一认证登录</string>
+    <string name="title_login_jiaowu">教务系统登录</string>
+    <string name="title_login_library">图书馆登录</string>
+    <string name="title_login_webvpn">WebVPN 登录</string>
+    <string name="title_login_course_selection">选课登录</string>
+    <string name="title_login_free_classroom">空教室登录</string>
+    <string name="title_login_grade">成绩查询登录</string>
+    <string name="title_login_academic">学业进程登录</string>
+    <string name="action_set">设置</string>
+    <string name="label_more_settings">更多设置</string>
+
+    <!-- 桌面长按快捷方式 -->
+    <string name="shortcut_short_qr_scan">扫一扫</string>
+    <string name="shortcut_short_campus_card">一卡通</string>
+    <string name="item_qr_scan">扫一扫</string>
+    <string name="desc_qr_scan">扫描统一认证登录二维码，确认电脑端登录</string>
+    <string name="title_qr_scan">扫一扫</string>
+    <string name="a11y_qr_scan_photo">从图片中识别二维码</string>
+    <string name="qr_scan_photo_no_code">图片里没找到二维码</string>
+    <string name="a11y_qr_scan_engine">扫描引擎</string>
+    <string name="qr_scan_engine_mlkit">ML Kit（默认）</string>
+    <string name="qr_scan_engine_zxing">ZXing（备用）</string>
+    <string name="qr_scan_hint_align">将二维码放入取景框内</string>
+    <string name="qr_scan_permission_title">需要相机权限</string>
+    <string name="qr_scan_permission_desc">扫码需要使用相机，请在系统设置中授予相机权限</string>
+    <string name="action_qr_scan_grant">授予权限</string>
+    <string name="action_qr_scan_open_settings">打开系统设置</string>
+    <string name="qr_scan_scanned_title">已扫描</string>
+    <string name="qr_scan_confirm_hint">确认后，电脑端将登录你的账号</string>
+    <string name="qr_scan_confirming">正在确认…</string>
+    <string name="action_qr_scan_confirm">确认登录</string>
+    <string name="action_qr_scan_rescan">重新扫描</string>
+    <string name="qr_scan_success_title">登录已确认</string>
+    <string name="qr_scan_success_desc">电脑端已完成登录</string>
+    <string name="action_qr_scan_done">完成</string>
+    <string name="action_continue_scan">继续扫码</string>
+    <string name="qr_scan_need_login_title">未登录统一认证</string>
+    <string name="qr_scan_need_login_desc">扫码确认需要本机已登录统一认证</string>
+    <string name="action_qr_scan_login">去登录</string>
+    <string name="qr_scan_err_not_cas">不是统一认证登录二维码，请继续扫描</string>
+    <string name="qr_scan_err_expired">二维码已失效，请在电脑上刷新</string>
+    <string name="qr_scan_err_network">网络异常，请重试</string>
+    <string name="action_qr_scan_retry">重试</string>
+    <string name="qr_scan_tls_prompt">证书校验异常，是否信任并继续？</string>
+
+    <string name="title_login_campus_card">登录一卡通</string>
+    <string name="desc_campus_card_app">余额流水、卡片管理与生活缴费</string>
+    <string name="credential_sync_campus_card_success">一卡通登录成功</string>
+    <string name="credential_sync_campus_card_failed">一卡通登录失败：%1$s</string>
+    <string name="webapp_scan_hint">对准设备上的二维码即可自动扫描</string>
+    <string name="title_ujing_water">U净饮水</string>
+    <string name="ujing_water_connecting">正在连接饮水机...</string>
+    <string name="ujing_water_dispensing">正在取水</string>
+    <string name="ujing_water_realtime_connected">长连接实时推送中</string>
+    <string name="ujing_water_order_info">订单明细</string>
+    <string name="ujing_water_hot_amount">热水用量</string>
+    <string name="ujing_water_warm_amount">温水用量</string>
+    <string name="ujing_water_cost">扣费金额</string>
+    <string name="ujing_water_pay_type">支付方式</string>
+    <string name="ujing_water_order_no">订单编号</string>
+    <string name="ujing_water_action_hint">请在饮水机按键接水，接水完毕后将自动结算</string>
+    <string name="ujing_water_finished_title">取水已完成</string>
+    <string name="ujing_water_repeat">再接一杯</string>
+    <string name="dialog_ujing_hairdryer_title">提示</string>
+    <string name="dialog_ujing_hairdryer_message">当前吹风机设备不支持一卡通扫码，请使用微信、支付宝、云闪付等扫码\n若信息有误请提交开发者</string>
+    <string name="dialog_ujing_washer_offline_title">设备离线</string>
+    <string name="dialog_ujing_washer_offline_message">该洗衣机设备当前已离线，暂无法下单使用。</string>
+    <string name="ujing_washer_checking">正在核验洗衣机状态...</string>
+    <string name="ujing_alipay_not_installed">未找到可处理支付宝请求的应用</string>
+
+    <!-- 语言设置（上游同步：语言 Tag 数组 + 语言显示名称数组，跟随系统用空 tag 表示） -->
+    <string-array name="language_tags">
+        <item>zh-CN</item>
+        <item>zh-TW</item>
+        <item>en</item>
+    </string-array>
+
+    <string-array name="language_names">
+        <item>简体中文</item>
+        <item>繁體中文</item>
+        <item>English</item>
+    </string-array>
+
 </resources>

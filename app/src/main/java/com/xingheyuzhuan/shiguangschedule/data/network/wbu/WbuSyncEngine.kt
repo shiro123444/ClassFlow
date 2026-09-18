@@ -3,6 +3,7 @@ package com.xingheyuzhuan.shiguangschedule.data.network.wbu
 import android.content.Context
 import android.util.Base64
 import android.util.Log
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
 import com.xingheyuzhuan.shiguangschedule.data.db.main.Course
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWithWeeks
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWeek
@@ -70,6 +71,40 @@ enum class QrStatus {
     CONFIRM,
     SUCCESS,
     EXPIRED,
+    ERROR
+}
+
+/**
+ * 扫码端（本机当「已登录的手机」）扫描他人二维码的结果。
+ */
+enum class QrScanOutcome {
+    /** 已扫描：被扫码端 getStatus 变为 2，等待本机确认。 */
+    SCANNED,
+
+    /** 本机没有有效的统一认证会话，需先登录。 */
+    NEED_LOGIN,
+
+    /** 二维码已失效。 */
+    EXPIRED,
+
+    /** 网络异常等无法判定。 */
+    ERROR
+}
+
+/**
+ * 扫码端确认登录的结果。
+ */
+enum class QrConfirmOutcome {
+    /** 已确认：被扫码端 getStatus 变为 1，随后可自行换 ST 完成登录。 */
+    CONFIRMED,
+
+    /** 本机没有有效的统一认证会话，需先登录。 */
+    NEED_LOGIN,
+
+    /** 二维码已失效。 */
+    EXPIRED,
+
+    /** 网络异常等无法判定。 */
     ERROR
 }
 
@@ -220,6 +255,20 @@ class WbuSyncEngine(
         password: String,
         captchaProvider: SliderCaptchaProvider? = null,
         authMode: WbuAuthMode = WbuAuthMode.UNIFIED_CAS
+    ): Boolean = try {
+        val ok = loginInternal(studentId, password, captchaProvider, authMode)
+        if (ok) transport.commitNewLoginSession() else transport.rollbackNewLoginSession()
+        ok
+    } catch (e: Exception) {
+        transport.rollbackNewLoginSession()
+        throw e
+    }
+
+    private suspend fun loginInternal(
+        studentId: String,
+        password: String,
+        captchaProvider: SliderCaptchaProvider? = null,
+        authMode: WbuAuthMode = WbuAuthMode.UNIFIED_CAS
     ): Boolean = withContext(Dispatchers.IO) {
         lastLocalLoginNetworkError = false
         // 每次启动全新登录前，清理旧的历史会话凭据（保留手动 TWFID），确保必须重新认证一次且不受残留干扰
@@ -232,7 +281,7 @@ class WbuSyncEngine(
             }
             if (success) {
                 prefs.edit()
-                    .putString(WbuAuthTransport.prefKeyLastStudentId(), studentId)
+                    .putString(WbuAuthTransport.prefKeyLastStudentId(context), studentId)
                     .putBoolean(KEY_LAST_USE_VPN, useVpn)
                     .putBoolean(KEY_LAST_USE_VPN_SET, true)
                     .apply()
@@ -241,6 +290,101 @@ class WbuSyncEngine(
             return@withContext success
         } catch (e: Exception) {
             Log.e("WbuSyncEngine", "Login failed", e)
+            lastLocalLoginNetworkError = true
+            false
+        }
+    }
+
+    /**
+     * 「仅登录统一认证 + 直连」时强制走公网统一认证基址，避免请求落到 WebVPN 代理域名
+     * （代理域名必须依赖 TWFID 隧道）。其余情况返回 null，沿用「统一认证经过WebVPN」等偏好。
+     */
+    private fun casOnlyAuthBaseOverride(unifiedAuthOnly: Boolean): String? =
+        if (unifiedAuthOnly && !useVpn) transport.idsPublicBase else null
+
+    /**
+     * 仅登录统一认证（CASTGC）：全程不触碰教务系统(/admin)，也不涉及校园网。
+     *
+     * 与 [login] / [loginVpnFull] 的区别：
+     * - 只重置统一认证会话，保留既有教务/图书馆会话（[WbuAuthTransport.startNewUnifiedAuthLoginSession]）；
+     * - CAS 的 service 固定为同源个人中心且不消费 ticket，成功即 CASTGC 就绪，不再换取教务会话；
+     * - 不写全局「网络接入模式」偏好（该偏好只描述教务/图书馆等校园服务的接入方式）。
+     *
+     * @param viaWebVpn true = 先打通 WebVPN 门禁（TWFID 校验 → 门户密码 / 短信）再经代理域名登录；
+     *                  false = 直连公网统一认证（不建隧道、不校验 WebVPN）。
+     */
+    suspend fun loginUnifiedAuthOnly(
+        studentId: String,
+        password: String,
+        viaWebVpn: Boolean,
+        flowTag: String,
+        vpnPasswordProvider: (suspend () -> String?)? = null,
+        smsCodeProvider: (suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?)? = null,
+        captchaProvider: SliderCaptchaProvider? = null
+    ): Boolean = try {
+        val ok = loginUnifiedAuthOnlyInternal(
+            studentId, password, viaWebVpn, flowTag, vpnPasswordProvider, smsCodeProvider, captchaProvider
+        )
+        if (ok) transport.commitNewLoginSession() else transport.rollbackNewLoginSession()
+        ok
+    } catch (e: Exception) {
+        transport.rollbackNewLoginSession()
+        throw e
+    }
+
+    private suspend fun loginUnifiedAuthOnlyInternal(
+        studentId: String,
+        password: String,
+        viaWebVpn: Boolean,
+        flowTag: String,
+        vpnPasswordProvider: (suspend () -> String?)?,
+        smsCodeProvider: (suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?)?,
+        captchaProvider: SliderCaptchaProvider?
+    ): Boolean = withContext(Dispatchers.IO) {
+        lastLocalLoginNetworkError = false
+        try {
+            // 只重置统一认证会话：既有教务/图书馆会话不受影响
+            transport.startNewUnifiedAuthLoginSession()
+
+            if (viaWebVpn) {
+                // 经 WebVPN：先打通门禁（有效 TWFID 直接放行；否则用密码 / 短信登录门户）
+                val provider = vpnPasswordProvider ?: return@withContext false
+                if (!ensureVpnTunnelReady(studentId, provider, smsCodeProvider)) return@withContext false
+            }
+
+            val authBase = if (viaWebVpn) transport.idsBase() else transport.idsPublicBase
+            val service = URLEncoder.encode(WbuAuthTransport.IDS_PERSON_CENTER_SERVICE, "UTF-8")
+            val idsLoginUrl = "$authBase/authserver/login?service=$service"
+            Log.i("WbuSyncEngine", "$flowTag 仅登录统一认证: base=$authBase viaWebVpn=$viaWebVpn")
+
+            // consumeTicket = false：同源个人中心 service，止于拿到 CASTGC，绝不被 302 带进教务
+            val result = cas.casPasswordLogin(
+                studentId = studentId,
+                password = password,
+                idsLoginUrl = idsLoginUrl,
+                flowTag = flowTag,
+                captchaProvider = captchaProvider,
+                clearAuthCookies = true,
+                consumeTicket = false
+            )
+            if (!result.success) {
+                lastLocalLoginFailure = result.failure
+                lastLocalLoginError = result.message
+                return@withContext false
+            }
+
+            val castgcReady = cookieStore.any { it.name == "CASTGC" && !it.value.isBlank() }
+            if (castgcReady) {
+                prefs.edit()
+                    .putString(WbuAuthTransport.prefKeyLastStudentId(context), studentId)
+                    .apply()
+                transport.persistCookieStore()
+            } else {
+                lastLocalLoginError = "登录成功但统一认证会话未就绪"
+            }
+            castgcReady
+        } catch (e: Exception) {
+            Log.e("WbuSyncEngine", "$flowTag 仅登录统一认证失败", e)
             lastLocalLoginNetworkError = true
             false
         }
@@ -255,12 +399,14 @@ class WbuSyncEngine(
 
     // ------------------- 对外透传（ids CAS 原语，UI 直接调用；教务 bootstrap 由引擎完成） -------------------
 
-    /** 发送动态码。 */
+    /** 发送动态码。[unifiedAuthOnly] 为「仅登录统一认证」：直连时强制公网基址、不牵动教务。 */
     suspend fun sendDynamicCode(
         studentId: String,
         flowTag: String,
-        captchaProvider: SliderCaptchaProvider?
-    ): DynamicCodeSendResult = cas.sendDynamicCode(studentId, flowTag, captchaProvider)
+        captchaProvider: SliderCaptchaProvider?,
+        unifiedAuthOnly: Boolean = false
+    ): DynamicCodeSendResult =
+        cas.sendDynamicCode(studentId, flowTag, captchaProvider, casOnlyAuthBaseOverride(unifiedAuthOnly))
 
     /**
      * 确保 WebVPN 网关隧道处于放行状态：
@@ -283,6 +429,7 @@ class WbuSyncEngine(
             if (portal.validateTwfid(currentTwfid)) {
                 Log.i("WbuSyncEngine", "ensureVpnTunnelReady: Valid TWFID present, skip WebVPN portal login")
                 portal.injectTwfid(currentTwfid)
+                persistCurrentTwfid()
                 return@withContext true
             } else {
                 Log.w("WbuSyncEngine", "ensureVpnTunnelReady: Existing TWFID invalid, clearing and prompting for password")
@@ -320,13 +467,24 @@ class WbuSyncEngine(
                     lastLocalLoginError = "WebVPN 短信验证码错误"
                     return@withContext false
                 }
+                persistCurrentTwfid()
                 true
             }
             is PortalLoginStep.PortalAuthenticated -> {
                 Log.i("WbuSyncEngine", "WebVPN portal authenticated successfully")
+                persistCurrentTwfid()
                 true
             }
         }
+    }
+
+    /**
+     * 门户登录成功后把 Cookie 罐里的 TWFID 回写偏好槽。
+     * 否则 TWFID 只存在于 Cookie 罐，账号页/登录弹窗读到的一直是空值。
+     */
+    private fun persistCurrentTwfid() {
+        val fresh = cookieStore.firstOrNull { it.name == "TWFID" && it.value.isNotBlank() }?.value
+        if (!fresh.isNullOrBlank()) WbuAuthTransport.setTwfid(context, fresh)
     }
 
     /**
@@ -361,38 +519,70 @@ class WbuSyncEngine(
         bootstrapJwxtSession(casResult.landingHtml)
     }
 
-    /** 仅获取动态码登录表单参数。 */
-    suspend fun obtainDynamicCodeForm(flowTag: String): AuthForm? =
-        cas.obtainDynamicCodeForm(flowTag, if (useVpn) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null)
+    /**
+     * 用已有凭据尝试建立教务会话（供「同步」图标按钮）：
+     * 1. WebVPN 模式下先校验 TWFID（失效/缺失 → 返回 false，由调用方引导 WebVPN 流程）；
+     * 2. 有 jw_uf → `checkSession` 验证有效性，有效即复用；
+     * 3. 否则用 CASTGC 走 ids 授权换教务会话。
+     */
+    suspend fun ensureJwxtSessionWithExistingCredentials(): Boolean = withContext(Dispatchers.IO) {
+        // 本地无任何可尝试的凭据时直接短路，避免白打两次请求
+        if (!WbuAuthTransport.hasLocalSession(context, CredentialService.JIAOWU)) return@withContext false
+        if (useVpn) {
+            val twfid = WbuAuthTransport.getTwfid(context)
+            if (twfid.isBlank()) return@withContext false
+            if (!WebVpnClient(transport).validateTwfid(twfid)) return@withContext false
+        }
+        val query = WbuQueryClient(context, useVpn)
+        if (runCatching { query.checkSession() }.getOrDefault(false)) return@withContext true
+        runCatching { exchangeCastgcForJwxtSession("SYNC") }.getOrDefault(false)
+    }
 
-    /** 用动态码完成登录（含教务会话引导与 WebVPN 门禁就绪检测）。 */
+    /** 仅获取动态码登录表单参数。[unifiedAuthOnly] 为「仅登录统一认证」：service 同源个人中心 + 直连强制公网基址。 */
+    suspend fun obtainDynamicCodeForm(flowTag: String, unifiedAuthOnly: Boolean = false): AuthForm? =
+        cas.obtainDynamicCodeForm(
+            flowTag,
+            if (useVpn || unifiedAuthOnly) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null,
+            casOnlyAuthBaseOverride(unifiedAuthOnly)
+        )
+
+    /** 用动态码完成登录（含教务会话引导与 WebVPN 门禁就绪检测）。[unifiedAuthOnly] 时只拿统一认证会话，不牵动教务。 */
     suspend fun dynamicCodeLogin(
         studentId: String,
         code: String,
         prep: AuthForm,
         flowTag: String,
         vpnPasswordProvider: (suspend () -> String?)? = null,
-        smsCodeProvider: (suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?)? = null
+        smsCodeProvider: (suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?)? = null,
+        unifiedAuthOnly: Boolean = false
     ): DynamicCodeLoginResult = withContext(Dispatchers.IO) {
-        // WebVPN 模式下：登录 IDS 时严格使用同源个人中心 service 且不跳转消费，防止未建网关时提前 302 撞入教务
-        val idsTarget = if (useVpn) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null
+        // WebVPN / 仅登录统一认证：登录 IDS 时严格使用同源个人中心 service 且不跳转消费，
+        // 防止未建网关时提前 302 撞入教务
+        val idsTarget = if (useVpn || unifiedAuthOnly) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null
         val result = cas.casDynamicCodeLogin(
             studentId = studentId,
             code = code,
             prep = prep,
             flowTag = flowTag,
             serviceTarget = idsTarget,
-            consumeTicket = !useVpn
+            consumeTicket = !useVpn && !unifiedAuthOnly,
+            authBaseOverride = casOnlyAuthBaseOverride(unifiedAuthOnly)
         )
         if (result.success) {
-            prefs.edit()
-                .putString(WbuAuthTransport.prefKeyLastStudentId(), studentId)
-                .putBoolean(KEY_LAST_USE_VPN, useVpn)
-                .putBoolean(KEY_LAST_USE_VPN_SET, true)
-                .apply()
+            val editor = prefs.edit()
+                .putString(WbuAuthTransport.prefKeyLastStudentId(context), studentId)
+            // 仅登录统一认证不改全局「网络接入模式」（该偏好只描述教务/图书馆等校园服务的接入方式）
+            if (!unifiedAuthOnly) {
+                editor.putBoolean(KEY_LAST_USE_VPN, useVpn).putBoolean(KEY_LAST_USE_VPN_SET, true)
+            }
+            editor.apply()
             transport.persistCookieStore()
 
-            if (useVpn) {
+            if (unifiedAuthOnly) {
+                // 只校验统一认证会话就绪，不换取教务会话
+                val castgcReady = cookieStore.any { it.name == "CASTGC" && !it.value.isBlank() }
+                DynamicCodeLoginResult(castgcReady, if (castgcReady) "" else "登录成功但统一认证会话未就绪")
+            } else if (useVpn) {
                 if (vpnPasswordProvider != null) {
                     val vpnReady = ensureVpnTunnelReady(studentId, vpnPasswordProvider, smsCodeProvider)
                     if (!vpnReady) {
@@ -411,37 +601,64 @@ class WbuSyncEngine(
         }
     }
 
-    /** 开始二维码登录。 */
-    suspend fun startQrLogin(flowTag: String): QrSession? =
-        cas.startQrLogin(flowTag, if (useVpn) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null)
+    /** 开始二维码登录。[unifiedAuthOnly] 为「仅登录统一认证」：service 同源个人中心 + 直连强制公网基址。 */
+    suspend fun startQrLogin(flowTag: String, unifiedAuthOnly: Boolean = false): QrSession? =
+        cas.startQrLogin(
+            flowTag,
+            if (useVpn || unifiedAuthOnly) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null,
+            casOnlyAuthBaseOverride(unifiedAuthOnly)
+        )
 
     /** 轮询二维码状态。 */
     suspend fun pollQrStatus(session: QrSession): QrStatus = cas.pollQrStatus(session)
 
-    /** 扫码确认后完成登录（含教务会话引导与 WebVPN 门禁就绪检测）。 */
+    /** 扫码端：扫描他人展示的统一认证登录二维码。 */
+    suspend fun scanPeerQrCode(uuid: String): QrScanOutcome = cas.scanPeerQrCode(uuid, "CAS_QR_SCAN")
+
+    /** 扫码端：确认登录。 */
+    suspend fun confirmPeerQrCode(uuid: String): QrConfirmOutcome = cas.confirmPeerQrCode(uuid, "CAS_QR_SCAN")
+
+    /** 是否已持有统一认证会话（轻量，仅查本地 CASTGC，不发请求）。 */
+    fun hasUnifiedAuthSession(): Boolean {
+        transport.restoreCookieStore()
+        return transport.cookieStore.any { it.name == "CASTGC" && it.value.isNotBlank() }
+    }
+
+    /** 扫码确认后完成登录（含教务会话引导与 WebVPN 门禁就绪检测）。[unifiedAuthOnly] 时只拿统一认证会话，不牵动教务。 */
     suspend fun completeQrLogin(
         session: QrSession,
         flowTag: String,
         vpnPasswordProvider: (suspend () -> String?)? = null,
-        smsCodeProvider: (suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?)? = null
+        smsCodeProvider: (suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?)? = null,
+        unifiedAuthOnly: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
-        // WebVPN 模式下：登录 IDS 时严格使用同源个人中心 service 且不跳转消费
-        val idsTarget = if (useVpn) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null
-        val result = cas.casCompleteQrLogin(session, serviceTarget = idsTarget, consumeTicket = !useVpn)
+        // WebVPN / 仅登录统一认证：登录 IDS 时严格使用同源个人中心 service 且不跳转消费
+        val idsTarget = if (useVpn || unifiedAuthOnly) WbuAuthTransport.IDS_PERSON_CENTER_SERVICE else null
+        val result = cas.casCompleteQrLogin(
+            session,
+            serviceTarget = idsTarget,
+            consumeTicket = !useVpn && !unifiedAuthOnly
+        )
         if (result.success) {
             // 获取真实学号始终使用个人中心同源 service
             val resolvedSid = cas.fetchStudentIdFromCas()
             if (!resolvedSid.isNullOrBlank()) {
                 lastResolvedStudentId = resolvedSid
-                prefs.edit().putString(WbuAuthTransport.prefKeyLastStudentId(), resolvedSid).apply()
+                prefs.edit().putString(WbuAuthTransport.prefKeyLastStudentId(context), resolvedSid).apply()
             }
-            prefs.edit()
-                .putBoolean(KEY_LAST_USE_VPN, useVpn)
-                .putBoolean(KEY_LAST_USE_VPN_SET, true)
-                .apply()
+            // 仅登录统一认证不改全局「网络接入模式」（该偏好只描述教务/图书馆等校园服务的接入方式）
+            if (!unifiedAuthOnly) {
+                prefs.edit()
+                    .putBoolean(KEY_LAST_USE_VPN, useVpn)
+                    .putBoolean(KEY_LAST_USE_VPN_SET, true)
+                    .apply()
+            }
             transport.persistCookieStore()
 
-            if (useVpn) {
+            if (unifiedAuthOnly) {
+                // 只校验统一认证会话就绪，不换取教务会话
+                cookieStore.any { it.name == "CASTGC" && !it.value.isBlank() }
+            } else if (useVpn) {
                 if (vpnPasswordProvider != null) {
                     val vpnReady = ensureVpnTunnelReady(resolvedSid.orEmpty(), vpnPasswordProvider, smsCodeProvider)
                     if (!vpnReady) {
@@ -466,6 +683,25 @@ class WbuSyncEngine(
      * @param vpnPassword 当 authMode 为 JYXT_LEGACY 且未配置 TWFID 时，用于连接 WebVPN 的统一认证密码；若为 null 则默认尝试使用 password。
      */
     suspend fun loginVpnFull(
+        studentId: String,
+        password: String,
+        smsCodeProvider: suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?,
+        captchaProvider: SliderCaptchaProvider? = null,
+        statusCallback: ((VpnFullLoginStatus) -> Unit)? = null,
+        authMode: WbuAuthMode = WbuAuthMode.UNIFIED_CAS,
+        vpnPassword: String? = null
+    ): Boolean = try {
+        val ok = loginVpnFullInternal(
+            studentId, password, smsCodeProvider, captchaProvider, statusCallback, authMode, vpnPassword
+        )
+        if (ok) transport.commitNewLoginSession() else transport.rollbackNewLoginSession()
+        ok
+    } catch (e: Exception) {
+        transport.rollbackNewLoginSession()
+        throw e
+    }
+
+    private suspend fun loginVpnFullInternal(
         studentId: String,
         password: String,
         smsCodeProvider: suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?,
@@ -553,11 +789,12 @@ class WbuSyncEngine(
         val ok = vpnLoginTail(vpnStudentId, password, captchaProvider, authMode, statusCallback)
         if (ok) {
             prefs.edit()
-                .putString(WbuAuthTransport.prefKeyLastStudentId(), vpnStudentId)
+                .putString(WbuAuthTransport.prefKeyLastStudentId(context), vpnStudentId)
                 .putBoolean(KEY_LAST_USE_VPN, true)
                 .putBoolean(KEY_LAST_USE_VPN_SET, true)
                 .apply()
             transport.persistCookieStore()
+            persistCurrentTwfid()
         }
         return ok
     }
@@ -1135,11 +1372,11 @@ class WbuSyncEngine(
                 client.newCall(Request.Builder().url("$baseUrl/admin").get().build()).execute().use { resp -> }
                 cookieStore.firstOrNull { it.name == "username" }?.value
                     ?.takeIf { it.isNotBlank() }
-                    ?.let { prefs.edit().putString(WbuAuthTransport.prefKeyLastStudentId(), it).apply() }
+                    ?.let { prefs.edit().putString(WbuAuthTransport.prefKeyLastStudentId(context), it).apply() }
             }
             return
         }
-        prefs.edit().putString(WbuAuthTransport.prefKeyLastStudentId(), sid).apply()
+        prefs.edit().putString(WbuAuthTransport.prefKeyLastStudentId(context), sid).apply()
         lastResolvedStudentId = sid
         Log.d("WbuSyncEngine", "Resolved student id from username cookie: $sid")
     }

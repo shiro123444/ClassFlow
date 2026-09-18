@@ -33,6 +33,7 @@ sealed interface Destination : NavKey {
     @Serializable data object CourseTableConversion : Destination
     @Serializable data object NotificationSettings : Destination
     @Serializable data object MoreOptions : Destination
+    @Serializable data object LanguageSettings : Destination
     @Serializable data object OpenSourceLicenses : Destination
     @Serializable data object UpdateRepo : Destination
     @Serializable data object QuickActions : Destination
@@ -51,6 +52,9 @@ sealed interface Destination : NavKey {
     @Serializable data object FreeClassroomQuery : Destination
     @Serializable data object AcademicProgress : Destination
     @Serializable data object LibraryBorrow : Destination
+    @Serializable data object CredentialManagement : Destination
+    @Serializable data object CourseSelection : Destination
+    @Serializable data object QrScan : Destination
 
     // --- 动态传参页面 ---
 
@@ -66,6 +70,19 @@ sealed interface Destination : NavKey {
     data class WebView(
         val initialUrl: String? = "about:blank",
         val assetJsPath: String? = null
+    ) : Destination
+
+    @Serializable
+    data class WebApp(
+        val appId: String,
+        val initialTargetUrl: String? = null,
+        val pendingAutoScan: String? = null
+    ) : Destination
+
+    @Serializable
+    data class UjingWater(
+        val cd: String,
+        val scanId: Long = 0L
     ) : Destination
 
     @Serializable

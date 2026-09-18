@@ -44,19 +44,33 @@ data class AcademicProgressSummary(
 )
 
 /**
- * 课程节点明细
+ * 课程节点明细（包含官方 17 项全字段档案与考核方式）
  */
 data class AcademicCourse(
     val courseCode: String = "",            // kcbh (课程编号)
     val courseName: String = "",            // kcmc (课程名称)
-    val college: String = "",               // kkyx (开课学院)
+    val college: String = "",               // kkyx / kkyxmc (开课学院)
     val planCredit: Double = 0.0,           // xf (额定/计划学分)
+    val rpxf: Double = 0.0,                 // rpxf (人培学分)
     val earnedCredit: Double = 0.0,         // hdxf (已获学分)
     val category: String = "",              // kclb (课程类别，如 集中性实践环节)
+    val courseType: String = "",            // kclx (课程类型，如 普通 / 本校本科生课)
+    val courseBelonging: String = "",       // kcgs (课程归属，如 普通课 / 实验课)
     val nature: String = "",                // kcxz (课程性质，如 专业必修课)
-    val score: String = "",                 // zhcj (综合成绩)
-    val gpa: String = "",                   // jd (单科绩点)
-    val status: String = ""                 // wczt (修读状态: "已修" / "已选课，未录成绩" / "未修")
+    val courseAttribute: String = "",       // kcsx / xxbx (课程属性，如 必修 / 选修)
+    val isElective: Boolean = false,        // 是否为选修课程
+    val examType: String = "",              // 考核方式全称 ("考试" / "考查")
+    val examTag: String = "",               // 考核方式单字标签 ("试" / "查")
+    val creditEarned: String = "",          // sfhdxf (是否获得学分: 是 / 否)
+    val score: String = "",                 // zgcj / zhcj (最高/综合成绩)
+    val gpa: String = "",                   // jd (单科绩点/结点)
+    val status: String = "",                // wczt (修读状态: "已修" / "已选课，未录成绩" / "未修")
+    val allowedSemester: String = "",       // yxxdxnxq / jyxdxq (允许修读学年学期)
+    val gradeSemester: String = "",         // cjxnxq / xnxq (成绩录入学年学期)
+    val studyNature: String = "",           // xdxz (修读性质: 初修 / 重修)
+    val isMakeup: String = "",              // sfbk (是否补考: 是 / 否)
+    val specialGrade: String = "",          // tscjzwmc (特殊成绩标志)
+    val remark: String = ""                 // bz / cjfxms (备注/成绩说明)
 ) {
     val isCompleted: Boolean get() = status == "已修"
     val isStudying: Boolean get() = status.contains("已选课") || status.contains("未录")

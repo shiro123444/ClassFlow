@@ -32,14 +32,21 @@ android {
         ?: System.getenv("CLASSFLOW_UPDATE_API_URL")
         ?: ""
 
+    val ujingNfcHost: String = (project.findProperty("CLASSFLOW_UJING_NFC_HOST") as? String)
+        ?: localProperties.getProperty("CLASSFLOW_UJING_NFC_HOST")
+        ?: System.getenv("CLASSFLOW_UJING_NFC_HOST")
+        ?: "ujing_test.wbu.edu.cn"
+
     defaultConfig {
         applicationId = "com.shiro.classflow"
         minSdk = 26
         targetSdk = 37
-        versionCode = 17
-        versionName = "1.1.1"
+        versionCode = 18
+        versionName = "1.1.2"
 
         buildConfigField("String", "UPDATE_API_URL", "\"$updateApiUrl\"")
+        buildConfigField("String", "UJING_NFC_HOST", "\"$ujingNfcHost\"")
+        manifestPlaceholders["ujingNfcHost"] = ujingNfcHost
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -154,6 +161,11 @@ dependencies {
     implementation(libs.okhttp)
     debugImplementation(libs.okhttp.logging.interceptor)
     implementation(libs.zxing.core)
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.mlkit.barcode.scanning)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     implementation(libs.jgit)

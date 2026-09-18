@@ -29,23 +29,18 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.xingheyuzhuan.shiguangschedule.R
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AuthForm
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.DynamicCodeSendResult
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.QrStatus
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaData
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaResult
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuLoginMethod
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
+import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import com.xingheyuzhuan.shiguangschedule.ui.settings.coursetables.ManageCourseTablesViewModel
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * 通用 WBU 教务直连一键导入课表流程组件。
- * 包含身份认证弹窗 (WbuAuthBottomSheet)、扫码轮询、滑块验证码、短信验证码、
- * 学期选择器 (SemesterPickerDialog)、重复/多教师冲突课程处理，并在完成后自动新建与切换课表。
+ * 通用 WBU 教务课表导入流程组件。
+ *
+ * 登录部分复用 [WbuCampusAuthSheet]（内建 WebVPN 门户登录、短信二次验证、滑块验证码与二维码），
+ * 本组件只负责导入管线、学期选择器与重复/多教师冲突课程处理。
  */
 @Composable
 fun WbuCourseImportSheet(
@@ -60,19 +55,6 @@ fun WbuCourseImportSheet(
     var isImporting by remember { mutableStateOf(false) }
     var importStatusMessage by remember { mutableStateOf("") }
     var importErrorMessage by remember { mutableStateOf("") }
-    var importMethod by remember { mutableStateOf(WbuLoginMethod.PASSWORD) }
-    var qrImportState by remember { mutableStateOf<QrUiState?>(null) }
-    var qrJob by remember { mutableStateOf<Job?>(null) }
-    var captchaDialogData by remember { mutableStateOf<SliderCaptchaData?>(null) }
-    var captchaDeferred by remember { mutableStateOf<CompletableDeferred<SliderCaptchaResult?>?>(null) }
-    var smsDialogPhone by remember { mutableStateOf<String?>(null) }
-    var smsDeferred by remember { mutableStateOf<CompletableDeferred<String?>?>(null) }
-    var smsError by remember { mutableStateOf<String?>(null) }
-    var smsVerifying by remember { mutableStateOf(false) }
-    var smsDialogIsStillValid by remember { mutableStateOf(false) }
-    var smsDialogSendInterval by remember { mutableStateOf(60) }
-    var smsDialogPromptText by remember { mutableStateOf("") }
-    var dynamicPrep by remember { mutableStateOf<AuthForm?>(null) }
 
     var semesterOptions by remember { mutableStateOf<List<WbuSyncEngine.WbuSemesterOption>>(emptyList()) }
     var semesterCurrentXnxq by remember { mutableStateOf<String?>(null) }
@@ -83,9 +65,6 @@ fun WbuCourseImportSheet(
 
     DisposableEffect(Unit) {
         onDispose {
-            qrJob?.cancel()
-            captchaDeferred?.complete(SliderCaptchaResult.Cancel)
-            smsDeferred?.complete(null)
             semesterSelectDeferred?.complete(null)
             duplicateDeferred?.complete(null)
         }
@@ -188,167 +167,35 @@ fun WbuCourseImportSheet(
         return true
     }
 
-    val startQrFlow: (Boolean) -> Unit = { useVpn ->
-        qrJob?.cancel()
-        val engine = WbuSyncEngine(context = context, useVpn = useVpn)
-        qrImportState = QrUiState(qrContent = null, phase = QrPhase.GENERATING, statusText = context.getString(R.string.status_qr_fetching))
+    /** 登录成功后：用刚建立的会话来跑导入管线。 */
+    val startImportAfterLogin: () -> Unit = {
         coroutineScope.launch {
-            val session = engine.startQrLogin("IMPORT_QR")
-            if (session == null) {
-                qrImportState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = context.getString(R.string.status_qr_fetch_failed))
-                return@launch
-            }
-            qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = context.getString(R.string.status_scan_qr_to_login))
-            qrJob = coroutineScope.launch {
-                while (true) {
-                    delay(2000)
-                    when (engine.pollQrStatus(session)) {
-                        QrStatus.WAIT -> qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = context.getString(R.string.status_scan_qr_to_login))
-                        QrStatus.CONFIRM -> qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.SCANNED, statusText = context.getString(R.string.status_qr_scanned))
-                        QrStatus.SUCCESS -> {
-                            qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.CONFIRMING, statusText = context.getString(R.string.status_qr_confirming))
-                            try {
-                                val qrOk = engine.completeQrLogin(
-                                    session = session,
-                                    flowTag = "IMPORT_QR",
-                                    vpnPasswordProvider = { null },
-                                    smsCodeProvider = { maskedPhone, isStillValid, sendInterval, promptText ->
-                                        val deferred = CompletableDeferred<String?>()
-                                        smsError = null
-                                        smsVerifying = false
-                                        smsDeferred = deferred
-                                        smsDialogPhone = maskedPhone
-                                        smsDialogIsStillValid = isStillValid
-                                        smsDialogSendInterval = sendInterval
-                                        smsDialogPromptText = promptText
-                                        deferred.await()
-                                    }
-                                )
-                                if (qrOk) {
-                                    runDirectImportPipeline(engine, WbuSyncEngine.getSavedStudentId(context))
-                                } else {
-                                    importErrorMessage = "扫码登录失败"
-                                }
-                            } finally {
-                                isImporting = false
-                            }
-                            return@launch
-                        }
-                        QrStatus.EXPIRED -> {
-                            qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.EXPIRED, statusText = context.getString(R.string.status_qr_expired))
-                            return@launch
-                        }
-                        QrStatus.ERROR -> {
-                            qrImportState = QrUiState(qrContent = session.content, phase = QrPhase.ERROR, statusText = context.getString(R.string.status_qr_query_failed))
-                        }
-                    }
-                }
+            try {
+                isImporting = true
+                importStatusMessage = context.getString(R.string.status_fetching_schedule)
+                importErrorMessage = ""
+                val useVpn = WbuSyncEngine.getSavedUseVpn(context) ?: false
+                val engine = WbuSyncEngine(context = context, useVpn = useVpn)
+                runDirectImportPipeline(engine, WbuSyncEngine.getSavedStudentId(context))
+            } catch (e: Exception) {
+                isImporting = false
+                importStatusMessage = ""
+                importErrorMessage = "导入异常: ${e.message}"
             }
         }
     }
 
-    // 主登录 Sheet
-    WbuAuthBottomSheet(
-        onDismissRequest = {
-            if (!isImporting) {
-                qrJob?.cancel()
-                qrImportState = null
-                onDismissRequest()
-            }
-        },
-        isLoading = isImporting,
-        statusMessage = importStatusMessage,
-        errorMessage = importErrorMessage,
-        initialStudentId = WbuSyncEngine.getSavedStudentId(context),
-        initialUseVpn = WbuSyncEngine.getSavedUseVpn(context) ?: false,
-        hideSelectSemesterSwitch = true,
-        method = importMethod,
-        onMethodChange = { importMethod = it },
-        qrState = qrImportState,
-        onStartQr = { useVpn -> startQrFlow(useVpn) },
-        onRefreshQr = { useVpn -> startQrFlow(useVpn) },
-        onPasswordLogin = { sid, pwd, useVpn, authMode ->
-            coroutineScope.launch {
-                try {
-                    isImporting = true
-                    importStatusMessage = "正在登录..."
-                    importErrorMessage = ""
-                    val engine = WbuSyncEngine(context = context, useVpn = useVpn)
-                    val ok = engine.login(
-                        sid, pwd, authMode = authMode,
-                        captchaProvider = { captcha ->
-                            val def = CompletableDeferred<SliderCaptchaResult?>()
-                            captchaDeferred = def
-                            captchaDialogData = captcha
-                            def.await() ?: SliderCaptchaResult.Cancel
-                        }
-                    )
-                    if (ok) {
-                        runDirectImportPipeline(engine, sid)
-                    } else {
-                        isImporting = false
-                        importErrorMessage = engine.lastLocalLoginError?.takeIf { it.isNotBlank() } ?: "登录失败，请检查账号密码"
-                    }
-                } catch (e: Exception) {
-                    isImporting = false
-                    importErrorMessage = "登录异常: ${e.message}"
-                }
-            }
-        },
-        onDynamicCodeLogin = { sid, code, useVpn ->
-            coroutineScope.launch {
-                try {
-                    isImporting = true
-                    importStatusMessage = "正在登录..."
-                    importErrorMessage = ""
-                    val engine = WbuSyncEngine(context = context, useVpn = useVpn)
-                    val prep = dynamicPrep ?: engine.obtainDynamicCodeForm("IMPORT_DYNAMIC")
-                    if (prep == null) {
-                        isImporting = false
-                        importErrorMessage = "无法获取登录参数，请重试"
-                        return@launch
-                    }
-                    val res = engine.dynamicCodeLogin(
-                        sid.trim(), code, prep, "IMPORT_DYNAMIC",
-                        vpnPasswordProvider = { null },
-                        smsCodeProvider = { maskedPhone, isStillValid, sendInterval, promptText ->
-                            val def = CompletableDeferred<String?>()
-                            smsError = null
-                            smsVerifying = false
-                            smsDeferred = def
-                            smsDialogPhone = maskedPhone
-                            smsDialogIsStillValid = isStillValid
-                            smsDialogSendInterval = sendInterval
-                            smsDialogPromptText = promptText
-                            def.await()
-                        }
-                    )
-                    if (res.success) {
-                        runDirectImportPipeline(engine, sid)
-                    } else {
-                        isImporting = false
-                        importErrorMessage = res.message.ifBlank { "验证码登录失败" }
-                    }
-                } catch (e: Exception) {
-                    isImporting = false
-                    importErrorMessage = "动态码登录失败: ${e.message}"
-                }
-            }
-        },
-        onSendDynamicCode = { sid, useVpn ->
-            val engine = WbuSyncEngine(context = context, useVpn = useVpn)
-            val result = engine.sendDynamicCode(
-                sid.trim(), "IMPORT_DYNAMIC",
-                captchaProvider = { captcha ->
-                    val def = CompletableDeferred<SliderCaptchaResult?>()
-                    captchaDeferred = def
-                    captchaDialogData = captcha
-                    def.await() ?: SliderCaptchaResult.Cancel
-                }
-            )
-            dynamicPrep = (result as? DynamicCodeSendResult.Success)?.prep
-            result
-        }
+    WbuCampusAuthSheet(
+        onDismiss = { if (!isImporting) onDismissRequest() },
+        onLoginSuccess = { startImportAfterLogin() },
+        dismissOnSuccess = false,
+        hideImportPreferences = false,
+        tipsScenario = WbuAuthTipsScenario.IMPORT,
+        primaryButtonText = stringResource(R.string.action_one_tap_sync),
+        loadingButtonText = stringResource(R.string.status_fetching_schedule),
+        externalLoading = isImporting,
+        externalStatusMessage = importStatusMessage,
+        externalErrorMessage = importErrorMessage
     )
 
     // 学期选择弹窗
@@ -364,47 +211,6 @@ fun WbuCourseImportSheet(
             onDismissRequest = {
                 deferred.complete(null)
                 semesterSelectDeferred = null
-            }
-        )
-    }
-
-    // 统一认证滑块验证码弹窗
-    captchaDialogData?.let { captchaData ->
-        SliderCaptchaDialog(
-            captcha = captchaData,
-            onSubmit = { result ->
-                captchaDeferred?.complete(result)
-                captchaDialogData = null
-                captchaDeferred = null
-            },
-            onDismiss = {
-                captchaDeferred?.complete(SliderCaptchaResult.Cancel)
-                captchaDialogData = null
-                captchaDeferred = null
-            }
-        )
-    }
-
-    // 短信验证码弹窗
-    if (smsDialogPhone != null) {
-        VpnSmsCodeDialog(
-            maskedPhone = smsDialogPhone!!,
-            promptText = smsDialogPromptText,
-            isStillValid = smsDialogIsStillValid,
-            sendInterval = smsDialogSendInterval,
-            errorMessage = smsError,
-            isVerifying = smsVerifying,
-            onSubmit = { code: String ->
-                smsVerifying = true
-                smsDeferred?.complete(code)
-            },
-            onResend = {},
-            onDismiss = {
-                smsDeferred?.complete(null)
-                smsDialogPhone = null
-                smsDeferred = null
-                smsVerifying = false
-                smsError = null
             }
         )
     }

@@ -40,7 +40,9 @@ git diff 3eb39c2 --stat -- app/src/main/java app/src/main/res | sort -t'|' -k2 -
 | 文件 | 差异内容 |
 |---|---|
 | `ui/settings/SettingsScreen.kt` | 毛玻璃卡片体系（SettingsCard/SettingTile）、品牌头部、Sakura 开关 |
-| `ui/settings/additional/MoreOptionsScreen.kt` | 毛玻璃、WBU VPN 手动开关、产品愿景卡片、贡献者入口；**不恢复**「更新适配仓库」入口（有意定制） |
+| `ui/settings/additional/MoreOptionsScreen.kt` | 毛玻璃、WBU VPN 手动开关、产品愿景卡片、贡献者入口；语言入口改为导航到 `LanguageSettings` 独立页（旧对话框已移除）；**不恢复**「更新适配仓库」入口（有意定制） |
+| `ui/settings/additional/LanguageSettingScreen.kt` | 上游移植文件（上游为 `shared/commonMain` + expect/actual，此处为 Android-only 单文件实现） |
+| `ui/settings/credentials/` | 账号与凭据管理页：按服务类型（统一认证/教务/图书馆/WebVPN/一卡通/WebDAV）分区，支持进入自动验证会话（可开关）、密码脱敏清除/重设、按服务清会话；独有文件 |
 | `ui/settings/style/StyleSettingsScreen.kt` + `Components.kt` + `ViewModel.kt` | 新增设置项：壁纸调整入口（WallpaperAdjust）、玻璃样式预设、字体样式、背景遮罩等；布局与上游不同 |
 | `ui/settings/conversion/` | WBU 教务一键同步入口（替换上游多校入口）、ICS 导出定制弹窗（Dialog+Card）、同步到系统日历（复用上游链路） |
 | `ui/settings/AppSettingsViewModel.kt` | 追加字段 setter（Sakura、显示非本周课程等） |
@@ -48,8 +50,10 @@ git diff 3eb39c2 --stat -- app/src/main/java app/src/main/res | sort -t'|' -k2 -
 ### 3. 宿主与导航
 | 文件 | 差异内容 |
 |---|---|
-| `MainActivity.kt` | 悬浮课程时隐藏 Dock（`isFloatingCourseMode`）、onboarding 引导、背景壁纸容器、校园服务路由（成绩/空教室/学业进程） |
-| `Navigation.kt` | `WallpaperAdjust`、`GradeQuery`、`FreeClassroomQuery`、`AcademicProgress` 目的地 |
+| `MainActivity.kt` | 悬浮课程时隐藏 Dock（`isFloatingCourseMode`）、onboarding 引导、背景壁纸容器、校园服务路由（成绩/空教室/学业进程/扫一扫）、桌面快捷方式深链（`ACTION_QR_SCAN` / `ACTION_CAMPUS_CARD` + `pendingDeepLink`/`onNewIntent`）、`AppCompatActivity` 宿主（语言切换依赖 AppCompat delegate 生效） |
+| `Navigation.kt` | `WallpaperAdjust`、`GradeQuery`、`FreeClassroomQuery`、`AcademicProgress`、`CredentialManagement`、`QrScan`、`LanguageSettings` 目的地 |
+| `AndroidManifest.xml` | `CAMERA` 权限；`MainActivity` 追加 `QR_SCAN` 与 `CAMPUS_CARD` intent-filter（与 flavor 独立的 shortcuts.xml 配合定向分发）与 `android.app.shortcuts` meta-data；`AppLocalesMetadataHolderService` + `autoStoreLocales=true`（语言选择持久化，上游同款） |
+| `res/values/themes.xml` | `Theme.ClassFlow` 父主题改为 `Theme.AppCompat.DayNight.NoActionBar` + 透明状态栏 + 关闭 Activity 转场（上游 androidApp 同款；AppCompatActivity 必需） |
 | `ui/components/NavigationComponents.kt` | 液态玻璃 Dock（`BottomNavigationBar`）+ `DockSafeBottomPadding` |
 
 ### 4. 数据层（Room/proto 无法拆文件，追加字段）
@@ -63,8 +67,15 @@ git diff 3eb39c2 --stat -- app/src/main/java app/src/main/res | sort -t'|' -k2 -
 ### 5. WBU 教务同步与校园服务（独有子系统，上游无此文件）
 `data/network/wbu/`、`data/model/wbu/`、`ui/campus/`（成绩查询、空教室查询、学业完成度与课程进程）、`ui/components/WbuAuthBottomSheet.kt`、`WbuLoginSelectorBottomSheet.kt`、`ui/schedule/components/WbuSyncComponents.kt`、`ui/schoolselection/web/`（WebView 注入）、`WbuWebLoginAutofillStore.kt` 等——**上游不存在，merge 零冲突**
 
+- 凭据存储改造（`WbuAuthTransport.kt`）：key 由旧版扁平名改为「服务类型 × 账号」分桶（`<field>@<service>@<account>`，如 `password@ids@primary`、`cookies@jwxt@primary`），Cookie 按服务归属拆分持久化（运行时内存 jar 仍共用）；旧扁平 key 一次性**复制**迁移（`migrateLegacyCredentialKeysOnce`，`MyApplication` 启动调用），**保留旧数据不删**。新增 `data/model/wbu/CredentialService.kt`（服务枚举）、`WbuCredentialRepository.kt`、`CredentialVerifier.kt`。
+- 登录编排统一（**上游无此结构**）：`ui/campus/components/WbuCampusAuthSheet.kt` 升级为唯一登录编排宿主（WebVPN 门户登录 / 短信 / 滑块 / 二维码 / 证书异常询问 `SslIssueDialog` / 校园网确认回调 / 验证码回退回调 / `flowTagPrefix`），校园服务、课表页、导入弹窗、账号与凭据页共用；`ui/components/SslIssueDialog.kt` 为抽出的公共弹窗；`ui/components/WbuCourseImportSheet.kt` 瘦身为「导入管线 + 学期/重复课程弹窗」。
+- 扫码端（**上游无此结构**）：`ui/campus/qrscan/`（`QrScanScreen` + `QrScanViewModel` + `QrLuminance` + `QrImageDecoder`）以 CameraX 取景，解码引擎可在 ML Kit 与 ZXing 间切换（右上角菜单，选择存于 `wbu_sync_auth` 的 `qr_scan_engine`，经 `WbuAuthTransport.get/setQrScanEngine`）；支持相册选图识别（系统 Photo Picker，按当前引擎解码，无需存储/相机权限）；取景框与状态卡按可用空间自适应横屏/Pad；`CasQrLink.parseUuid` 解析二维码内 uuid；`IdsCasClient.scanPeerQrCode`/`confirmPeerQrCode`（+ `WbuSyncEngine` 门面）实现「置 2 → 置 1」，身份取自本机 `CASTGC`，未登录按 `206302` 判定。
+- 仅登录统一认证与 WebVPN / 校园网解耦（**上游无此结构**）：`WbuCampusAuthSheet` / `WbuAuthBottomSheet` 新增 `unifiedAuthOnly`——账号页「统一认证」卡与扫一扫页唤起的 Sheet 只为拿到/续期统一认证会话（`CASTGC`），不再登录教务、也不探测或要求校园网（密码 / 动态码 / 二维码三种方式一致）。「统一认证经过WebVPN」关闭时不显示网络开关并强制直连（`WbuSyncEngine.loginUnifiedAuthOnly` + `IdsCasClient` 的 `authBaseOverride` 覆盖 `WbuAuthTransport.idsPublicBase`），开启时开关保留、关闭态文案为「直连」（`label_direct_connection`）。该开关只作用于本次统一认证，不改写全局「网络接入模式」（`last_use_vpn`）；`WbuAuthTransport.startNewUnifiedAuthLoginSession()` 定向重置 ids 会话（保留教务 / 图书馆 / WebVPN 既有会话），失败经会话快照回滚。
+
 ### 6. 其他独有/定制
 - `ui/theme/ThemeClassFlow.kt`（Sakura/Afternoon/Evening 色板 + ClassFlowTheme）
+- 桌面快捷方式资源：`src/dev/res/xml/shortcuts.xml` 与 `src/prod/res/xml/shortcuts.xml`（显式指定 `targetPackage` 与 `targetClass`，消除 dev/prod 共存时的选择弹窗；扫一扫 `qr_scan` + 一卡通 `campus_card`）、`res/drawable/ic_shortcut_qr_scan.xml`、`res/drawable/ic_shortcut_campus_card.xml`（独有文件）
+- 依赖追加：`androidx.camera:camera-{core,camera2,lifecycle,view}` 1.6.2 + `com.google.mlkit:barcode-scanning` 17.3.0（`gradle/libs.versions.toml`、`app/build.gradle.kts`）
 - `ui/settings/themesettings/`、`WallpaperAdjustScreen.kt`、`OnboardingOverlay.kt`
 - widget `*NativeRenderer.kt` 系列（原生渲染，上游部分有对应文件——差异在渲染实现）
 - `tool/UpdateTool.kt`（更新渠道单渠道 + 兼容 API）

@@ -47,18 +47,15 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import android.util.Log
-import com.xingheyuzhuan.shiguangschedule.ui.components.WbuAuthBottomSheet
+import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
+import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import com.xingheyuzhuan.shiguangschedule.ui.components.VpnSmsCodeDialog
 import com.xingheyuzhuan.shiguangschedule.ui.components.DockSafeBottomPadding
 import com.xingheyuzhuan.shiguangschedule.ui.components.NavigationRailWidth
 import com.xingheyuzhuan.shiguangschedule.ui.components.isWideScreen
 import com.xingheyuzhuan.shiguangschedule.ui.components.CourseTablePickerDialog
-import com.xingheyuzhuan.shiguangschedule.ui.components.SliderCaptchaDialog
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.VpnFullLoginStatus
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthMode
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaData
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaResult
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.LocalLoginFailure
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WebVpnClient
 import androidx.compose.ui.text.input.VisualTransformation
@@ -68,13 +65,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuLoginMethod
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.QrSession
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AuthForm
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.DynamicCodeSendResult
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.QrStatus
-import com.xingheyuzhuan.shiguangschedule.ui.components.QrUiState
-import com.xingheyuzhuan.shiguangschedule.ui.components.QrPhase
 import com.xingheyuzhuan.shiguangschedule.data.model.schedule_style.ScheduleModeProto
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTable
 import java.util.Locale
@@ -183,12 +173,6 @@ fun WeeklyScheduleScreen(
     var wbuSyncStatus by remember { mutableStateOf("") }
     var wbuError by remember { mutableStateOf("") }
     var wbuInitialStudentId by remember { mutableStateOf(WbuSyncEngine.getSavedStudentId(appContext)) }
-    var wbuInitialUseVpn by remember { mutableStateOf(WbuSyncEngine.getSavedUseVpn(appContext) ?: false) }
-    var wbuLoginMethod by remember { mutableStateOf(WbuLoginMethod.PASSWORD) }
-    var wbuQrState by remember { mutableStateOf<QrUiState?>(null) }
-    var activeAuthEngine by remember { mutableStateOf<WbuSyncEngine?>(null) }
-    var dynamicPrep by remember { mutableStateOf<AuthForm?>(null) }
-    var qrJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var selectedBlockForDetail by remember { mutableStateOf<MergedCourseBlock?>(null) }
     var showTableSwitcher by remember { mutableStateOf(false) }
     var isGridHolding by remember { mutableStateOf(false) } // 拖拽编辑期间禁用 Pager 滑页（上游同步）
@@ -208,10 +192,6 @@ fun WeeklyScheduleScreen(
     // WebVPN 证书校验异常对话框状态
     var sslIssueMessage by remember { mutableStateOf("") }
     var sslIssueDeferred by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
-
-    // 滑块验证码对话框状态（统一认证滑块）
-    var captchaDialogData by remember { mutableStateOf<SliderCaptchaData?>(null) }
-    var captchaDeferred by remember { mutableStateOf<CompletableDeferred<SliderCaptchaResult?>?>(null) }
 
     // 教务系统疑似触发超星验证码 → 询问是否跳转 WebView 手动登录
     var showManualLoginPrompt by remember { mutableStateOf(false) }
@@ -645,16 +625,9 @@ fun WeeklyScheduleScreen(
                                     return@launch
                                 }
 
-                                val savedUseVpn = WbuSyncEngine.getSavedUseVpn(appContext)
-
-                                wbuInitialUseVpn = savedUseVpn ?: false
                                 wbuInitialStudentId = WbuSyncEngine.getSavedStudentId(appContext)
                                 wbuSyncStatus = ""
                                 wbuError = ""
-                                wbuLoginMethod = WbuLoginMethod.PASSWORD
-                                wbuQrState = null
-                                dynamicPrep = null
-                                qrJob?.cancel()
                                 showWbuAuthDialog = true
                             }
                         },
@@ -673,14 +646,9 @@ fun WeeklyScheduleScreen(
                                         .clearPersistedSession()
                                     snackbarHostState.showSnackbar(appContext.getString(R.string.snackbar_ignored_saved_session))
 
-                                    wbuInitialUseVpn = savedUseVpn
                                     wbuInitialStudentId = WbuSyncEngine.getSavedStudentId(appContext)
                                     wbuSyncStatus = ""
                                     wbuError = ""
-                                    wbuLoginMethod = WbuLoginMethod.PASSWORD
-                                    wbuQrState = null
-                                    dynamicPrep = null
-                                    qrJob?.cancel()
                                     showWbuAuthDialog = true
                                 }
                             })
@@ -1009,248 +977,22 @@ fun WeeklyScheduleScreen(
             }
         }
 
-        val startQrFlow: (Boolean) -> Unit = { useVpn ->
-            wbuError = ""
-            qrJob?.cancel()
-            val engine = WbuSyncEngine(context = appContext, useVpn = useVpn)
-            activeAuthEngine = engine
-            activeVpnEngine = engine
-            wbuQrState = QrUiState(qrContent = null, phase = QrPhase.GENERATING, statusText = appContext.getString(R.string.status_qr_fetching))
-            coroutineScope.launch {
-                val session = engine.startQrLogin("QR")
-                if (session == null) {
-                    wbuQrState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = appContext.getString(R.string.status_qr_fetch_failed))
-                    return@launch
-                }
-                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = appContext.getString(R.string.status_scan_qr_to_login))
-                qrJob = coroutineScope.launch {
-                    while (true) {
-                        delay(2000)
-                        when (val st = engine.pollQrStatus(session)) {
-                            QrStatus.WAIT -> wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.WAIT, statusText = appContext.getString(R.string.status_scan_qr_to_login))
-                            QrStatus.CONFIRM -> wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.SCANNED, statusText = appContext.getString(R.string.status_qr_scanned))
-                            QrStatus.SUCCESS -> {
-                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.CONFIRMING, statusText = appContext.getString(R.string.status_qr_confirming))
-                                isWbuSyncing = true
-                                try {
-                                    val activeTableId = viewModel.uiState.value.tableId
-                                    wbuSyncStatus = appContext.getString(R.string.status_login_success_fetching_schedule)
-                                    val qrOk = engine.completeQrLogin(
-                                        session = session,
-                                        flowTag = "QR",
-                                        vpnPasswordProvider = {
-                                            val d = CompletableDeferred<String?>()
-                                            withContext(Dispatchers.Main) {
-                                                vpnPasswordError = null
-                                                vpnPasswordDeferred = d
-                                            }
-                                            d.await()
-                                        },
-                                        smsCodeProvider = { maskedPhone, isStillValid, sendInterval, promptText ->
-                                            val deferred = CompletableDeferred<String?>()
-                                            withContext(Dispatchers.Main) {
-                                                smsError = null
-                                                smsVerifying = false
-                                                smsDeferred = deferred
-                                                smsDialogPhone = maskedPhone
-                                                smsDialogIsStillValid = isStillValid
-                                                smsDialogSendInterval = sendInterval
-                                                smsDialogPromptText = promptText
-                                            }
-                                            deferred.await()
-                                        }
-                                    )
-                                    if (qrOk && activeTableId != null) {
-                                        val sid = WbuSyncEngine.getSavedStudentId(appContext)
-                                        performCourseImportPipeline(engine, sid)
-                                    } else {
-                                        wbuError = engine.lastLocalLoginError?.takeIf { it.isNotBlank() } ?: appContext.getString(R.string.err_qr_login_failed)
-                                        wbuQrState = QrUiState(qrContent = null, phase = QrPhase.ERROR, statusText = appContext.getString(R.string.status_qr_login_failed_retry))
-                                    }
-                                } finally {
-                                    isWbuSyncing = false
-                                }
-                                return@launch
-                            }
-                            QrStatus.EXPIRED -> {
-                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.EXPIRED, statusText = appContext.getString(R.string.status_qr_expired))
-                                return@launch
-                            }
-                            QrStatus.ERROR -> {
-                                wbuQrState = QrUiState(qrContent = session.content, phase = QrPhase.ERROR, statusText = appContext.getString(R.string.status_qr_query_failed))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        WbuAuthBottomSheet(
-            onDismissRequest = {
-                if (!isWbuSyncing) {
-                    qrJob?.cancel()
-                    wbuQrState = null
-                    showWbuAuthDialog = false
-                }
-            },
-            isLoading = isWbuSyncing,
-            statusMessage = wbuSyncStatus,
-            errorMessage = wbuError,
-            initialStudentId = wbuInitialStudentId,
-            initialUseVpn = wbuInitialUseVpn,
-            method = wbuLoginMethod,
-            onMethodChange = { m ->
-                wbuLoginMethod = m
-                if (m != WbuLoginMethod.QR) {
-                    qrJob?.cancel()
-                    wbuQrState = null
-                } else if (wbuQrState == null) {
-                    // 选中二维码即自动尝试生成
-                    startQrFlow(wbuInitialUseVpn)
-                }
-            },
-            onUseVpnChange = {
-                wbuInitialUseVpn = it
-                WbuSyncEngine.setSavedUseVpn(appContext, it)
-            },
-            qrState = wbuQrState,
-            onPasswordLogin = { studentId, password, useVpn, authMode ->
-                isWbuSyncing = true
-                wbuError = ""
+        WbuCampusAuthSheet(
+            onDismiss = { if (!isWbuSyncing) showWbuAuthDialog = false },
+            onLoginSuccess = {
                 coroutineScope.launch {
                     try {
-                        val activeTableId = viewModel.uiState.value.tableId ?: return@launch
-
-                        // VPN 模式
-                        if (useVpn) {
-                            val vpnEngine = WbuSyncEngine(context = appContext, useVpn = true)
-                            activeVpnEngine = vpnEngine
-                            vpnEngine.sslIssueHandler = { msg ->
-                                val d = CompletableDeferred<Boolean>()
-                                withContext(Dispatchers.Main) {
-                                    sslIssueMessage = msg
-                                    sslIssueDeferred = d
-                                }
-                                d.await()
-                            }
-
-                            // 直接完整登录：先建立/校验 WebVPN 鉴权（TWFID/门户登录），
-                            // 完成后再访问教务；不再在鉴权前做 hasActiveSession 探测。
-                            // 如果是教务系统密码模式且无 TWFID，先弹窗询问 WebVPN/统一认证密码
-                            var customVpnPassword: String? = null
-                            if (authMode == WbuAuthMode.JYXT_LEGACY && WebVpnClient.getTwfid(appContext).isBlank()) {
-                                val d = CompletableDeferred<String?>()
-                                withContext(Dispatchers.Main) {
-                                    vpnPasswordError = null
-                                    vpnPasswordDeferred = d
-                                }
-                                customVpnPassword = d.await()
-                                if (customVpnPassword == null) {
-                                    // 用户取消输入 WebVPN 密码
-                                    isWbuSyncing = false
-                                    wbuSyncStatus = ""
-                                    return@launch
-                                }
-                            }
-
-                            wbuSyncStatus = appContext.getString(R.string.status_logging_in_webvpn)
-                            val fullLoginOk = vpnEngine.loginVpnFull(
-                                studentId, password,
-                                authMode = authMode,
-                                vpnPassword = customVpnPassword,
-                                smsCodeProvider = { maskedPhone, isStillValid, sendInterval, promptText ->
-                                    val deferred = CompletableDeferred<String?>()
-                                    withContext(Dispatchers.Main) {
-                                        smsError = null
-                                        smsVerifying = false
-                                        smsDeferred = deferred
-                                        smsDialogPhone = maskedPhone
-                                        smsDialogIsStillValid = isStillValid
-                                        smsDialogSendInterval = sendInterval
-                                        smsDialogPromptText = promptText
-                                    }
-                                    deferred.await()
-                                },
-                                captchaProvider = { captcha ->
-                                    val deferred = CompletableDeferred<SliderCaptchaResult?>()
-                                    withContext(Dispatchers.Main) {
-                                        captchaDeferred = deferred
-                                        captchaDialogData = captcha
-                                    }
-                                    deferred.await() ?: SliderCaptchaResult.Cancel
-                                },
-                                statusCallback = vpnStatusText(authMode)
-                            )
-
-                            if (fullLoginOk) {
-                                performCourseImportPipeline(vpnEngine, studentId)
-                                return@launch
-                            } else {
-                                isWbuSyncing = false
-                                wbuSyncStatus = ""
-                                val realErr = vpnEngine.lastLocalLoginError?.takeIf { it.isNotBlank() }
-                                when {
-                                    vpnEngine.lastLocalLoginFailure == LocalLoginFailure.CAPTCHA -> {
-                                        showWbuAuthDialog = false
-                                        WbuWebLoginAutofillStore.put(studentId = studentId, password = password)
-                                        manualLoginUseVpn = true
-                                        showManualLoginPrompt = true
-                                    }
-                                    vpnEngine.lastLocalLoginNetworkError -> {
-                                        wbuError = appContext.getString(R.string.err_webvpn_connect_failed)
-                                    }
-                                    realErr != null -> {
-                                        wbuError = realErr
-                                    }
-                                    else -> {
-                                        wbuError = appContext.getString(R.string.err_auto_login_failed_check_creds)
-                                    }
-                                }
-                            }
-                            return@launch
-                        }
-
-                        // 校园网直连
-                        if (!confirmCampusIfDirect(false)) return@launch
-                        wbuSyncStatus = appContext.getString(R.string.status_connecting_campus)
-                        val engine = WbuSyncEngine(context = appContext, useVpn = false)
-                        val loginSuccess = engine.login(
-                            studentId, password,
-                            authMode = authMode,
-                            captchaProvider = { captcha ->
-                                val deferred = CompletableDeferred<SliderCaptchaResult?>()
-                                withContext(Dispatchers.Main) {
-                                    captchaDeferred = deferred
-                                    captchaDialogData = captcha
-                                }
-                                deferred.await() ?: SliderCaptchaResult.Cancel
-                            }
-                        )
-                        if (!loginSuccess) {
+                        isWbuSyncing = true
+                        wbuError = ""
+                        val activeTableId = viewModel.uiState.value.tableId
+                        if (activeTableId == null) {
                             isWbuSyncing = false
-                            wbuSyncStatus = ""
-                            val realErr = engine.lastLocalLoginError?.takeIf { it.isNotBlank() }
-                            when {
-                                engine.lastLocalLoginFailure == LocalLoginFailure.CAPTCHA -> {
-                                    showWbuAuthDialog = false
-                                    WbuWebLoginAutofillStore.put(studentId = studentId, password = password)
-                                    manualLoginUseVpn = false
-                                    showManualLoginPrompt = true
-                                }
-                                engine.lastLocalLoginNetworkError -> {
-                                    wbuError = appContext.getString(R.string.err_campus_direct_failed)
-                                }
-                                realErr != null -> {
-                                    wbuError = realErr
-                                }
-                                else -> {
-                                    wbuError = appContext.getString(R.string.err_login_failed_check_creds)
-                                }
-                            }
                             return@launch
                         }
-
-                        performCourseImportPipeline(engine, studentId)
+                        val useVpn = WbuSyncEngine.getSavedUseVpn(appContext) ?: false
+                        val sid = WbuSyncEngine.getSavedStudentId(appContext)
+                        val engine = WbuSyncEngine(context = appContext, useVpn = useVpn)
+                        performCourseImportPipeline(engine, sid)
                     } catch (e: Exception) {
                         Log.e("WbuSync", "同步发生错误", e)
                         wbuError = appContext.getString(R.string.format_err_sync_error, e.message ?: "")
@@ -1259,85 +1001,89 @@ fun WeeklyScheduleScreen(
                     }
                 }
             },
-            onSendDynamicCode = { sid, useVpn ->
-                val engine = WbuSyncEngine(context = appContext, useVpn = useVpn)
-                activeAuthEngine = engine
-                activeVpnEngine = engine
-                val result = engine.sendDynamicCode(
-                    sid.trim(), "DYNAMIC",
-                    captchaProvider = { captcha ->
-                        val deferred = CompletableDeferred<SliderCaptchaResult?>()
-                        withContext(Dispatchers.Main) {
-                            captchaDeferred = deferred
-                            captchaDialogData = captcha
-                        }
-                        deferred.await() ?: SliderCaptchaResult.Cancel
-                    }
-                )
-                dynamicPrep = (result as? DynamicCodeSendResult.Success)?.prep
-                result
+            dismissOnSuccess = false,
+            hideImportPreferences = false,
+            tipsScenario = WbuAuthTipsScenario.IMPORT,
+            onNavigateToAccount = { navBridge.navigate(Destination.CredentialManagement) },
+            primaryButtonText = stringResource(R.string.action_one_tap_sync),
+            loadingButtonText = stringResource(R.string.status_fetching_schedule),
+            externalLoading = isWbuSyncing,
+            externalStatusMessage = wbuSyncStatus,
+            externalErrorMessage = wbuError,
+            flowTagPrefix = "SCHEDULE",
+            confirmCampusNetwork = confirmCampusIfDirect,
+            onVpnStatus = { status, authMode -> vpnStatusText(authMode).invoke(status) },
+            onCaptchaFallback = { sid, pwd, useVpn ->
+                showWbuAuthDialog = false
+                WbuWebLoginAutofillStore.put(studentId = sid, password = pwd)
+                manualLoginUseVpn = useVpn
+                showManualLoginPrompt = true
             },
-            onDynamicCodeLogin = { sid, code, useVpn ->
-                isWbuSyncing = true
-                wbuError = ""
-                coroutineScope.launch {
-                    try {
-                        val activeTableId = viewModel.uiState.value.tableId ?: return@launch
-                        if (!confirmCampusIfDirect(useVpn)) return@launch
-                        val engine = if (activeAuthEngine?.useVpn == useVpn) {
-                            activeAuthEngine!!
-                        } else {
-                            val newEngine = WbuSyncEngine(context = appContext, useVpn = useVpn)
-                            activeAuthEngine = newEngine
-                            newEngine
-                        }
-                        activeVpnEngine = engine
-                        // 没有现成 prep 时（用户直接填已有验证码）临时取表单参数
-                        val prep = dynamicPrep ?: engine.obtainDynamicCodeForm("DYNAMIC")
-                        if (prep == null) {
-                            wbuError = appContext.getString(R.string.err_get_login_params_failed)
-                            return@launch
-                        }
-                        wbuSyncStatus = appContext.getString(R.string.status_logging_in)
-                        val result = engine.dynamicCodeLogin(
-                            sid.trim(), code, prep, "DYNAMIC",
-                            vpnPasswordProvider = {
-                                val d = CompletableDeferred<String?>()
+            onSyncWithCredentials = {
+                if (!isWbuSyncing) {
+                    isWbuSyncing = true
+                    wbuError = ""
+                    coroutineScope.launch {
+                        try {
+                            val useVpn = WbuSyncEngine.getSavedUseVpn(appContext) ?: false
+                            val engine = WbuSyncEngine(context = appContext, useVpn = useVpn)
+                            activeVpnEngine = engine
+                            engine.sslIssueHandler = { msg ->
+                                val d = CompletableDeferred<Boolean>()
                                 withContext(Dispatchers.Main) {
-                                    vpnPasswordError = null
-                                    vpnPasswordDeferred = d
+                                    sslIssueMessage = msg
+                                    sslIssueDeferred = d
                                 }
                                 d.await()
-                            },
-                            smsCodeProvider = { maskedPhone, isStillValid, sendInterval, promptText ->
-                                val deferred = CompletableDeferred<String?>()
-                                withContext(Dispatchers.Main) {
-                                    smsError = null
-                                    smsVerifying = false
-                                    smsDeferred = deferred
-                                    smsDialogPhone = maskedPhone
-                                    smsDialogIsStillValid = isStillValid
-                                    smsDialogSendInterval = sendInterval
-                                    smsDialogPromptText = promptText
-                                }
-                                deferred.await()
                             }
-                        )
-                        if (result.success) {
-                            performCourseImportPipeline(engine, sid)
-                        } else {
-                            wbuError = result.message.ifBlank { appContext.getString(R.string.err_otp_login_failed) }
+                            // WebVPN 模式下先打通门禁：TWFID 缺失/失效时弹窗索取密码 + 短信二次验证
+                            if (useVpn) {
+                                wbuSyncStatus = appContext.getString(R.string.status_logging_in_webvpn)
+                                val tunnelOk = engine.ensureVpnTunnelReady(
+                                    studentId = WbuSyncEngine.getSavedStudentId(appContext),
+                                    vpnPasswordProvider = {
+                                        val d = CompletableDeferred<String?>()
+                                        withContext(Dispatchers.Main) {
+                                            vpnPasswordError = null
+                                            vpnPasswordDeferred = d
+                                        }
+                                        d.await()
+                                    },
+                                    smsCodeProvider = { maskedPhone, isStillValid, sendInterval, promptText ->
+                                        val deferred = CompletableDeferred<String?>()
+                                        withContext(Dispatchers.Main) {
+                                            smsError = null
+                                            smsVerifying = false
+                                            smsDeferred = deferred
+                                            smsDialogPhone = maskedPhone
+                                            smsDialogIsStillValid = isStillValid
+                                            smsDialogSendInterval = sendInterval
+                                            smsDialogPromptText = promptText
+                                        }
+                                        deferred.await()
+                                    }
+                                )
+                                if (!tunnelOk) {
+                                    isWbuSyncing = false
+                                    wbuSyncStatus = ""
+                                    wbuError = appContext.getString(R.string.err_webvpn_connect_failed)
+                                    return@launch
+                                }
+                            }
+                            if (engine.ensureJwxtSessionWithExistingCredentials()) {
+                                performCourseImportPipeline(engine, WbuSyncEngine.getSavedStudentId(appContext))
+                            } else {
+                                wbuError = appContext.getString(R.string.err_no_valid_credentials)
+                            }
+                        } catch (e: Exception) {
+                            Log.e("WbuSync", "已有凭据同步错误", e)
+                            wbuError = appContext.getString(R.string.format_err_sync_error, e.message ?: "")
+                        } finally {
+                            isWbuSyncing = false
                         }
-                    } catch (e: Exception) {
-                        Log.e("WbuSync", "动态码同步错误", e)
-                        wbuError = appContext.getString(R.string.format_err_sync_error, e.message ?: "")
-                    } finally {
-                        isWbuSyncing = false
                     }
                 }
-            },
-            onStartQr = { useVpn -> startQrFlow(useVpn) },
-            onRefreshQr = { useVpn -> startQrFlow(useVpn) }
+            }
         )
     }
 
@@ -1378,23 +1124,6 @@ fun WeeklyScheduleScreen(
                 smsDeferred = null
                 smsVerifying = false
                 smsError = null
-            }
-        )
-    }
-
-    // 统一认证滑块验证码对话框
-    captchaDialogData?.let { captchaData ->
-        SliderCaptchaDialog(
-            captcha = captchaData,
-            onSubmit = { result ->
-                captchaDeferred?.complete(result)
-                captchaDialogData = null
-                captchaDeferred = null
-            },
-            onDismiss = {
-                captchaDeferred?.complete(SliderCaptchaResult.Cancel)
-                captchaDialogData = null
-                captchaDeferred = null
             }
         )
     }
@@ -1513,15 +1242,18 @@ fun WeeklyScheduleScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.padding(end = 6.dp)
                             ) {
-                                IconButton(
-                                    onClick = { passwordVisible = !passwordVisible },
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                        contentDescription = if (passwordVisible) stringResource(R.string.a11y_hide_password) else stringResource(R.string.a11y_show_password),
-                                        modifier = Modifier.size(20.dp)
-                                    )
+                                // 预填已记住的密码（••••••••）时隐藏"显示密码"按钮，避免展示无意义的占位符
+                                if (!(hasSavedVpnPassword && !isVpnPasswordModified)) {
+                                    IconButton(
+                                        onClick = { passwordVisible = !passwordVisible },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                            contentDescription = if (passwordVisible) stringResource(R.string.a11y_hide_password) else stringResource(R.string.a11y_show_password),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,

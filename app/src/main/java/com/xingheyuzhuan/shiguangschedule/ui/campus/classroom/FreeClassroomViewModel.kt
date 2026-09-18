@@ -12,6 +12,8 @@ import com.xingheyuzhuan.shiguangschedule.data.model.wbu.DEFAULT_BUILDINGS_ALL
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.DEFAULT_BUILDINGS_HGH
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.DEFAULT_BUILDINGS_MYH
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.FreeClassroom
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuQueryClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSessionExpiredException
 import com.xingheyuzhuan.shiguangschedule.data.repository.AppSettingsRepository
@@ -137,6 +139,11 @@ class FreeClassroomViewModel @Inject constructor(
     }
 
     fun loadFreeClassrooms() {
+        // 本地无教务凭据时直接进入登录引导，不空跑请求
+        if (!WbuAuthTransport.hasLocalSession(context, CredentialService.JIAOWU)) {
+            _uiState.update { it.copy(isLoading = false, needLogin = true, errorMessage = null) }
+            return
+        }
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null, needLogin = false) }
 

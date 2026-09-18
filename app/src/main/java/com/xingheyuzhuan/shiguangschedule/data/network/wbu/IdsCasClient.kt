@@ -471,13 +471,14 @@ internal class IdsCasClient(
 
     // ------------------- 手机动态码 -------------------
 
-    /** 发送动态码：解析登录页 → 滑块验证 → 发送短信。 */
+    /** 发送动态码：解析登录页 → 滑块验证 → 发送短信。[authBaseOverride] 供「仅登录统一认证 + 直连」强制公网基址。 */
     suspend fun sendDynamicCode(
         studentId: String,
         flowTag: String,
-        captchaProvider: SliderCaptchaProvider?
+        captchaProvider: SliderCaptchaProvider?,
+        authBaseOverride: String? = null
     ): DynamicCodeSendResult = withContext(Dispatchers.IO) {
-        val authBase = transport.idsBase()
+        val authBase = authBaseOverride ?: transport.idsBase()
         val service = URLEncoder.encode(transport.casServiceTarget, "UTF-8")
         val loginUrl = "$authBase/authserver/login?service=$service"
         val form = fetchLoginForm(loginUrl, "phoneFromId") ?: run {
@@ -532,9 +533,13 @@ internal class IdsCasClient(
         }
     }
 
-    /** 仅获取动态码登录表单参数，不发短信。 */
-    suspend fun obtainDynamicCodeForm(flowTag: String, serviceTarget: String? = null): AuthForm? = withContext(Dispatchers.IO) {
-        val authBase = transport.idsBase()
+    /** 仅获取动态码登录表单参数，不发短信。[authBaseOverride] 仅供「仅登录统一认证 + 直连」使用。 */
+    suspend fun obtainDynamicCodeForm(
+        flowTag: String,
+        serviceTarget: String? = null,
+        authBaseOverride: String? = null
+    ): AuthForm? = withContext(Dispatchers.IO) {
+        val authBase = authBaseOverride ?: transport.idsBase()
         val target = serviceTarget ?: transport.casServiceTarget
         val service = URLEncoder.encode(target, "UTF-8")
         fetchLoginForm("$authBase/authserver/login?service=$service", "phoneFromId")
@@ -547,9 +552,10 @@ internal class IdsCasClient(
         prep: AuthForm,
         flowTag: String,
         serviceTarget: String? = null,
-        consumeTicket: Boolean = true
+        consumeTicket: Boolean = true,
+        authBaseOverride: String? = null
     ): CasPasswordLoginResult = withContext(Dispatchers.IO) {
-        val authBase = transport.idsBase()
+        val authBase = authBaseOverride ?: transport.idsBase()
         val target = serviceTarget ?: transport.casServiceTarget
         val service = URLEncoder.encode(target, "UTF-8")
         val postUrl = "$authBase/authserver/login?service=$service"
@@ -581,10 +587,14 @@ internal class IdsCasClient(
 
     // ------------------- 二维码 -------------------
 
-    /** 开始二维码登录：解析 qr 登录页 → 获取 uuid → 生成二维码内容。 */
-    suspend fun startQrLogin(flowTag: String, serviceTarget: String? = null): QrSession? = withContext(Dispatchers.IO) {
+    /** 开始二维码登录：解析 qr 登录页 → 获取 uuid → 生成二维码内容。[authBaseOverride] 供「仅登录统一认证 + 直连」强制公网基址。 */
+    suspend fun startQrLogin(
+        flowTag: String,
+        serviceTarget: String? = null,
+        authBaseOverride: String? = null
+    ): QrSession? = withContext(Dispatchers.IO) {
         runCatching {
-            val authBase = transport.qrBase()
+            val authBase = authBaseOverride ?: transport.qrBase()
             val target = serviceTarget ?: transport.casServiceTarget
             val service = URLEncoder.encode(target, "UTF-8")
             val qrPageUrl = "$authBase/authserver/login?type=qrcode&service=$service"
@@ -665,6 +675,92 @@ internal class IdsCasClient(
             Log.e("IdsCasClient", "qr login exception", e)
             CasPasswordLoginResult(false, "网络异常: ${e.message}", LocalLoginFailure.CREDENTIALS)
         }
+    }
+
+    // ------------------- 二维码：扫码端（手机侧） -------------------
+
+    /**
+     * 扫码端：把 uuid 对应的二维码标记为「已扫描」，被扫码端 getStatus 由 0 变 2。
+     *
+     * `qrCodeLogin.do` 本身是 CAS 受保护地址，身份来自本机 CASTGC；
+     * 未登录时服务端返回 206302（XHR）或 302 到 /authserver/login（非 XHR）。
+     */
+    suspend fun scanPeerQrCode(uuid: String, flowTag: String): QrScanOutcome = withContext(Dispatchers.IO) {
+        val base = transport.idsBase()
+        transport.restoreCookieStore()
+        val url = "$base/authserver/qrCode/qrCodeLogin.do?uuid=${URLEncoder.encode(uuid, "UTF-8")}"
+        try {
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("X-Requested-With", "XMLHttpRequest")
+                .addHeader("Referer", "$base/authserver/login")
+                .get()
+                .build()
+            val manualClient = client.newBuilder().followRedirects(false).build()
+            manualClient.newCall(req).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                val location = resp.header("Location").orEmpty()
+                when {
+                    isAnonymousCasResponse(resp.code, location, body) -> QrScanOutcome.NEED_LOGIN
+                    body.contains("qrCodeConfirm.do") || body.contains("confirmLogin") -> QrScanOutcome.SCANNED
+                    else -> {
+                        Log.w("IdsCasClient", "$flowTag peer scan unexpected response: ${resp.code}")
+                        QrScanOutcome.EXPIRED
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("IdsCasClient", "$flowTag peer scan exception", e)
+            QrScanOutcome.ERROR
+        }
+    }
+
+    /** 扫码端：确认登录，被扫码端 getStatus 由 2 变 1，随后即可提交表单换 ST。 */
+    suspend fun confirmPeerQrCode(uuid: String, flowTag: String): QrConfirmOutcome = withContext(Dispatchers.IO) {
+        val base = transport.idsBase()
+        transport.restoreCookieStore()
+        val loginUrl = "$base/authserver/qrCode/qrCodeLogin.do?uuid=${URLEncoder.encode(uuid, "UTF-8")}"
+        try {
+            val form = FormBody.Builder().add("uuid", uuid).build()
+            val req = Request.Builder()
+                .url("$base/authserver/qrCode/qrCodeConfirm.do")
+                .post(form)
+                .addHeader("Content-Type", "application/x-www-form-urlencoded")
+                .addHeader("X-Requested-With", "XMLHttpRequest")
+                .addHeader("Referer", loginUrl)
+                .addHeader("Origin", base)
+                .build()
+            val manualClient = client.newBuilder().followRedirects(false).build()
+            manualClient.newCall(req).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                val location = resp.header("Location").orEmpty()
+                val json = runCatching { JSONObject(body) }.getOrNull()
+                when {
+                    json?.optString("res") == "1" -> QrConfirmOutcome.CONFIRMED
+                    isAnonymousCasResponse(resp.code, location, body) -> QrConfirmOutcome.NEED_LOGIN
+                    else -> {
+                        Log.w("IdsCasClient", "$flowTag peer confirm rejected: ${resp.code}")
+                        QrConfirmOutcome.EXPIRED
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("IdsCasClient", "$flowTag peer confirm exception", e)
+            QrConfirmOutcome.ERROR
+        }
+    }
+
+    /**
+     * 统一认证「未登录」特征：
+     * XHR 下返回 `{"errCode":"206302",...}`，非 XHR 下 302 到 `/authserver/login`。
+     * 注意 `.do` 是兜底路由（任何不存在的 `.do` 未登录时都返回同一段 JSON），故必须按内容判定。
+     */
+    private fun isAnonymousCasResponse(code: Int, location: String, body: String): Boolean {
+        if (code in 300..399 && location.contains("/authserver/login")) return true
+        if (body.isBlank()) return false
+        val json = runCatching { JSONObject(body) }.getOrNull() ?: return false
+        if (json.optString("errCode") == "206302") return true
+        return json.has("success") && !json.optBoolean("success")
     }
 
     // ------------------- 加密 / 解析基元 -------------------

@@ -251,6 +251,27 @@ fun SettingsScreen(
                         subtitle = stringResource(R.string.desc_library_borrow),
                         onClick = { navBridge.navigate(Destination.LibraryBorrow) }
                     )
+                    SettingDivider()
+                    SettingTile(
+                        icon = androidx.compose.material.icons.Icons.Rounded.EventSeat,
+                        title = stringResource(R.string.item_library_seat),
+                        subtitle = stringResource(R.string.desc_library_seat),
+                        onClick = { navBridge.navigate(Destination.WebApp(com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId.LIBRARY_SEAT.name)) }
+                    )
+                    SettingDivider()
+                    SettingTile(
+                        icon = androidx.compose.material.icons.Icons.Rounded.CreditCard,
+                        title = stringResource(R.string.service_campus_card),
+                        subtitle = stringResource(R.string.desc_campus_card_app),
+                        onClick = { navBridge.navigate(Destination.WebApp(com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId.CAMPUS_CARD.name)) }
+                    )
+                    SettingDivider()
+                    SettingTile(
+                        icon = androidx.compose.material.icons.Icons.Rounded.HowToReg,
+                        title = stringResource(R.string.item_course_selection),
+                        subtitle = stringResource(R.string.desc_course_selection),
+                        onClick = { navBridge.navigate(Destination.CourseSelection) }
+                    )
                 }
             }
 
@@ -311,6 +332,25 @@ fun SettingsScreen(
                         title = stringResource(R.string.item_more_options),
                         subtitle = stringResource(R.string.desc_more_options),
                         onClick = { navBridge.navigate(Destination.MoreOptions) }
+                    )
+                }
+            }
+
+            // 账号与凭据管理（追加在末尾，避免打乱上方 onboarding 依赖的 LazyColumn index）
+            item {
+                SettingsCard(title = stringResource(R.string.item_credential_management)) {
+                    SettingTile(
+                        icon = Icons.Rounded.Lock,
+                        title = stringResource(R.string.item_credential_management),
+                        subtitle = stringResource(R.string.desc_credential_management),
+                        onClick = { navBridge.navigate(Destination.CredentialManagement) }
+                    )
+                    SettingDivider()
+                    SettingTile(
+                        icon = Icons.Rounded.QrCodeScanner,
+                        title = stringResource(R.string.item_qr_scan),
+                        subtitle = stringResource(R.string.desc_qr_scan),
+                        onClick = { navBridge.navigate(Destination.QrScan) }
                     )
                 }
             }

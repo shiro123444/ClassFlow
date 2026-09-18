@@ -3,8 +3,11 @@ package com.xingheyuzhuan.shiguangschedule.ui.campus.academic
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.AcademicCourse
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.AcademicCourseGroup
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.AcademicProgressData
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuQueryClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSessionExpiredException
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -34,8 +37,10 @@ data class AcademicProgressUiState(
     val viewMode: AcademicViewMode = AcademicViewMode.SEMESTER,
     val searchKeyword: String = "",
     val filterStatus: String = "", // "" (全部), "已修", "修读中", "未修"
+    val filterExamMode: String = "", // "" (全部), "考试", "考查"
     val expandedGroupIds: Set<String> = emptySet(),
-    val needLogin: Boolean = false
+    val needLogin: Boolean = false,
+    val selectedCourse: AcademicCourse? = null
 ) {
     /**
      * 过滤后展示的课程组列表
@@ -48,7 +53,7 @@ data class AcademicProgressUiState(
                 data?.natureGroups.orEmpty()
             }
 
-            if (searchKeyword.isBlank() && filterStatus.isBlank()) {
+            if (searchKeyword.isBlank() && filterStatus.isBlank() && filterExamMode.isBlank()) {
                 return rawGroups
             }
 
@@ -69,7 +74,13 @@ data class AcademicProgressUiState(
                         else -> true
                     }
 
-                    matchesKw && matchesStatus
+                    val matchesExam = when (filterExamMode) {
+                        "考试" -> course.examType == "考试" || course.examTag == "试"
+                        "考查" -> course.examType == "考查" || course.examTag == "查"
+                        else -> true
+                    }
+
+                    matchesKw && matchesStatus && matchesExam
                 }
 
                 if (filteredCourses.isNotEmpty()) {
@@ -97,6 +108,18 @@ class AcademicProgressViewModel @Inject constructor(
      * 加载或刷新学业完成度与课程进程
      */
     fun loadAcademicProgress(isRefresh: Boolean = false) {
+        // 本地无教务凭据时直接进入登录引导，不空跑请求
+        if (!WbuAuthTransport.hasLocalSession(getApplication(), CredentialService.JIAOWU)) {
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    isRefreshing = false,
+                    errorMessage = null,
+                    needLogin = true
+                )
+            }
+            return
+        }
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -146,6 +169,14 @@ class AcademicProgressViewModel @Inject constructor(
 
     fun setFilterStatus(status: String) {
         _uiState.update { it.copy(filterStatus = status) }
+    }
+
+    fun setFilterExamMode(examMode: String) {
+        _uiState.update { it.copy(filterExamMode = examMode) }
+    }
+
+    fun selectCourse(course: AcademicCourse?) {
+        _uiState.update { it.copy(selectedCourse = course) }
     }
 
     fun toggleGroup(groupId: String) {

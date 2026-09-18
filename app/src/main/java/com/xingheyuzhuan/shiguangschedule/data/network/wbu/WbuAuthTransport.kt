@@ -6,6 +6,8 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
 import androidx.appcompat.app.AppCompatDelegate
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.QrScanEngine
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -16,6 +18,9 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.runBlocking
 import okhttp3.ConnectionPool
 import okhttp3.Cookie
@@ -53,7 +58,11 @@ internal class WbuAuthTransport(
 
     val prefs by lazy { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
 
-    val cookieStore = CopyOnWriteArrayList<Cookie>()
+    /**
+     * 进程内唯一的 Cookie 库，与 [useVpn] 无关：VPN 与直连共享同一份内存。
+     * 原先两个 transport 各持一份，写盘时会把对方 scope 的桶删掉，切模式就像凭据丢失。
+     */
+    val cookieStore: CopyOnWriteArrayList<Cookie> get() = sharedCookieStore
 
     /** WebVPN TLS 证书校验异常回调（见 WbuSyncEngine 同名属性说明）。 */
     @Volatile
@@ -67,8 +76,14 @@ internal class WbuAuthTransport(
                     cookie.newBuilder().path("/admin").build()
                 } else cookie
 
+                val singleValued = cookieNameFamily(normalizedCookie.name) != null
                 cookieStore.removeAll {
-                    it.name == normalizedCookie.name && it.domain == normalizedCookie.domain && (it.path == normalizedCookie.path || (normalizedCookie.name == "jw_uf" && it.path.startsWith("/admin")))
+                    if (singleValued) {
+                        // 核心会话 Cookie 按「名」唯一：直连与隧道是同一个后端会话，只留最新一份
+                        it.name == normalizedCookie.name
+                    } else {
+                        it.name == normalizedCookie.name && it.domain == normalizedCookie.domain && (it.path == normalizedCookie.path || (normalizedCookie.name == "jw_uf" && it.path.startsWith("/admin")))
+                    }
                 }
                 if (!normalizedCookie.expiresAt.let { expiresAt -> expiresAt <= System.currentTimeMillis() }) {
                     cookieStore.add(normalizedCookie)
@@ -83,14 +98,28 @@ internal class WbuAuthTransport(
             cookieStore.removeAll { it.expiresAt <= now }
 
             return validCookies.filter { cookie ->
-                if (cookie.name == "TWFID") {
+                val family = cookieNameFamily(cookie.name)
+                when {
                     // TWFID 是 WebVPN 网关门禁通行证，只要是 webvpn 域或其代理子域均全域匹配放行
-                    url.host == "webvpn.wbu.edu.cn" || url.host.endsWith(".webvpn.wbu.edu.cn")
-                } else {
-                    cookie.matches(url)
+                    cookie.name == "TWFID" ->
+                        url.host == "webvpn.wbu.edu.cn" || url.host.endsWith(".webvpn.wbu.edu.cn")
+
+                    // 核心会话 Cookie 在校内域名之间跨域放行：
+                    // 直连登录得到的会话，经 WebVPN 隧道（<sub>-wbu-edu-cn.webvpn.wbu.edu.cn）同样复用
+                    family != null -> url.host.endsWith("wbu.edu.cn") && url.host.contains(family)
+
+                    else -> cookie.matches(url)
                 }
             }
         }
+    }
+
+    /** 核心会话 Cookie 对应的域名族：这些 Cookie 按名唯一，且可在校内域名间跨域复用。 */
+    private fun cookieNameFamily(name: String): String? = when (name) {
+        "jw_uf" -> "jwxt"
+        "CASTGC" -> "ids"
+        "PHPSESSID" -> "opac"
+        else -> null
     }
 
     /** 延迟构建，确保构造期间所有属性（含 [defaultTrustManager]、[authAcceptLanguage]）已初始化。 */
@@ -230,7 +259,8 @@ internal class WbuAuthTransport(
     /** WebVPN 门户基址。 */
     val vpnBase: String = "https://webvpn.wbu.edu.cn"
 
-    private val idsPublicBase: String = "http://ids.wbu.edu.cn"
+    /** ids 统一认证公网基址（「直连」走这里，与 WebVPN 代理基址相对）。 */
+    val idsPublicBase: String = "http://ids.wbu.edu.cn"
 
     /** 统一认证(CAS) service 目标：支持通过「使用固定service获取ticket」开关定制。 */
     val casServiceTarget: String
@@ -254,6 +284,18 @@ internal class WbuAuthTransport(
     } else {
         "https://opac.wbu.edu.cn"
     }
+
+    /** 通用 WebVPN 代理基址构造器：将任意 wbu.edu.cn 目标主机映射为对应的代理子域名。 */
+    fun webVpnProxyBase(targetHost: String, withSingleSuffix: Boolean = true): String {
+        val slug = targetHost.replace('.', '-') + if (withSingleSuffix) "-s" else ""
+        return "${webVpnScheme()}://$slug.webvpn.wbu.edu.cn${webVpnPort()}"
+    }
+
+    /** 图书馆座位预约(libseat)代理宿主基址。 */
+    fun libseatProxyBase(): String = webVpnProxyBase("libseat.wbu.edu.cn", withSingleSuffix = true)
+
+    /** 图书馆座位预约(libseat)基址：WebVPN 模式下走代理子域，校内直连走公网。 */
+    fun libseatBase(): String = if (useVpn) libseatProxyBase() else "https://libseat.wbu.edu.cn"
 
     private fun idsProxyBase(): String = "${webVpnScheme()}://ids-wbu-edu-cn.webvpn.wbu.edu.cn${webVpnPort()}"
 
@@ -396,68 +438,113 @@ internal class WbuAuthTransport(
         return cookie.domain == "webvpn.wbu.edu.cn" || cookie.domain.endsWith(".webvpn.wbu.edu.cn")
     }
 
+    /** 按服务归属持久化 Cookie：运行时内存 jar 仍全局共用，仅落盘时按服务分桶。 */
     fun persistCookieStore() {
-        val array = JSONArray()
+        val buckets = HashMap<String, JSONArray>()
         cookieStore.forEach { cookie ->
-            // 不持久化 WebVPN 会话 Cookie，只保留手动 TWFID(prefs KEY_TWFID)
+            // 不持久化 WebVPN 会话 Cookie，只保留手动 TWFID(prefs 的 webvpn 槽)
             if (isWebVpnCookie(cookie)) return@forEach
-            val obj = JSONObject()
-                .put("name", cookie.name)
-                .put("value", cookie.value)
-                .put("domain", cookie.domain)
-                .put("path", cookie.path)
-                .put("expiresAt", cookie.expiresAt)
-                .put("secure", cookie.secure)
-                .put("httpOnly", cookie.httpOnly)
-                .put("hostOnly", cookie.hostOnly)
-                .put("persistent", cookie.persistent)
-            array.put(obj)
+            val scope = cookieScopeId(cookie.name, cookie.domain)
+            buckets.getOrPut(scope) { JSONArray() }.put(cookieToJson(cookie))
         }
-        prefs.edit().putString(KEY_COOKIES_JSON, array.toString()).apply()
+        val editor = prefs.edit()
+        allCookieScopeIds().forEach { scope ->
+            val key = cookieKeyFor(scope, accountForCookieScope(context, scope))
+            val arr = buckets[scope]
+            if (arr == null || arr.length() == 0) editor.remove(key) else editor.putString(key, arr.toString())
+        }
+        editor.apply()
+        _credentialChanges.tryEmit(Unit)
+    }
+
+    private fun cookieToJson(cookie: Cookie): JSONObject = JSONObject()
+        .put("name", cookie.name)
+        .put("value", cookie.value)
+        .put("domain", cookie.domain)
+        .put("path", cookie.path)
+        .put("expiresAt", cookie.expiresAt)
+        .put("secure", cookie.secure)
+        .put("httpOnly", cookie.httpOnly)
+        .put("hostOnly", cookie.hostOnly)
+        .put("persistent", cookie.persistent)
+
+    private fun parseCookies(raw: String, into: MutableList<Cookie>) {
+        val token = JSONTokener(raw).nextValue()
+        val arr = when (token) {
+            is JSONArray -> token
+            else -> JSONArray()
+        }
+        for (i in 0 until arr.length()) {
+            val obj = arr.optJSONObject(i) ?: continue
+            val name = obj.optString("name")
+            val value = obj.optString("value")
+            val domain = obj.optString("domain")
+            if (name.isBlank() || value.isBlank() || domain.isBlank()) continue
+
+            val builder = Cookie.Builder()
+                .name(name)
+                .value(value)
+                .path(obj.optString("path", "/"))
+
+            if (obj.optBoolean("hostOnly", false)) {
+                builder.hostOnlyDomain(domain)
+            } else {
+                builder.domain(domain)
+            }
+
+            val expiresAt = obj.optLong("expiresAt", 0L)
+            if (expiresAt > System.currentTimeMillis()) {
+                builder.expiresAt(expiresAt)
+            }
+            if (obj.optBoolean("secure", false)) builder.secure()
+            if (obj.optBoolean("httpOnly", false)) builder.httpOnly()
+
+            into.add(builder.build())
+        }
     }
 
     fun restoreCookieStore() {
-        val raw = prefs.getString(KEY_COOKIES_JSON, null) ?: return
-        try {
-            val token = JSONTokener(raw).nextValue()
-            val arr = when (token) {
-                is JSONArray -> token
-                else -> JSONArray()
+        val restored = mutableListOf<Cookie>()
+        var loaded = false
+        var parseFailed = false
+        allCookieScopeIds().forEach { scope ->
+            val raw = prefs.getString(cookieKeyFor(scope, accountForCookieScope(context, scope)), null) ?: return@forEach
+            loaded = true
+            try {
+                parseCookies(raw, restored)
+            } catch (e: JSONException) {
+                Log.w("WbuSyncEngine", "Failed to restore cookies for scope=$scope", e)
+                parseFailed = true
             }
-            val restored = mutableListOf<Cookie>()
-            for (i in 0 until arr.length()) {
-                val obj = arr.optJSONObject(i) ?: continue
-                val name = obj.optString("name")
-                val value = obj.optString("value")
-                val domain = obj.optString("domain")
-                if (name.isBlank() || value.isBlank() || domain.isBlank()) continue
-
-                val builder = Cookie.Builder()
-                    .name(name)
-                    .value(value)
-                    .path(obj.optString("path", "/"))
-
-                if (obj.optBoolean("hostOnly", false)) {
-                    builder.hostOnlyDomain(domain)
-                } else {
-                    builder.domain(domain)
+        }
+        // 兼容旧版整包：新分桶尚未建立时回退读取 cookies_json
+        if (!loaded) {
+            val legacy = prefs.getString(LEGACY_KEY_COOKIES_JSON, null)
+            if (legacy != null) {
+                try {
+                    parseCookies(legacy, restored)
+                    loaded = true
+                } catch (e: JSONException) {
+                    Log.w("WbuSyncEngine", "Failed to restore legacy cookies; clearing persisted session", e)
+                    prefs.edit().remove(LEGACY_KEY_COOKIES_JSON).apply()
+                    parseFailed = true
                 }
-
-                val expiresAt = obj.optLong("expiresAt", 0L)
-                if (expiresAt > System.currentTimeMillis()) {
-                    builder.expiresAt(expiresAt)
-                }
-                if (obj.optBoolean("secure", false)) builder.secure()
-                if (obj.optBoolean("httpOnly", false)) builder.httpOnly()
-
-                restored.add(builder.build())
             }
+        }
+        // WebVPN 网关会话 Cookie 不落盘（见 persistCookieStore 的过滤），
+        // 恢复时不能把它们一起清掉：Cookie 库是两个 transport 共用的。
+        val preservedWebVpn = cookieStore.filter { isWebVpnCookie(it) }
+        if (!loaded) return
+        if (parseFailed && restored.isEmpty()) {
             cookieStore.clear()
-            cookieStore.addAll(restored)
-        } catch (e: JSONException) {
-            Log.w("WbuSyncEngine", "Failed to restore cookies; clearing persisted session", e)
-            prefs.edit().remove(KEY_COOKIES_JSON).apply()
-            cookieStore.clear()
+            return
+        }
+        cookieStore.clear()
+        cookieStore.addAll(restored)
+        preservedWebVpn.forEach { cookie ->
+            if (cookieStore.none { it.name == cookie.name && it.domain == cookie.domain && it.path == cookie.path }) {
+                cookieStore.add(cookie)
+            }
         }
     }
 
@@ -470,19 +557,76 @@ internal class WbuAuthTransport(
         }
     }
 
+    /** 从内存 jar 移除某服务的会话 Cookie（不影响其它服务）。 */
+    fun removeServiceCookies(service: CredentialService) {
+        cookieStore.removeAll { cookieScopeId(it.name, it.domain) == service.id }
+    }
+
+    /** 高级模式手动改凭据：同步改写内存 jar 里该服务的同名 Cookie。 */
+    fun updateServiceCookie(service: CredentialService, name: String, value: String) {
+        cookieStore.replaceAll { cookie ->
+            if (cookie.name == name && cookieScopeId(cookie.name, cookie.domain) == service.id) {
+                cookie.newBuilder().value(value).build()
+            } else {
+                cookie
+            }
+        }
+    }
+
     fun clearPersistedSession() {
         cookieStore.clear()
-        prefs.edit().remove(KEY_COOKIES_JSON).apply()
+        clearAllCookieBuckets(context)
+    }
+
+    /** 会话快照：用于登录失败时还原，避免冲掉既有的有效会话。 */
+    class SessionSnapshot(val buckets: Map<String, String?>, val twfid: String)
+
+    private var pendingSessionSnapshot: SessionSnapshot? = null
+
+    fun snapshotSessions(): SessionSnapshot {
+        val buckets = HashMap<String, String?>()
+        allCookieScopeIds().forEach { scope ->
+            val key = cookieKeyFor(scope, accountForCookieScope(context, scope))
+            buckets[key] = prefs.getString(key, null)
+        }
+        return SessionSnapshot(buckets, currentTwfid())
+    }
+
+    fun restoreSessions(snapshot: SessionSnapshot) {
+        val editor = prefs.edit()
+        snapshot.buckets.forEach { (key, value) ->
+            if (value.isNullOrBlank()) editor.remove(key) else editor.putString(key, value)
+        }
+        if (snapshot.twfid.isBlank()) {
+            editor.remove(twfidKey(context))
+        } else {
+            editor.putString(twfidKey(context), snapshot.twfid)
+        }
+        editor.apply()
+        restoreCookieStore()
+    }
+
+    /** 登录成功后调用：丢弃快照，接受本次登录产生的会话。 */
+    fun commitNewLoginSession() {
+        pendingSessionSnapshot = null
+    }
+
+    /** 登录失败后调用：还原到 [startNewLoginSession] 之前的状态。 */
+    fun rollbackNewLoginSession() {
+        pendingSessionSnapshot?.let { restoreSessions(it) }
+        pendingSessionSnapshot = null
     }
 
     /**
      * 在登录事务启动时彻底清空上一次的历史会话 Cookie（CASTGC、JSESSIONID、jw_uf 等），
      * 但保留全局配置（例如手动配置的 TWFID）。确保本次登录不受旧会话干扰，必须重新认证一次。
+     * 清空前会先做快照，登录失败时可通过 [rollbackNewLoginSession] 还原。
      */
     fun startNewLoginSession() {
+        pendingSessionSnapshot = snapshotSessions()
         val manualTwfid = currentTwfid().trim()
         cookieStore.clear()
-        prefs.edit().remove(KEY_COOKIES_JSON).apply()
+        clearAllCookieBuckets(context)
         // 彻底清空客户端所有闲置的 TCP/TLS 连接，防止上一次会话的 Keep-Alive 连接被错误复用导致 Host 漂移
         runCatching { client.connectionPool.evictAll() }
         runCatching { portalClient.connectionPool.evictAll() }
@@ -499,6 +643,27 @@ internal class WbuAuthTransport(
             )
         }
         Log.i("WbuAuthTransport", "startNewLoginSession: cleared old cookies and evicted connection pools; manualTwfidPresent=${manualTwfid.isNotEmpty()}")
+    }
+
+    /**
+     * 「只登录统一认证」事务：只重置统一认证(ids)会话，保留教务/图书馆/WebVPN 等既有会话。
+     *
+     * 与 [startNewLoginSession] 的区别：统一认证与其它服务互不影响，一次统一认证登录
+     * 不该顺手把既有的教务/图书馆会话一起清掉。清空前同样先做快照，失败时用
+     * [rollbackNewLoginSession] 还原。
+     */
+    fun startNewUnifiedAuthLoginSession() {
+        pendingSessionSnapshot = snapshotSessions()
+        // 内存 jar 内属于统一认证的 Cookie（CASTGC / ids 域 JSESSIONID）与 ids 落盘桶
+        removeServiceCookies(CredentialService.UNIFIED_AUTH)
+        val key = cookieKeyFor(
+            CredentialService.UNIFIED_AUTH.id,
+            activeAccount(context, CredentialService.UNIFIED_AUTH)
+        )
+        prefs.edit().remove(key).apply()
+        // 清空闲置连接，防止上一次会话的 Keep-Alive 连接被误复用导致 Host 漂移
+        runCatching { client.connectionPool.evictAll() }
+        Log.i("WbuAuthTransport", "startNewUnifiedAuthLoginSession: ids session reset, other services preserved")
     }
 
     /** 从 Android WebView CookieManager 导入 cookies 到 OkHttp cookie jar。 */
@@ -558,11 +723,11 @@ internal class WbuAuthTransport(
 
     // ------------------- 实例便捷访问（读取静态偏好） -------------------
 
-    /** 当前手动 TWFID（prefs）。 */
-    fun currentTwfid(): String = prefs.getString(KEY_TWFID, "").orEmpty()
+    /** 当前手动 TWFID（prefs 的 webvpn 槽）。 */
+    fun currentTwfid(): String = prefs.getString(twfidKey(context), "").orEmpty()
 
     fun clearTwfidPref() {
-        prefs.edit().remove(KEY_TWFID).apply()
+        prefs.edit().remove(twfidKey(context)).apply()
     }
 
     // ====================== 静态偏好访问器（供各业务模块共用） ======================
@@ -570,34 +735,274 @@ internal class WbuAuthTransport(
     companion object {
         const val PREFS_NAME = "wbu_sync_auth"
 
-        private const val KEY_COOKIES_JSON = "cookies_json"
+        // ── 旧版扁平 key（迁移来源，保留不删，绝不销毁用户数据） ──
+        private const val LEGACY_KEY_COOKIES_JSON = "cookies_json"
+        private const val LEGACY_KEY_REMEMBER_PASSWORD = "remember_password"
+        private const val LEGACY_KEY_ENCRYPTED_PASSWORD = "encrypted_password"
+        private const val LEGACY_KEY_PASSWORD_CRYPTO_IV = "password_crypto_iv"
+        private const val LEGACY_KEY_SAVED_AUTH_MODE = "saved_auth_mode"
+        private const val LEGACY_KEY_REMEMBER_VPN_PASSWORD = "remember_vpn_password"
+        private const val LEGACY_KEY_ENCRYPTED_VPN_PASSWORD = "encrypted_vpn_password"
+        private const val LEGACY_KEY_VPN_PASSWORD_CRYPTO_IV = "vpn_password_crypto_iv"
+        private const val LEGACY_KEY_LAST_STUDENT_ID = "last_student_id"
+        private const val LEGACY_KEY_TWFID = "twfid"
+        private const val KEY_CRED_KEYS_MIGRATED = "cred_keys_migrated"
+
+        /** VPN / 直连两个 transport 共用的内存 Cookie 库（落盘仍按服务 scope 分桶）。 */
+        private val sharedCookieStore = CopyOnWriteArrayList<Cookie>()
+
+        /** 是否已从落盘恢复过：只需一次，否则第二个 transport 建库时会清空共享内存。 */
+        @Volatile
+        private var cookieStoreRestored = false
+
+        private val _credentialChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+        /**
+         * 凭据变更信号：任何一次 Cookie 落盘、TWFID 写入或清除都会发一次。
+         * 账号页 / 登录 Sheet 订阅它来同步刷新，避免各自 remember 的状态发霉。
+         */
+        val credentialChanges: SharedFlow<Unit> = _credentialChanges.asSharedFlow()
+
+        // ── 全局（非账号维度）key ──
         private const val KEY_LAST_USE_VPN = "last_use_vpn"
         private const val KEY_LAST_USE_VPN_SET = "last_use_vpn_set"
-        private const val KEY_REMEMBER_PASSWORD = "remember_password"
-        private const val KEY_ENCRYPTED_PASSWORD = "encrypted_password"
-        private const val KEY_PASSWORD_CRYPTO_IV = "password_crypto_iv"
-        private const val KEY_SAVED_AUTH_MODE = "saved_auth_mode"
-        private const val KEY_REMEMBER_VPN_PASSWORD = "remember_vpn_password"
-        private const val KEY_ENCRYPTED_VPN_PASSWORD = "encrypted_vpn_password"
-        private const val KEY_VPN_PASSWORD_CRYPTO_IV = "vpn_password_crypto_iv"
-        private const val KEY_LAST_STUDENT_ID = "last_student_id"
         private const val KEY_USE_WEBVIEW_VPN_MANUAL_MODE = "use_webview_vpn_manual_mode"
         private const val KEY_IDS_VIA_WEBVPN = "ids_via_webvpn"
         private const val KEY_QR_VIA_WEBVPN = "qr_via_webvpn"
+        private const val KEY_QR_SCAN_ENGINE = "qr_scan_engine"
         private const val KEY_SEND_ENGLISH_SMS = "send_english_sms"
         private const val KEY_USE_PC_USER_AGENT = "use_pc_user_agent"
         private const val KEY_SKIP_CAMPUS_CHECK = "skip_campus_check"
         private const val KEY_KEEP_TEACHER_ID = "keep_teacher_id"
         private const val KEY_KEEP_BUILDING = "keep_building"
         private const val KEY_SELECT_SEMESTER_ON_IMPORT = "select_semester_on_import"
-        private const val KEY_TWFID = "twfid"
         private const val KEY_USE_HTTPS_WEBVPN = "use_https_webvpn"
         private const val KEY_IDS_ADDR_NOT_FROM_JWXT = "ids_addr_not_from_jwxt"
         private const val KEY_NO_INDEXMAIN_VERIFY = "no_indexmain_verify"
         private const val KEY_FORCE_FETCH_STUDENT_ID_BEFORE_VPN = "force_fetch_student_id_before_vpn"
         private const val KEY_USE_FIXED_SERVICE_FOR_TICKET = "use_fixed_service_for_ticket"
+        private const val KEY_CREDENTIAL_ADVANCED_MODE = "credential_advanced_mode"
+        private const val KEY_CREDENTIAL_AUTO_VERIFY = "credential_auto_verify_enabled"
         const val IDS_PERSON_CENTER_SERVICE = "http://ids.wbu.edu.cn/personalInfo/personCenter/index.html"
         const val MAX_CAPTCHA_ATTEMPTS = 5
+
+        // ── 凭据字段名（按「服务类型 × 账号」拼接 key，形如 password@ids@primary） ──
+        private const val FIELD_PASSWORD = "password"
+        private const val FIELD_PASSWORD_IV = "password_iv"
+        private const val FIELD_REMEMBER_PASSWORD = "remember_password"
+        private const val FIELD_COOKIES = "cookies"
+        private const val FIELD_TWFID = "twfid"
+        private const val FIELD_STUDENT_ID = "student_id"
+        private const val FIELD_AUTH_MODE = "auth_mode"
+        private const val FIELD_ACCOUNT_NAME = "account_name"
+        private const val FIELD_CAMPUS_CARD_ACCESS_TOKEN = "card_access_token"
+        private const val FIELD_CAMPUS_CARD_REFRESH_TOKEN = "card_refresh_token"
+
+        /** 未归属任何服务的 Cookie（如 locale 等）统一落到共享桶。 */
+        private const val SHARED_COOKIE_SCOPE = "shared"
+
+        private fun prefsOf(context: Context) =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+        private fun activeAccountKey(service: CredentialService) = "active_account@${service.id}"
+        private fun accountsKey(service: CredentialService) = "accounts@${service.id}"
+        private fun fieldKey(field: String, service: CredentialService, account: String) =
+            "$field@${service.id}@$account"
+        private fun cookieKeyFor(scopeId: String, account: String) = "$FIELD_COOKIES@$scopeId@$account"
+
+        private fun twfidKey(context: Context) =
+            fieldKey(FIELD_TWFID, CredentialService.WEBVPN, activeAccount(context, CredentialService.WEBVPN))
+
+        private fun campusCardAccessTokenKey(context: Context) =
+            fieldKey(FIELD_CAMPUS_CARD_ACCESS_TOKEN, CredentialService.CAMPUS_CARD, activeAccount(context, CredentialService.CAMPUS_CARD))
+
+        private fun campusCardRefreshTokenKey(context: Context) =
+            fieldKey(FIELD_CAMPUS_CARD_REFRESH_TOKEN, CredentialService.CAMPUS_CARD, activeAccount(context, CredentialService.CAMPUS_CARD))
+
+        /** 某服务当前激活的账号（单用户阶段恒为 "primary"）。 */
+        fun activeAccount(context: Context, service: CredentialService): String =
+            prefsOf(context).getString(activeAccountKey(service), null)
+                ?.takeIf { it.isNotBlank() } ?: CredentialService.DEFAULT_ACCOUNT
+
+        /** 某服务已登记的账号列表（预埋多账号；单用户下仅返回当前账号）。 */
+        fun listAccounts(context: Context, service: CredentialService): List<String> {
+            val raw = prefsOf(context).getString(accountsKey(service), null)
+                ?: return listOf(activeAccount(context, service))
+            val parsed = runCatching {
+                val arr = JSONArray(raw)
+                (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotBlank() } }
+            }.getOrDefault(emptyList())
+            return parsed.ifEmpty { listOf(activeAccount(context, service)) }
+        }
+
+        /** 切换某服务的当前账号（预埋；当前仅更新指针与账号登记）。 */
+        fun switchAccount(context: Context, service: CredentialService, account: String) {
+            if (account.isBlank()) return
+            val accounts = (listAccounts(context, service) + account).distinct()
+            prefsOf(context).edit()
+                .putString(activeAccountKey(service), account)
+                .putString(accountsKey(service), JSONArray(accounts).toString())
+                .apply()
+        }
+
+        /** 某服务当前账号的自定义名称（null 表示未命名）。与登录身份无关，可随意修改。 */
+        fun getAccountName(context: Context, service: CredentialService): String? =
+            prefsOf(context).getString(fieldKey(FIELD_ACCOUNT_NAME, service, activeAccount(context, service)), null)
+
+        fun setAccountName(context: Context, service: CredentialService, name: String) {
+            prefsOf(context).edit()
+                .putString(fieldKey(FIELD_ACCOUNT_NAME, service, activeAccount(context, service)), name.trim())
+                .apply()
+        }
+
+        private fun accountForCookieScope(context: Context, scopeId: String): String {
+            val service = CredentialService.fromId(scopeId)
+            return if (service != null) activeAccount(context, service) else CredentialService.DEFAULT_ACCOUNT
+        }
+
+        private fun allCookieScopeIds(): List<String> =
+            CredentialService.entries.map { it.id } + SHARED_COOKIE_SCOPE
+
+        /** 依据 Cookie 名/域判定其归属的服务 scope id。 */
+        private fun cookieScopeId(name: String, domain: String): String = when {
+            name == "CASTGC" -> CredentialService.UNIFIED_AUTH.id
+            name == "jw_uf" -> CredentialService.JIAOWU.id
+            name == "TWFID" -> CredentialService.WEBVPN.id
+            name == "PHPSESSID" -> CredentialService.LIBRARY.id
+            name == "JSESSIONID" -> when {
+                domain.contains("jwxt") -> CredentialService.JIAOWU.id
+                domain.contains("opac") -> CredentialService.LIBRARY.id
+                domain.contains("ids") -> CredentialService.UNIFIED_AUTH.id
+                else -> SHARED_COOKIE_SCOPE
+            }
+            else -> SHARED_COOKIE_SCOPE
+        }
+
+        private fun clearAllCookieBuckets(context: Context) {
+            val editor = prefsOf(context).edit()
+            allCookieScopeIds().forEach { scope ->
+                editor.remove(cookieKeyFor(scope, accountForCookieScope(context, scope)))
+            }
+            editor.remove(LEGACY_KEY_COOKIES_JSON).apply()
+        }
+
+        /** 某服务当前是否持有落盘的会话（Cookie 桶非空）。 */
+        fun hasServiceSession(context: Context, service: CredentialService): Boolean {
+            if (service == CredentialService.CAMPUS_CARD) {
+                return getCampusCardAccessToken(context).isNotBlank()
+            }
+            val key = cookieKeyFor(service.id, activeAccount(context, service))
+            return !prefsOf(context).getString(key, null).isNullOrBlank()
+        }
+
+        /** 某服务落盘的会话 Cookie 原始 JSON（供高级模式查看凭据，如 jw_uf）。 */
+        fun cookieBucketJson(context: Context, service: CredentialService): String? =
+            prefsOf(context).getString(cookieKeyFor(service.id, activeAccount(context, service)), null)
+
+        /**
+         * 高级模式手动改凭据：改写某服务落盘会话里某个 Cookie 的值。
+         * @param value 新的 Cookie 值（不含 `名=值` 前缀）；传空串则把该 Cookie 值清空。
+         */
+        fun updateServiceCookie(context: Context, service: CredentialService, name: String, value: String) {
+            val key = cookieKeyFor(service.id, activeAccount(context, service))
+            val raw = prefsOf(context).getString(key, null) ?: return
+            val updated = runCatching {
+                val arr = JSONArray(raw)
+                var hit = false
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    if (obj.optString("name") == name) {
+                        obj.put("value", value.trim())
+                        hit = true
+                    }
+                }
+                if (hit) arr.toString() else null
+            }.getOrNull() ?: return
+            prefsOf(context).edit().putString(key, updated).apply()
+            getShared(context, false).updateServiceCookie(service, name, value.trim())
+            getShared(context, true).updateServiceCookie(service, name, value.trim())
+        }
+
+        /** 高级模式开关（跨页面记住）。 */
+        fun getCredentialAdvancedMode(context: Context): Boolean =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(KEY_CREDENTIAL_ADVANCED_MODE, false)
+
+        fun setCredentialAdvancedMode(context: Context, enabled: Boolean) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_CREDENTIAL_ADVANCED_MODE, enabled).apply()
+        }
+
+        /** 清除某服务的会话（Cookie 桶 + 内存 jar 内该服务的 Cookie）。 */
+        fun clearServiceSession(context: Context, service: CredentialService) {
+            val key = cookieKeyFor(service.id, activeAccount(context, service))
+            prefsOf(context).edit().remove(key).apply()
+            getShared(context, false).removeServiceCookies(service)
+            getShared(context, true).removeServiceCookies(service)
+        }
+
+        fun isCredentialAutoVerifyEnabled(context: Context): Boolean =
+            prefsOf(context).getBoolean(KEY_CREDENTIAL_AUTO_VERIFY, true)
+
+        fun setCredentialAutoVerifyEnabled(context: Context, enabled: Boolean) {
+            prefsOf(context).edit().putBoolean(KEY_CREDENTIAL_AUTO_VERIFY, enabled).apply()
+        }
+
+        /**
+         * 一次性迁移：旧版扁平 key → 「服务类型 × 账号」分桶 key。
+         * 一律**复制**，保留旧 key，确保升级不丢失任何凭据。
+         */
+        fun migrateLegacyCredentialKeysOnce(context: Context) {
+            val prefs = prefsOf(context)
+            if (prefs.getBoolean(KEY_CRED_KEYS_MIGRATED, false)) return
+            val editor = prefs.edit()
+            val acc = CredentialService.DEFAULT_ACCOUNT
+
+            fun copyString(legacyKey: String, field: String, service: CredentialService) {
+                val value = prefs.getString(legacyKey, null) ?: return
+                val target = fieldKey(field, service, acc)
+                if (prefs.getString(target, null).isNullOrBlank()) editor.putString(target, value)
+            }
+
+            fun copyBoolean(legacyKey: String, field: String, service: CredentialService) {
+                if (!prefs.contains(legacyKey)) return
+                val target = fieldKey(field, service, acc)
+                if (!prefs.contains(target)) editor.putBoolean(target, prefs.getBoolean(legacyKey, false))
+            }
+
+            copyString(LEGACY_KEY_ENCRYPTED_PASSWORD, FIELD_PASSWORD, CredentialService.UNIFIED_AUTH)
+            copyString(LEGACY_KEY_PASSWORD_CRYPTO_IV, FIELD_PASSWORD_IV, CredentialService.UNIFIED_AUTH)
+            copyBoolean(LEGACY_KEY_REMEMBER_PASSWORD, FIELD_REMEMBER_PASSWORD, CredentialService.UNIFIED_AUTH)
+            copyString(LEGACY_KEY_ENCRYPTED_VPN_PASSWORD, FIELD_PASSWORD, CredentialService.WEBVPN)
+            copyString(LEGACY_KEY_VPN_PASSWORD_CRYPTO_IV, FIELD_PASSWORD_IV, CredentialService.WEBVPN)
+            copyBoolean(LEGACY_KEY_REMEMBER_VPN_PASSWORD, FIELD_REMEMBER_PASSWORD, CredentialService.WEBVPN)
+            copyString(LEGACY_KEY_TWFID, FIELD_TWFID, CredentialService.WEBVPN)
+            copyString(LEGACY_KEY_LAST_STUDENT_ID, FIELD_STUDENT_ID, CredentialService.JIAOWU)
+            copyString(LEGACY_KEY_SAVED_AUTH_MODE, FIELD_AUTH_MODE, CredentialService.JIAOWU)
+
+            val legacyCookies = prefs.getString(LEGACY_KEY_COOKIES_JSON, null)
+            if (!legacyCookies.isNullOrBlank()) {
+                splitCookiesByScope(legacyCookies).forEach { (scopeId, json) ->
+                    val key = cookieKeyFor(scopeId, acc)
+                    if (prefs.getString(key, null).isNullOrBlank()) editor.putString(key, json)
+                }
+            }
+
+            editor.putBoolean(KEY_CRED_KEYS_MIGRATED, true).apply()
+        }
+
+        private fun splitCookiesByScope(raw: String): Map<String, String> {
+            val arr = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyMap()
+            val buckets = HashMap<String, JSONArray>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                val name = obj.optString("name")
+                val domain = obj.optString("domain")
+                if (name.isBlank() || domain.isBlank()) continue
+                buckets.getOrPut(cookieScopeId(name, domain)) { JSONArray() }.put(obj)
+            }
+            return buckets.mapValues { it.value.toString() }
+        }
 
         @Volatile
         private var sharedDirectTransport: WbuAuthTransport? = null
@@ -609,21 +1014,29 @@ internal class WbuAuthTransport(
             return if (useVpn) {
                 sharedVpnTransport ?: synchronized(this) {
                     sharedVpnTransport ?: WbuAuthTransport(appCtx, true).also {
-                        it.restoreCookieStore()
+                        // Cookie 库是进程级共享的，只允许恢复一次
+                        if (!cookieStoreRestored) {
+                            it.restoreCookieStore()
+                            cookieStoreRestored = true
+                        }
                         sharedVpnTransport = it
                     }
                 }
             } else {
                 sharedDirectTransport ?: synchronized(this) {
                     sharedDirectTransport ?: WbuAuthTransport(appCtx, false).also {
-                        it.restoreCookieStore()
+                        if (!cookieStoreRestored) {
+                            it.restoreCookieStore()
+                            cookieStoreRestored = true
+                        }
                         sharedDirectTransport = it
                     }
                 }
             }
         }
 
-        fun prefKeyLastStudentId(): String = KEY_LAST_STUDENT_ID
+        fun prefKeyLastStudentId(context: Context): String =
+            fieldKey(FIELD_STUDENT_ID, CredentialService.JIAOWU, activeAccount(context, CredentialService.JIAOWU))
 
         fun getIdsViaWebVpn(context: Context): Boolean =
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_IDS_VIA_WEBVPN, false)
@@ -639,6 +1052,22 @@ internal class WbuAuthTransport(
         fun setQrViaWebVpn(context: Context, enabled: Boolean) {
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit().putBoolean(KEY_QR_VIA_WEBVPN, enabled).apply()
+        }
+
+        /** 扫一扫使用的二维码解码引擎（默认 ML Kit，识别不理想时切 ZXing）。 */
+        fun getQrScanEngine(context: Context): QrScanEngine {
+            val name = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(KEY_QR_SCAN_ENGINE, null) ?: return QrScanEngine.DEFAULT
+            return try {
+                QrScanEngine.valueOf(name)
+            } catch (e: Exception) {
+                QrScanEngine.DEFAULT
+            }
+        }
+
+        fun setQrScanEngine(context: Context, engine: QrScanEngine) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putString(KEY_QR_SCAN_ENGINE, engine.name).apply()
         }
 
         fun getUsePcUserAgent(context: Context): Boolean =
@@ -681,17 +1110,65 @@ internal class WbuAuthTransport(
                 .edit().putBoolean(KEY_SELECT_SEMESTER_ON_IMPORT, enabled).apply()
         }
 
+        /**
+         * 仅读本地 Cookie 罐判断该服务是否还剩「值得一试」的登录态（不联网）。
+         *
+         * 用于数据请求前的快速短路：只有确定什么都没存时才拦。Cookie 存在但已过期不会被拦，
+         * 仍交由服务端的 [WbuSessionExpiredException] 判定，避免网络抖动误伤。
+         */
+        fun hasLocalSession(
+            context: Context,
+            service: CredentialService,
+            useVpn: Boolean = WbuSyncEngine.getSavedUseVpn(context) ?: false,
+        ): Boolean {
+            val jar = getShared(context, useVpn).cookieStore
+            fun has(name: String) = jar.any { it.name == name && it.value.isNotBlank() }
+            return when (service) {
+                CredentialService.JIAOWU -> has("jw_uf") || has("CASTGC") || (useVpn && has("TWFID"))
+                CredentialService.LIBRARY -> has("PHPSESSID") || has("CASTGC")
+                CredentialService.UNIFIED_AUTH -> has("CASTGC")
+                CredentialService.WEBVPN -> has("TWFID")
+                else -> true
+            }
+        }
+
         fun getTwfid(context: Context): String =
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_TWFID, "").orEmpty()
+            prefsOf(context).getString(twfidKey(context), "").orEmpty()
 
         fun setTwfid(context: Context, value: String) {
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putString(KEY_TWFID, value.trim()).apply()
+            prefsOf(context)
+                .edit().putString(twfidKey(context), value.trim()).apply()
+            _credentialChanges.tryEmit(Unit)
         }
 
         fun clearTwfid(context: Context) {
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().remove(KEY_TWFID).apply()
+            prefsOf(context)
+                .edit().remove(twfidKey(context)).apply()
+            _credentialChanges.tryEmit(Unit)
+        }
+
+        fun getCampusCardAccessToken(context: Context): String =
+            prefsOf(context).getString(campusCardAccessTokenKey(context), "").orEmpty()
+
+        fun getCampusCardRefreshToken(context: Context): String =
+            prefsOf(context).getString(campusCardRefreshTokenKey(context), "").orEmpty()
+
+        fun setCampusCardTokens(context: Context, accessToken: String, refreshToken: String? = null) {
+            val editor = prefsOf(context).edit().putString(campusCardAccessTokenKey(context), accessToken.trim())
+            if (!refreshToken.isNullOrBlank()) {
+                editor.putString(campusCardRefreshTokenKey(context), refreshToken.trim())
+            }
+            editor.apply()
+            _credentialChanges.tryEmit(Unit)
+        }
+
+        fun clearCampusCardTokens(context: Context) {
+            prefsOf(context)
+                .edit()
+                .remove(campusCardAccessTokenKey(context))
+                .remove(campusCardRefreshTokenKey(context))
+                .apply()
+            _credentialChanges.tryEmit(Unit)
         }
 
         fun getUseHttpsWebVpn(context: Context): Boolean =
@@ -702,9 +1179,13 @@ internal class WbuAuthTransport(
                 .edit().putBoolean(KEY_USE_HTTPS_WEBVPN, enabled).apply()
         }
 
-        fun hasPersistedSession(context: Context): Boolean =
-            !context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .getString(KEY_COOKIES_JSON, null).isNullOrBlank()
+        fun hasPersistedSession(context: Context): Boolean {
+            val prefs = prefsOf(context)
+            if (!prefs.getString(LEGACY_KEY_COOKIES_JSON, null).isNullOrBlank()) return true
+            return allCookieScopeIds().any { scope ->
+                !prefs.getString(cookieKeyFor(scope, accountForCookieScope(context, scope)), null).isNullOrBlank()
+            }
+        }
 
         fun getSavedUseVpn(context: Context): Boolean? {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -721,13 +1202,13 @@ internal class WbuAuthTransport(
         }
 
         fun getSavedStudentId(context: Context): String =
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .getString(KEY_LAST_STUDENT_ID, "").orEmpty()
+            prefsOf(context)
+                .getString(prefKeyLastStudentId(context), "").orEmpty()
 
         fun setSavedStudentId(context: Context, studentId: String) {
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefsOf(context)
                 .edit()
-                .putString(KEY_LAST_STUDENT_ID, studentId)
+                .putString(prefKeyLastStudentId(context), studentId)
                 .apply()
         }
 
@@ -823,75 +1304,143 @@ internal class WbuAuthTransport(
             return keyGenerator.generateKey()
         }
 
-        fun isRememberPasswordEnabled(context: Context): Boolean {
-            return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(KEY_REMEMBER_PASSWORD, false)
+        fun isRememberPasswordEnabled(
+            context: Context,
+            service: CredentialService = CredentialService.UNIFIED_AUTH
+        ): Boolean {
+            val key = fieldKey(FIELD_REMEMBER_PASSWORD, service, activeAccount(context, service))
+            return prefsOf(context).getBoolean(key, false)
         }
 
-        fun setRememberPasswordEnabled(context: Context, enabled: Boolean) {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            prefs.edit().putBoolean(KEY_REMEMBER_PASSWORD, enabled).apply()
+        fun setRememberPasswordEnabled(context: Context, service: CredentialService, enabled: Boolean) {
+            val key = fieldKey(FIELD_REMEMBER_PASSWORD, service, activeAccount(context, service))
+            prefsOf(context).edit().putBoolean(key, enabled).apply()
             if (!enabled) {
-                clearSavedPassword(context)
+                clearSavedPassword(context, service)
             }
         }
 
-        fun hasSavedPassword(context: Context): Boolean {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            return isRememberPasswordEnabled(context) &&
-                !prefs.getString(KEY_ENCRYPTED_PASSWORD, null).isNullOrBlank() &&
-                !prefs.getString(KEY_PASSWORD_CRYPTO_IV, null).isNullOrBlank()
+        /** 兼容旧调用：等价于统一认证服务。 */
+        fun setRememberPasswordEnabled(context: Context, enabled: Boolean) =
+            setRememberPasswordEnabled(context, CredentialService.UNIFIED_AUTH, enabled)
+
+        /** 该服务自身是否持有密码槽（不含教务对统一认证的回退）。 */
+        fun hasOwnPassword(context: Context, service: CredentialService): Boolean {
+            val acc = activeAccount(context, service)
+            val prefs = prefsOf(context)
+            return !prefs.getString(fieldKey(FIELD_PASSWORD, service, acc), null).isNullOrBlank() &&
+                !prefs.getString(fieldKey(FIELD_PASSWORD_IV, service, acc), null).isNullOrBlank()
         }
 
-        fun getSavedPassword(context: Context): String? {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            if (!isRememberPasswordEnabled(context)) return null
-            val encryptedBase64 = prefs.getString(KEY_ENCRYPTED_PASSWORD, null) ?: return null
-            val ivBase64 = prefs.getString(KEY_PASSWORD_CRYPTO_IV, null) ?: return null
-            return try {
-                val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
-                val ivBytes = Base64.decode(ivBase64, Base64.NO_WRAP)
-                val gcmSpec = GCMParameterSpec(128, ivBytes)
-                cipher.init(Cipher.DECRYPT_MODE, getSecretKey(), gcmSpec)
-                val decryptedBytes = cipher.doFinal(Base64.decode(encryptedBase64, Base64.NO_WRAP))
-                String(decryptedBytes, Charsets.UTF_8).replace("\u0000", "").trim()
-            } catch (e: Exception) {
-                Log.w("WbuAuthTransport", "Failed to decrypt saved password", e)
-                null
+        fun hasSavedPassword(
+            context: Context,
+            service: CredentialService = CredentialService.UNIFIED_AUTH
+        ): Boolean {
+            if (hasOwnPassword(context, service) && isRememberPasswordEnabled(context, service)) return true
+            // 教务系统：自身密码槽为空时回退统一认证（两者当前共用同一密码）
+            if (service == CredentialService.JIAOWU) return hasSavedPassword(context, CredentialService.UNIFIED_AUTH)
+            return false
+        }
+
+        fun getSavedPassword(
+            context: Context,
+            service: CredentialService = CredentialService.UNIFIED_AUTH
+        ): String? {
+            if (isRememberPasswordEnabled(context, service)) {
+                decryptStoredPassword(context, service)?.let { return it }
             }
+            if (service == CredentialService.JIAOWU) {
+                return getSavedPassword(context, CredentialService.UNIFIED_AUTH)
+            }
+            return null
         }
 
-        fun savePassword(context: Context, password: String) {
+        private fun decryptStoredPassword(context: Context, service: CredentialService): String? {
+            val acc = activeAccount(context, service)
+            val prefs = prefsOf(context)
+            val encryptedBase64 = prefs.getString(fieldKey(FIELD_PASSWORD, service, acc), null) ?: return null
+            val ivBase64 = prefs.getString(fieldKey(FIELD_PASSWORD_IV, service, acc), null) ?: return null
+            return decrypt(encryptedBase64, ivBase64)
+        }
+
+        /**
+         * 读取已存储的明文密码（不受「记住密码」开关影响），用于高级模式的查看/编辑。
+         * 教务系统在自身密码槽为空时回退统一认证。
+         */
+        fun getStoredPassword(
+            context: Context,
+            service: CredentialService = CredentialService.UNIFIED_AUTH
+        ): String? {
+            decryptStoredPassword(context, service)?.let { if (it.isNotBlank()) return it }
+            if (service == CredentialService.JIAOWU) {
+                return getStoredPassword(context, CredentialService.UNIFIED_AUTH)
+            }
+            return null
+        }
+
+        fun savePassword(context: Context, service: CredentialService, password: String) {
             if (password.isBlank()) return
+            val acc = activeAccount(context, service)
+            encryptInto(
+                context,
+                fieldKey(FIELD_PASSWORD, service, acc),
+                fieldKey(FIELD_PASSWORD_IV, service, acc),
+                password
+            )
+        }
+
+        /** 兼容旧调用：等价于统一认证服务。 */
+        fun savePassword(context: Context, password: String) =
+            savePassword(context, CredentialService.UNIFIED_AUTH, password)
+
+        fun clearSavedPassword(
+            context: Context,
+            service: CredentialService = CredentialService.UNIFIED_AUTH
+        ) {
+            val acc = activeAccount(context, service)
+            val editor = prefsOf(context).edit()
+                .remove(fieldKey(FIELD_PASSWORD, service, acc))
+                .remove(fieldKey(FIELD_PASSWORD_IV, service, acc))
+            if (service == CredentialService.UNIFIED_AUTH) {
+                // 保持旧行为：清除统一认证密码时，同时清除教务记住的登录方式与教务密码槽
+                val jwAcc = activeAccount(context, CredentialService.JIAOWU)
+                editor.remove(fieldKey(FIELD_AUTH_MODE, CredentialService.JIAOWU, jwAcc))
+                editor.remove(fieldKey(FIELD_PASSWORD, CredentialService.JIAOWU, jwAcc))
+                editor.remove(fieldKey(FIELD_PASSWORD_IV, CredentialService.JIAOWU, jwAcc))
+            }
+            editor.apply()
+        }
+
+        private fun encryptInto(context: Context, dataKey: String, ivKey: String, plain: String) {
             try {
                 val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
                 cipher.init(Cipher.ENCRYPT_MODE, getSecretKey())
-                val encryptedBytes = cipher.doFinal(password.toByteArray(Charsets.UTF_8))
-                val encryptedBase64 = Base64.encodeToString(encryptedBytes, Base64.NO_WRAP)
+                val encryptedBase64 = Base64.encodeToString(cipher.doFinal(plain.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
                 val ivBase64 = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
-
-                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    .edit()
-                    .putString(KEY_ENCRYPTED_PASSWORD, encryptedBase64)
-                    .putString(KEY_PASSWORD_CRYPTO_IV, ivBase64)
+                prefsOf(context).edit()
+                    .putString(dataKey, encryptedBase64)
+                    .putString(ivKey, ivBase64)
                     .apply()
             } catch (e: Exception) {
-                Log.w("WbuAuthTransport", "Failed to encrypt and save password", e)
+                Log.w("WbuAuthTransport", "Failed to encrypt and save credential", e)
             }
         }
 
-        fun clearSavedPassword(context: Context) {
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit()
-                .remove(KEY_ENCRYPTED_PASSWORD)
-                .remove(KEY_PASSWORD_CRYPTO_IV)
-                .remove(KEY_SAVED_AUTH_MODE)
-                .apply()
+        private fun decrypt(encryptedBase64: String, ivBase64: String): String? = try {
+            val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
+            val ivBytes = Base64.decode(ivBase64, Base64.NO_WRAP)
+            val gcmSpec = GCMParameterSpec(128, ivBytes)
+            cipher.init(Cipher.DECRYPT_MODE, getSecretKey(), gcmSpec)
+            val decryptedBytes = cipher.doFinal(Base64.decode(encryptedBase64, Base64.NO_WRAP))
+            String(decryptedBytes, Charsets.UTF_8).replace("\u0000", "").trim()
+        } catch (e: Exception) {
+            Log.w("WbuAuthTransport", "Failed to decrypt saved credential", e)
+            null
         }
 
         fun getSavedAuthMode(context: Context): WbuAuthMode {
-            val name = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .getString(KEY_SAVED_AUTH_MODE, null) ?: return WbuAuthMode.UNIFIED_CAS
+            val key = fieldKey(FIELD_AUTH_MODE, CredentialService.JIAOWU, activeAccount(context, CredentialService.JIAOWU))
+            val name = prefsOf(context).getString(key, null) ?: return WbuAuthMode.UNIFIED_CAS
             return try {
                 WbuAuthMode.valueOf(name)
             } catch (e: Exception) {
@@ -900,75 +1449,26 @@ internal class WbuAuthTransport(
         }
 
         fun setSavedAuthMode(context: Context, authMode: WbuAuthMode) {
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit()
-                .putString(KEY_SAVED_AUTH_MODE, authMode.name)
-                .apply()
+            val key = fieldKey(FIELD_AUTH_MODE, CredentialService.JIAOWU, activeAccount(context, CredentialService.JIAOWU))
+            prefsOf(context).edit().putString(key, authMode.name).apply()
         }
 
-        fun isRememberVpnPasswordEnabled(context: Context): Boolean {
-            return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(KEY_REMEMBER_VPN_PASSWORD, false)
-        }
+        fun isRememberVpnPasswordEnabled(context: Context): Boolean =
+            isRememberPasswordEnabled(context, CredentialService.WEBVPN)
 
-        fun setRememberVpnPasswordEnabled(context: Context, enabled: Boolean) {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            prefs.edit().putBoolean(KEY_REMEMBER_VPN_PASSWORD, enabled).apply()
-            if (!enabled) {
-                clearSavedVpnPassword(context)
-            }
-        }
+        fun setRememberVpnPasswordEnabled(context: Context, enabled: Boolean) =
+            setRememberPasswordEnabled(context, CredentialService.WEBVPN, enabled)
 
-        fun hasSavedVpnPassword(context: Context): Boolean {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            return isRememberVpnPasswordEnabled(context) &&
-                !prefs.getString(KEY_ENCRYPTED_VPN_PASSWORD, null).isNullOrBlank() &&
-                !prefs.getString(KEY_VPN_PASSWORD_CRYPTO_IV, null).isNullOrBlank()
-        }
+        fun hasSavedVpnPassword(context: Context): Boolean =
+            hasSavedPassword(context, CredentialService.WEBVPN)
 
-        fun getSavedVpnPassword(context: Context): String? {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            if (!isRememberVpnPasswordEnabled(context)) return null
-            val encryptedBase64 = prefs.getString(KEY_ENCRYPTED_VPN_PASSWORD, null) ?: return null
-            val ivBase64 = prefs.getString(KEY_VPN_PASSWORD_CRYPTO_IV, null) ?: return null
-            return try {
-                val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
-                val ivBytes = Base64.decode(ivBase64, Base64.NO_WRAP)
-                val gcmSpec = GCMParameterSpec(128, ivBytes)
-                cipher.init(Cipher.DECRYPT_MODE, getSecretKey(), gcmSpec)
-                val decryptedBytes = cipher.doFinal(Base64.decode(encryptedBase64, Base64.NO_WRAP))
-                String(decryptedBytes, Charsets.UTF_8).replace("\u0000", "").trim()
-            } catch (e: Exception) {
-                Log.w("WbuAuthTransport", "Failed to decrypt saved VPN password", e)
-                null
-            }
-        }
+        fun getSavedVpnPassword(context: Context): String? =
+            getSavedPassword(context, CredentialService.WEBVPN)
 
-        fun saveVpnPassword(context: Context, password: String) {
-            if (password.isBlank()) return
-            try {
-                val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
-                cipher.init(Cipher.ENCRYPT_MODE, getSecretKey())
-                val encryptedBytes = cipher.doFinal(password.toByteArray(Charsets.UTF_8))
-                val encryptedBase64 = Base64.encodeToString(encryptedBytes, Base64.NO_WRAP)
-                val ivBase64 = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
+        fun saveVpnPassword(context: Context, password: String) =
+            savePassword(context, CredentialService.WEBVPN, password)
 
-                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    .edit()
-                    .putString(KEY_ENCRYPTED_VPN_PASSWORD, encryptedBase64)
-                    .putString(KEY_VPN_PASSWORD_CRYPTO_IV, ivBase64)
-                    .apply()
-            } catch (e: Exception) {
-                Log.w("WbuAuthTransport", "Failed to encrypt and save VPN password", e)
-            }
-        }
-
-        fun clearSavedVpnPassword(context: Context) {
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit()
-                .remove(KEY_ENCRYPTED_VPN_PASSWORD)
-                .remove(KEY_VPN_PASSWORD_CRYPTO_IV)
-                .apply()
-        }
+        fun clearSavedVpnPassword(context: Context) =
+            clearSavedPassword(context, CredentialService.WEBVPN)
     }
 }

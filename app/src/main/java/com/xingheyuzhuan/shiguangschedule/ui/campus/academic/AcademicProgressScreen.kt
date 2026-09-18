@@ -55,6 +55,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -87,6 +91,7 @@ import com.xingheyuzhuan.shiguangschedule.data.model.wbu.AcademicProgressData
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.AcademicProgressSummary
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.AcademicStats
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.StudentProfile
+import com.xingheyuzhuan.shiguangschedule.Destination
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import com.xingheyuzhuan.shiguangschedule.ui.components.DockSafeBottomPadding
 import com.xingheyuzhuan.shiguangschedule.ui.components.NavigationRailWidth
@@ -104,6 +109,7 @@ fun AcademicProgressScreen(
 
     if (uiState.needLogin || showLoginSheet) {
         WbuCampusAuthSheet(
+            onNavigateToAccount = { navBridge.navigate(Destination.CredentialManagement) },
             onDismiss = {
                 showLoginSheet = false
                 viewModel.onLoginDismissed()
@@ -111,8 +117,26 @@ fun AcademicProgressScreen(
             onLoginSuccess = {
                 showLoginSheet = false
                 viewModel.onLoginSuccess()
-            }
+            },
+            title = stringResource(R.string.title_login_academic)
         )
+    }
+
+    // 课程全字段档案弹窗
+    val selectedCourse = uiState.selectedCourse
+    if (selectedCourse != null) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { viewModel.selectCourse(null) },
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        ) {
+            CourseDetailBottomSheetContent(
+                course = selectedCourse,
+                onDismiss = { viewModel.selectCourse(null) }
+            )
+        }
     }
 
     val backgroundBrush = ThemeGradients.backgroundGradient()
@@ -251,6 +275,8 @@ fun AcademicProgressScreen(
                                 onSearchChange = { viewModel.setSearchKeyword(it) },
                                 filterStatus = uiState.filterStatus,
                                 onFilterStatus = { viewModel.setFilterStatus(it) },
+                                filterExamMode = uiState.filterExamMode,
+                                onFilterExamMode = { viewModel.setFilterExamMode(it) },
                                 modifier = Modifier.padding(horizontal = 16.dp)
                             )
                         }
@@ -279,6 +305,7 @@ fun AcademicProgressScreen(
                                     group = group,
                                     isExpanded = isExpanded,
                                     onToggle = { viewModel.toggleGroup(group.nodeId) },
+                                    onCourseClick = { viewModel.selectCourse(it) },
                                     modifier = Modifier.padding(horizontal = 16.dp)
                                 )
                             }
@@ -713,6 +740,8 @@ private fun SearchAndFilterBar(
     onSearchChange: (String) -> Unit,
     filterStatus: String,
     onFilterStatus: (String) -> Unit,
+    filterExamMode: String,
+    onFilterExamMode: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -773,6 +802,23 @@ private fun SearchAndFilterBar(
                     shape = RoundedCornerShape(10.dp)
                 )
             }
+            // 考核方式过滤
+            item {
+                FilterChip(
+                    selected = filterExamMode == "考试",
+                    onClick = { onFilterExamMode(if (filterExamMode == "考试") "" else "考试") },
+                    label = { Text(stringResource(R.string.filter_exam_mode_exam)) },
+                    shape = RoundedCornerShape(10.dp)
+                )
+            }
+            item {
+                FilterChip(
+                    selected = filterExamMode == "考查",
+                    onClick = { onFilterExamMode(if (filterExamMode == "考查") "" else "考查") },
+                    label = { Text(stringResource(R.string.filter_exam_mode_inspect)) },
+                    shape = RoundedCornerShape(10.dp)
+                )
+            }
         }
     }
 }
@@ -785,6 +831,7 @@ private fun AcademicGroupCard(
     group: AcademicCourseGroup,
     isExpanded: Boolean,
     onToggle: () -> Unit,
+    onCourseClick: (AcademicCourse) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val arrowRotation by animateFloatAsState(
@@ -864,7 +911,10 @@ private fun AcademicGroupCard(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     group.courses.forEach { course ->
-                        CourseRowItem(course = course)
+                        CourseRowItem(
+                            course = course,
+                            onClick = { onCourseClick(course) }
+                        )
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                 }
@@ -878,10 +928,13 @@ private fun AcademicGroupCard(
  */
 @Composable
 private fun CourseRowItem(
-    course: AcademicCourse
+    course: AcademicCourse,
+    onClick: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
@@ -891,7 +944,7 @@ private fun CourseRowItem(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // 首行：课程名与状态 Badge
+            // 首行：课程名与考查/考试 tag + 状态 Badge
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -906,7 +959,16 @@ private fun CourseRowItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                CourseStatusBadge(course = course)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    // 考核方式单字 Tag：[试] 表示考试，[查] 表示考查
+                    if (course.examTag.isNotBlank()) {
+                        ExamSingleTag(tag = course.examTag)
+                    }
+                    CourseStatusBadge(course = course)
+                }
             }
 
             // 次行：课程代码 · 性质 · 计划/获得学分 · 成绩/绩点
@@ -973,6 +1035,175 @@ private fun CourseRowItem(
                 }
             }
         }
+    }
+}
+
+/**
+ * 考核方式单字 Tag：[试] 或 [查]
+ */
+@Composable
+private fun ExamSingleTag(tag: String) {
+    val isExam = tag == "试" || tag.contains("试") || tag.equals("exam", ignoreCase = true)
+    val bgColor = if (isExam) Color(0xFFE3F2FD) else Color(0xFFF3E5F5)
+    val textColor = if (isExam) Color(0xFF1565C0) else Color(0xFF7B1FA2)
+    val labelText = if (isExam) stringResource(R.string.tag_exam_single) else stringResource(R.string.tag_inspect_single)
+
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(bgColor)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    ) {
+        Text(
+            text = labelText,
+            style = MaterialTheme.typography.labelSmall,
+            color = textColor,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp
+        )
+    }
+}
+
+/**
+ * 课程全字段档案 BottomSheet 内容
+ */
+@Composable
+private fun CourseDetailBottomSheetContent(
+    course: AcademicCourse,
+    onDismiss: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 12.dp)
+            .padding(bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // 顶部标题与关闭
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = course.courseName.ifBlank { stringResource(R.string.title_course_archive) },
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                if (course.courseCode.isNotBlank()) {
+                    Text(
+                        text = course.courseCode,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Default.Clear, contentDescription = null)
+            }
+        }
+
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+        // 1. 课程基础与属性归属
+        SectionCard(title = stringResource(R.string.section_course_basic)) {
+            DetailFieldRow(label = stringResource(R.string.field_course_code), value = course.courseCode.ifBlank { "--" })
+            DetailFieldRow(label = stringResource(R.string.field_course_name), value = course.courseName.ifBlank { "--" })
+            DetailFieldRow(label = stringResource(R.string.field_college), value = course.college.ifBlank { "--" })
+            DetailFieldRow(label = stringResource(R.string.field_category), value = course.category.ifBlank { "--" })
+            DetailFieldRow(label = stringResource(R.string.field_course_type), value = course.courseType.ifBlank { "--" })
+            DetailFieldRow(label = stringResource(R.string.field_course_belonging), value = course.courseBelonging.ifBlank { "--" })
+            DetailFieldRow(label = stringResource(R.string.field_nature), value = course.nature.ifBlank { "--" })
+            DetailFieldRow(label = stringResource(R.string.field_attribute), value = course.courseAttribute.ifBlank { if (course.isElective) "选修" else "必修" })
+            DetailFieldRow(
+                label = stringResource(R.string.field_exam_type),
+                value = if (course.examType.isNotBlank()) "${course.examType} [${course.examTag}]" else "--"
+            )
+        }
+
+        // 2. 学分与考核成绩
+        SectionCard(title = stringResource(R.string.section_course_credits_score)) {
+            DetailFieldRow(
+                label = stringResource(R.string.field_plan_credit),
+                value = stringResource(R.string.format_credits_val, course.planCredit.toString())
+            )
+            DetailFieldRow(
+                label = stringResource(R.string.field_rpxf),
+                value = stringResource(R.string.format_credits_val, course.rpxf.toString())
+            )
+            DetailFieldRow(
+                label = stringResource(R.string.field_earned_credit),
+                value = stringResource(R.string.format_credits_val, course.earnedCredit.toString())
+            )
+            DetailFieldRow(label = stringResource(R.string.field_is_credit_earned), value = course.creditEarned.ifBlank { "--" })
+            DetailFieldRow(
+                label = stringResource(R.string.field_score),
+                value = if (course.score.isNotBlank() && course.score != "--") stringResource(R.string.format_score_val, course.score) else "--"
+            )
+            DetailFieldRow(label = stringResource(R.string.field_gpa), value = course.gpa.ifBlank { "--" })
+            DetailFieldRow(label = stringResource(R.string.field_status), value = course.status.ifBlank { "--" })
+        }
+
+        // 3. 学期进程与考务状态
+        SectionCard(title = stringResource(R.string.section_course_schedule_exam)) {
+            DetailFieldRow(label = stringResource(R.string.field_allowed_semester), value = course.allowedSemester.ifBlank { "--" })
+            DetailFieldRow(label = stringResource(R.string.field_grade_semester), value = course.gradeSemester.ifBlank { "--" })
+            DetailFieldRow(label = stringResource(R.string.field_study_nature), value = course.studyNature.ifBlank { "--" })
+            DetailFieldRow(label = stringResource(R.string.field_is_makeup), value = course.isMakeup.ifBlank { "--" })
+            DetailFieldRow(label = stringResource(R.string.field_special_grade), value = course.specialGrade.ifBlank { "--" })
+            DetailFieldRow(label = stringResource(R.string.field_remark), value = course.remark.ifBlank { "--" })
+        }
+    }
+}
+
+@Composable
+private fun SectionCard(
+    title: String,
+    content: @Composable () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            content()
+        }
+    }
+}
+
+@Composable
+private fun DetailFieldRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.End
+        )
     }
 }
 

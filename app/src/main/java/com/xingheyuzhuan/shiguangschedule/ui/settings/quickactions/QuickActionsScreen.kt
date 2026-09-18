@@ -140,6 +140,12 @@ fun QuickActionsScreen(
                             subtitle = stringResource(R.string.desc_library_borrow),
                             onClick = { navBridge.navigate(Destination.LibraryBorrow) }
                         )
+
+                        QuickActionItem(
+                            title = stringResource(R.string.item_course_selection),
+                            subtitle = stringResource(R.string.desc_course_selection),
+                            onClick = { navBridge.navigate(Destination.CourseSelection) }
+                        )
                     }
                 }
             }
