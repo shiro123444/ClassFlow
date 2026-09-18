@@ -602,6 +602,49 @@ fun WebAppScreen(
                 onScanned = { rawResult ->
                     val webView = webViewInstance
                     scanRequest = null
+                    val hairdryer = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.parse(rawResult) as? com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.Result.Hairdryer
+                    if (hairdryer != null) {
+                        val scheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayScheme(hairdryer.cd)
+                        val ulinkUrl = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayUrl(hairdryer.cd)
+                        val nfcScheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerNfcScheme(hairdryer.cd)
+                        val explicitIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
+                            setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        val launched = runCatching {
+                            context.startActivity(explicitIntent)
+                            true
+                        }.getOrElse {
+                            val genericIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            runCatching {
+                                context.startActivity(genericIntent)
+                                true
+                            }.getOrElse {
+                                val nfcIntent = Intent(android.nfc.NfcAdapter.ACTION_NDEF_DISCOVERED, Uri.parse(nfcScheme)).apply {
+                                    setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                runCatching {
+                                    context.startActivity(nfcIntent)
+                                    true
+                                }.getOrElse {
+                                    val ulinkIntent = Intent(Intent.ACTION_VIEW, Uri.parse(ulinkUrl)).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    runCatching {
+                                        context.startActivity(ulinkIntent)
+                                        true
+                                    }.getOrDefault(false)
+                                }
+                            }
+                        }
+                        if (!launched) {
+                            Toast.makeText(context, context.getString(R.string.ujing_alipay_not_installed), Toast.LENGTH_SHORT).show()
+                        }
+                        return@QrScannerOverlay
+                    }
                     if (webView != null && rawResult.isNotBlank()) {
                         when (request) {
                             is ScanRequest.Redirect -> {

@@ -772,6 +772,7 @@
     <string name="dialog_ujing_washer_offline_title">設備離線</string>
     <string name="dialog_ujing_washer_offline_message">該洗衣機設備當前已離線，暫無法下單使用。</string>
     <string name="ujing_washer_checking">正在核驗洗衣機狀態...</string>
+    <string name="ujing_alipay_not_installed">未找到可處理支付寶請求的應用</string>
 
     <!-- 語言設定（上游同步：語言 Tag 陣列 + 語言顯示名稱陣列，跟隨系統用空 tag 表示） -->
     <string-array name="language_tags">

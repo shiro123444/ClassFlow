@@ -772,6 +772,7 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="dialog_ujing_washer_offline_title">Device Offline</string>
     <string name="dialog_ujing_washer_offline_message">The washing machine is currently offline and unavailable.</string>
     <string name="ujing_washer_checking">Checking washing machine status...</string>
+    <string name="ujing_alipay_not_installed">No app found to handle Alipay request</string>
 
     <!-- Language settings (upstream sync: language tag array + display name array, empty tag = follow system) -->
     <string-array name="language_tags">

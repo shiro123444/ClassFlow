@@ -3,6 +3,7 @@ package com.xingheyuzhuan.shiguangschedule
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.Uri
 import android.nfc.NfcAdapter
 import android.os.Build
 import android.os.Bundle
@@ -307,6 +308,41 @@ class MainActivity : AppCompatActivity() {
             pendingDeepLink.value = Destination.WebApp(
                 com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId.CAMPUS_CARD.name
             )
+            return
+        }
+
+        val hairdryer = com.xingheyuzhuan.shiguangschedule.data.network.wbu.CampusLinkRouter.extractHairdryer(intent)
+        if (hairdryer != null) {
+            val scheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayScheme(hairdryer.cd)
+            val ulinkUrl = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayUrl(hairdryer.cd)
+            val nfcScheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerNfcScheme(hairdryer.cd)
+            val explicitIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
+                setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching {
+                startActivity(explicitIntent)
+            }.getOrElse {
+                val genericIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                runCatching {
+                    startActivity(genericIntent)
+                }.getOrElse {
+                    val nfcIntent = Intent(NfcAdapter.ACTION_NDEF_DISCOVERED, Uri.parse(nfcScheme)).apply {
+                        setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    runCatching {
+                        startActivity(nfcIntent)
+                    }.getOrElse {
+                        val ulinkIntent = Intent(Intent.ACTION_VIEW, Uri.parse(ulinkUrl)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        runCatching { startActivity(ulinkIntent) }
+                    }
+                }
+            }
             return
         }
 

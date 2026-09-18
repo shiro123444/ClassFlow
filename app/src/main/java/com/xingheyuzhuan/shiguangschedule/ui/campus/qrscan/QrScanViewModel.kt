@@ -65,6 +65,7 @@ enum class QrTransientNotice { NOT_CAS_QR, PHOTO_NO_CODE }
 sealed interface QrScanEvent {
     data class NavigateToWater(val cd: String) : QrScanEvent
     data class NavigateToWasher(val initialUrl: String?, val pendingAutoScan: String) : QrScanEvent
+    data class OpenHairdryer(val cd: String, val scheme: String, val ulinkUrl: String) : QrScanEvent
 }
 
 /**
@@ -173,6 +174,7 @@ class QrScanViewModel @Inject constructor(
 
             // 用户主动选图：允许重复提交同一张（否则失败后重选会被去重逻辑挡掉）
             handledUuid = null
+            handledUjing = null
             if (raw.isNullOrBlank()) notifyPhotoNoCode() else submitDecoded(raw)
         }
     }
@@ -213,7 +215,9 @@ class QrScanViewModel @Inject constructor(
             }
 
             is com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.Result.Hairdryer -> {
-                _hairdryerPrompt.value = true
+                val scheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayScheme(ujing.cd)
+                val ulink = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayUrl(ujing.cd)
+                _scanEvent.tryEmit(QrScanEvent.OpenHairdryer(cd = ujing.cd, scheme = scheme, ulinkUrl = ulink))
             }
 
             is com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.Result.Washer -> {

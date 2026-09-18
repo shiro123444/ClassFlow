@@ -72,4 +72,37 @@ class UjingQrLinkTest {
         assertEquals("0000000000000A1234567202208040004678", washer.uuid)
         assertEquals("http://app.littleswan.com/u_download.html?type=Ujing&uuid=0000000000000A1234567202208040004678", washer.raw)
     }
+
+    @Test
+    fun buildsHairdryerAlipaySchemeAndUrl() {
+        val cd = "0014202206120446"
+        val scheme = UjingQrLink.buildHairdryerAlipayScheme(cd)
+        assertTrue(scheme.startsWith("alipays://platformapi/startapp?appId=10000007&actionType=route&codeContent="))
+        assertTrue(scheme.contains("0014202206120446"))
+
+        val nfcScheme = UjingQrLink.buildHairdryerNfcScheme(cd)
+        assertTrue(nfcScheme.startsWith("alipay://nfc/app?id=10000007&actionType=route&codeContent="))
+        assertTrue(nfcScheme.contains("0014202206120446"))
+
+        val ulink = UjingQrLink.buildHairdryerAlipayUrl(cd)
+        assertTrue(ulink.startsWith("https://render.alipay.com/p/s/ulink/sn?s=dc&scheme=alipay"))
+        assertTrue(ulink.contains("0014202206120446"))
+
+        // 测试生成的链接与 scheme 可被 parse 正确提取
+        val resUlink = UjingQrLink.parse(ulink)
+        assertTrue(resUlink is UjingQrLink.Result.Hairdryer)
+        assertEquals(cd, (resUlink as UjingQrLink.Result.Hairdryer).cd)
+
+        val resScheme = UjingQrLink.parse(scheme)
+        assertTrue(resScheme is UjingQrLink.Result.Hairdryer)
+        assertEquals(cd, (resScheme as UjingQrLink.Result.Hairdryer).cd)
+    }
+
+    @Test
+    fun parsesAlipayHairdryerUlinkFromUser() {
+        val raw = "https://render.alipay.com/p/s/ulink/sn?s=dc&scheme=alipay%3a%2f%2fnfc%2fapp%3fid%3d10000007%26actionType%3droute%26codeContent%3dhttp%253a%252f%252fq.ujing.com.cn%252f6d%252findex.html%253fcd%253d0014202206120446"
+        val res = UjingQrLink.parse(raw)
+        assertTrue(res is UjingQrLink.Result.Hairdryer)
+        assertEquals("0014202206120446", (res as UjingQrLink.Result.Hairdryer).cd)
+    }
 }

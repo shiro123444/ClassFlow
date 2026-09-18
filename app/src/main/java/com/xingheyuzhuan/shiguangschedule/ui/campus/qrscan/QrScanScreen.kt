@@ -1,5 +1,8 @@
 package com.xingheyuzhuan.shiguangschedule.ui.campus.qrscan
 
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -53,6 +57,7 @@ fun QrScanScreen(
     navBridge: NavBridge,
     viewModel: QrScanViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
     val state by viewModel.state.collectAsState()
     val transientNotice by viewModel.transientNotice.collectAsState()
     val tlsPrompt by viewModel.tlsPrompt.collectAsState()
@@ -78,6 +83,56 @@ fun QrScanScreen(
                             pendingAutoScan = event.pendingAutoScan
                         )
                     )
+                }
+                is QrScanEvent.OpenHairdryer -> {
+                    val schemeUri = Uri.parse(event.scheme)
+                    // 1. 优先使用标准 alipays:// Scheme 显式调起支付宝官方客户端（经实测可直接唤起吹风机原生小程序）
+                    val explicitIntent = Intent(Intent.ACTION_VIEW, schemeUri).apply {
+                        setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    val launched = runCatching {
+                        context.startActivity(explicitIntent)
+                        true
+                    }.getOrElse {
+                        // 2. 兜底：通用 alipays Scheme（适配分身等）
+                        val genericIntent = Intent(Intent.ACTION_VIEW, schemeUri).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        runCatching {
+                            context.startActivity(genericIntent)
+                            true
+                        }.getOrElse {
+                            // 3. 兜底：尝试 NFC Action 调起 alipay://nfc/app
+                            val nfcScheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerNfcScheme(event.cd)
+                            val nfcIntent = Intent(android.nfc.NfcAdapter.ACTION_NDEF_DISCOVERED, Uri.parse(nfcScheme)).apply {
+                                setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            runCatching {
+                                context.startActivity(nfcIntent)
+                                true
+                            }.getOrElse {
+                                // 4. 降级：Universal Link 网页或浏览器调起
+                                val ulinkIntent = Intent(Intent.ACTION_VIEW, Uri.parse(event.ulinkUrl)).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                runCatching {
+                                    context.startActivity(ulinkIntent)
+                                    true
+                                }.getOrDefault(false)
+                            }
+                        }
+                    }
+                    if (launched) {
+                        navBridge.popBackStack()
+                    } else {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.ujing_alipay_not_installed),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                 }
             }
         }

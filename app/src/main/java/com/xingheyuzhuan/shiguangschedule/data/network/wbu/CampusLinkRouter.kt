@@ -101,4 +101,31 @@ object CampusLinkRouter {
 
         return null
     }
+
+    /**
+     * 从接收到的 Intent 中安全提取吹风机设备信息（若符合吹风机规范）。
+     */
+    fun extractHairdryer(intent: Intent?): UjingQrLink.Result.Hairdryer? {
+        if (intent == null) return null
+
+        intent.data?.let { uri ->
+            val res = UjingQrLink.parse(uri.toString())
+            if (res is UjingQrLink.Result.Hairdryer) return res
+        }
+
+        @Suppress("DEPRECATION")
+        val rawMessages = intent.getParcelableArrayExtra(NfcAdapter.EXTRA_NDEF_MESSAGES)
+        if (rawMessages != null) {
+            for (raw in rawMessages) {
+                val msg = raw as? NdefMessage ?: continue
+                for (record in msg.records) {
+                    val uri = record.toUri() ?: continue
+                    val res = UjingQrLink.parse(uri.toString())
+                    if (res is UjingQrLink.Result.Hairdryer) return res
+                }
+            }
+        }
+
+        return null
+    }
 }
