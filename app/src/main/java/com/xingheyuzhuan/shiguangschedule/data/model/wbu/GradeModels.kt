@@ -87,25 +87,11 @@ data class CourseGrade(
 )
 
 /**
- * 成绩综合统计数据（加权 GPA、加权均分、总学分等）
- */
-data class GradeStats(
-    val totalCredits: Double = 0.0,
-    val earnedCredits: Double = 0.0,
-    val weightedGpa: Double = 0.0,
-    val weightedScore: Double = 0.0,
-    val courseCount: Int = 0,
-    val passedCount: Int = 0,
-    val failedCount: Int = 0
-)
-
-/**
  * 成绩查询结果包装
  */
 data class GradeQueryResult(
     val ret: Int,
     val msg: String,
     val total: Int,
-    val courses: List<CourseGrade>,
-    val stats: GradeStats
+    val courses: List<CourseGrade>
 )

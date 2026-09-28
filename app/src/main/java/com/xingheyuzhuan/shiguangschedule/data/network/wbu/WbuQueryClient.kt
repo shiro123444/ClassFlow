@@ -18,7 +18,6 @@ import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CourseGrade
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.FreeClassroom
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.FreeClassroomQueryResult
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.GradeQueryResult
-import com.xingheyuzhuan.shiguangschedule.data.model.wbu.GradeStats
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.KCGS_DICT
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.KCLX_DICT
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.KCXZ_DICT
@@ -226,7 +225,7 @@ class WbuQueryClient(
                 .add("page.size", pageSize.toString())
                 .add("sort", "xnxq")
                 .add("order", "desc")
-                .add("queryFields", "id,xnxq,kcmc,xf,kcxz,kclx,ksxs,kcgs,xdxz,kclb,cjfxms,zhcj,jd,hdxf,tscjzwmc,sfbk,cjlrjsxm,kcsx,fxcj,kkyxmc,")
+                .add("queryFields", "id,xnxq,kcbh,kcmc,xf,kcxz,kclx,ksxs,kcgs,xdxz,kclb,cjfxms,zhcj,jd,hdxf,tscjzwmc,sfbk,cjlrjsxm,kcsx,fxcj,kkyxmc,khfs,")
 
             if (startXnxq.isNotBlank()) formBuilder.add("startXnxq", startXnxq)
             if (endXnxq.isNotBlank()) formBuilder.add("endXnxq", endXnxq)
@@ -269,14 +268,6 @@ class WbuQueryClient(
             val resultsArr = json.optJSONArray("results") ?: JSONArray()
             val courses = mutableListOf<CourseGrade>()
 
-            var totalXf = 0.0
-            var totalPassedXf = 0.0
-            var sumWeightedScore = 0.0
-            var sumScoreXf = 0.0
-            var sumXfjd = 0.0
-            var passedCount = 0
-            var failedCount = 0
-
             for (i in 0 until resultsArr.length()) {
                 val item = resultsArr.optJSONObject(i) ?: continue
                 val id = item.optString("id", "")
@@ -288,12 +279,14 @@ class WbuQueryClient(
                 val xf = item.optDouble("xf", 0.0)
                 val hdxf = item.optDouble("hdxf", 0.0)
                 val zhcj = item.optString("zhcj", "")
+                // 成绩库只有 xfjd（学分绩点 = 学分 × 绩点），没有单科 jd 字段
                 val xfjd = item.optDouble("xfjd", 0.0)
+                val gradePoint = if (xf > 0.0) Math.round((xfjd / xf) * 100.0) / 100.0 else 0.0
                 val kcxzVal = item.optString("kcxz", "")
                 val propertyName = KCXZ_DICT[kcxzVal] ?: "其他"
                 val teacher = item.optString("cjlrjsxm", "")
                 val khfs = item.optString("khfs", "")
-                val examMethod = KHFS_DICT[khfs] ?: if (khfs.isNotBlank()) "考核" else ""
+                val examMethod = KHFS_DICT[khfs] ?: ""
                 val xdxz = item.optString("xdxz", "")
                 val studyNature = when (xdxz) {
                     "1" -> "初修"
@@ -302,9 +295,24 @@ class WbuQueryClient(
                 }
                 val isMakeup = item.optString("sfbk", "0") == "1"
 
-                // 及格判断：hdxf > 0，或综合成绩数字 >= 60，或非不及格/旷考字眼
-                val isScorePassed = zhcj.toDoubleOrNull()?.let { it >= 60.0 }
-                    ?: (hdxf > 0.0 || (!zhcj.contains("不及格") && !zhcj.contains("缺考") && !zhcj.contains("作弊") && zhcj.isNotBlank()))
+                // 及格判断：仅依据官方成绩/学分字段，不做模糊猜测
+                // 1) 数值成绩 >= 60 及格；2) 等级制（优/良/中/及格/合格/通过）及格；
+                // 3) 明确的不及格字眼判为不及格；4) 其余按是否获得学分（hdxf）判断
+                val trimmedScore = zhcj.trim()
+                val isScorePassed = when {
+                    trimmedScore.toDoubleOrNull() != null -> trimmedScore.toDouble() >= 60.0
+                    trimmedScore.contains("不及格") || trimmedScore.contains("不合格") ||
+                            trimmedScore.contains("不通过") || trimmedScore.contains("差") ||
+                            trimmedScore.contains("旷考") || trimmedScore.contains("缺考") ||
+                            trimmedScore.contains("作弊") || trimmedScore.contains("违纪") ||
+                            trimmedScore.contains("取消") -> false
+                    trimmedScore.contains("优") || trimmedScore.contains("良") ||
+                            trimmedScore.contains("中") || trimmedScore.contains("及格") ||
+                            trimmedScore.contains("合格") || trimmedScore.contains("通过") ||
+                            trimmedScore.equals("P", ignoreCase = true) -> true
+                    hdxf > 0.0 -> true
+                    else -> false
+                }
 
                 courses.add(
                     CourseGrade(
@@ -315,7 +323,7 @@ class WbuQueryClient(
                         credit = xf,
                         earnedCredit = hdxf,
                         score = zhcj,
-                        gradePoint = xfjd,
+                        gradePoint = gradePoint,
                         propertyCode = kcxzVal,
                         propertyName = propertyName,
                         teacher = teacher,
@@ -325,36 +333,13 @@ class WbuQueryClient(
                         isPassed = isScorePassed
                     )
                 )
-
-                totalXf += xf
-                totalPassedXf += hdxf
-                sumXfjd += xfjd
-                if (isScorePassed) passedCount++ else failedCount++
-
-                val numericScore = zhcj.toDoubleOrNull()
-                if (numericScore != null && xf > 0) {
-                    sumWeightedScore += numericScore * xf
-                    sumScoreXf += xf
-                }
             }
-
-            val weightedGpa = if (totalXf > 0) Math.round((sumXfjd / totalXf) * 100.0) / 100.0 else 0.0
-            val weightedScore = if (sumScoreXf > 0) Math.round((sumWeightedScore / sumScoreXf) * 100.0) / 100.0 else 0.0
 
             GradeQueryResult(
                 ret = 0,
                 msg = msg,
                 total = total,
-                courses = courses,
-                stats = GradeStats(
-                    totalCredits = Math.round(totalXf * 10.0) / 10.0,
-                    earnedCredits = Math.round(totalPassedXf * 10.0) / 10.0,
-                    weightedGpa = weightedGpa,
-                    weightedScore = weightedScore,
-                    courseCount = courses.size,
-                    passedCount = passedCount,
-                    failedCount = failedCount
-                )
+                courses = courses
             )
         }
     }
@@ -843,10 +828,10 @@ class WbuQueryClient(
                                 kcsxRaw == "2" -> "公选"
                                 kcsxRaw == "3" -> "专选"
                                 kcsxRaw.isNotBlank() -> kcsxRaw
-                                else -> if (isElective) "选修" else "必修"
+                                else -> ""
                             }
 
-                            // 考核方式: py.ksxs -> gr.khfs -> c.ksxs (优先官方培养方案)
+                            // 考核方式：仅采用官方字段（培养方案 ksxs / 成绩库 khfs / 课程 ksxs），缺失留空不做推断
                             val ksxsRaw = py?.optString("ksxs")?.takeIf { it.isNotBlank() }
                                 ?: extra?.optString("khfs")?.takeIf { it.isNotBlank() }
                                 ?: cObj.optString("ksxs").takeIf { it.isNotBlank() }
@@ -857,12 +842,7 @@ class WbuQueryClient(
                             val (examType, examTag) = when {
                                 ksxsName == "考试" || ksxsName.contains("试") -> "考试" to "试"
                                 ksxsName == "考查" || ksxsName.contains("查") || ksxsName.contains("察") -> "考查" to "查"
-                                ksxsName.isNotBlank() -> ksxsName to ""
-                                cat.contains("实践") || cat.contains("环节") || cat.contains("实验") ||
-                                        cName.contains("实习") || cName.contains("实训") || cName.contains("设计") ||
-                                        cName.contains("论文") || cName.contains("技能") || cName.contains("劳动") ||
-                                        cName.contains("体育") || cName.contains("形势与政策") || isElective -> "考查" to "查"
-                                else -> "考试" to "试"
+                                else -> ksxsName to ""
                             }
 
                             // 成绩: c.zhcj -> gr.zhcj
@@ -889,17 +869,17 @@ class WbuQueryClient(
                                 ?: extra?.optString("xnxq")?.takeIf { it.isNotBlank() }
                                 ?: (if (wczt == "已修" && nodeName.contains("20")) nodeName else "")
 
-                            // 修读性质: gr.xdxz -> c.xdxz (2 -> 重修)
+                            // 修读性质: gr.xdxz -> c.xdxz (仅官方 2 -> 重修，缺失留空)
                             val xdxzRaw = extra?.optString("xdxz")?.takeIf { it.isNotBlank() }
                                 ?: cObj.optString("xdxz").takeIf { it.isNotBlank() }
                                 ?: ""
-                            val studyNature = if (xdxzRaw == "2") "重修" else if (wczt == "已修") "初修" else ""
+                            val studyNature = if (xdxzRaw == "2") "重修" else ""
 
-                            // 是否补考: gr.sfbk -> c.sfbk
+                            // 是否补考: gr.sfbk -> c.sfbk (仅官方明确为是时展示，缺失留空)
                             val bkRaw = extra?.optString("sfbk")?.takeIf { it.isNotBlank() }
                                 ?: cObj.optString("sfbk").takeIf { it.isNotBlank() }
                                 ?: ""
-                            val isMakeup = if (bkRaw == "1" || bkRaw == "是") "是" else if (wczt == "已修") "否" else ""
+                            val isMakeup = if (bkRaw == "1" || bkRaw == "是") "是" else ""
 
                             val specialGrade = extra?.optString("tscjzwmc")?.takeIf { it.isNotBlank() }
                                 ?: cObj.optString("tscjzwmc").takeIf { it.isNotBlank() }

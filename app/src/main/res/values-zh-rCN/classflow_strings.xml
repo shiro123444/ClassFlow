@@ -314,10 +314,10 @@
     <!-- 成绩查询与空教室查询模块字符串 -->
     <string name="section_campus_service">校园服务</string>
     <string name="item_grade_query">成绩查询</string>
-    <string name="desc_grade_query">加权GPA、加权均分、全科学分与成绩明细</string>
+    <string name="desc_grade_query">各学期成绩、筛选与成绩明细</string>
     <string name="item_free_classroom_query">空教室查询</string>
     <string name="desc_free_classroom_query">自习室空闲检索、单教室整周课表探测</string>
-    <string name="desc_quick_grade_query">加权GPA、加权均分、全科成绩列表</string>
+    <string name="desc_quick_grade_query">全科成绩列表与筛选</string>
 
     <string name="dialog_title_campus_login">登录教务系统</string>
     <string name="dialog_desc_campus_login">登录后即可获取最新成绩与空教室信息</string>
@@ -346,10 +346,6 @@
     <string name="action_relogin">重新登录</string>
     <string name="empty_grades_no_record">暂无成绩记录，请确认已登录教务系统</string>
     <string name="empty_grades_no_match">未匹配到符合筛选条件的课程成绩</string>
-    <string name="stat_weighted_gpa">加权 GPA</string>
-    <string name="stat_weighted_score">加权均分</string>
-    <string name="stat_earned_credits">已获学分</string>
-    <string name="stat_failed_count">挂科门数</string>
     <string name="format_credit_and_gpa">学分 %1$s · 绩点 %2$s</string>
     <string name="detail_label_semester">归属学期</string>
     <string name="detail_label_course_code">课程编号</string>
@@ -421,20 +417,22 @@
 
     <!-- 学业完成度与课程进程模块 -->
     <string name="item_academic_progress">学业完成度与进程</string>
-    <string name="desc_academic_progress">培养方案总完成度、官方专业排名、各学期推进树</string>
+    <string name="desc_academic_progress">学业完成度、GPA专业排名、各学期推进树</string>
     <string name="title_academic_progress">学业完成度与进程</string>
     <string name="tab_semester_progress">课程进程 (学期)</string>
     <string name="tab_nature_progress">学业完成 (性质)</string>
-    <string name="label_plan_progress_card">培养方案总学分完成度</string>
-    <string name="desc_plan_progress_calc">依据教务系统官方模型实时计算</string>
+    <string name="label_plan_progress_card">学业完成度</string>
+    <string name="action_ok">确定</string>
+    <string name="msg_academic_completion_formula">计算方式：（所有相同课程性质获得学分÷应修学分 相加之和）÷课程性质种类个数×100%</string>
+    <string name="a11y_academic_completion_info">查看学业完成度计算方式</string>
     <string name="format_total_plan_courses">全学期培养方案共 %1$d 门课程</string>
     <string name="format_progress_course_breakdown">已修完 %1$d 门 · 修读中 %2$d 门 · 待修 %3$d 门</string>
     <string name="format_completed_courses_count">已修完 %1$d 门</string>
     <string name="format_studying_courses_count">修读中 %1$d 门</string>
     <string name="format_uncompleted_courses_count">待修读 %1$d 门</string>
-    <string name="stat_official_gpa">综合 GPA</string>
-    <string name="stat_major_rank">专业排名</string>
-    <string name="stat_avg_score">加权平均成绩</string>
+    <string name="stat_official_gpa">GPA</string>
+    <string name="stat_major_rank">GPA专业排名</string>
+    <string name="stat_avg_score">平均成绩</string>
     <string name="stat_earned_credits_total">已获总学分</string>
     <string name="stat_fail_and_retake">挂科 / 重修</string>
     <string name="hint_search_academic_course">搜索课程名称或课程代码</string>

@@ -38,10 +38,12 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.UnfoldLess
 import androidx.compose.material.icons.filled.UnfoldMore
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,6 +64,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -249,7 +252,7 @@ fun AcademicProgressScreen(
                             )
                         }
 
-                        // 3. 核心学业指标网格 (官方综合 GPA, 专业排名, 加权均分, 累计学分, 挂科/重修)
+                        // 3. 核心学业指标网格 (GPA, GPA专业排名, 平均成绩, 累计学分, 挂科/重修)
                         item {
                             AcademicStatsBanner(
                                 stats = data.stats,
@@ -478,6 +481,8 @@ private fun ProgressSummaryCard(
     summary: AcademicProgressSummary,
     modifier: Modifier = Modifier
 ) {
+    var showInfoDialog by remember { mutableStateOf(false) }
+
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -499,18 +504,24 @@ private fun ProgressSummaryCard(
                         .weight(1f)
                         .padding(end = 12.dp)
                 ) {
-                    Text(
-                        text = stringResource(R.string.label_plan_progress_card),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = stringResource(R.string.desc_plan_progress_calc),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.label_plan_progress_card),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.Outlined.Info,
+                            contentDescription = stringResource(R.string.a11y_academic_completion_info),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clickable { showInfoDialog = true }
+                        )
+                    }
                 }
                 Text(
                     text = "${summary.completionPercentage}%",
@@ -570,10 +581,23 @@ private fun ProgressSummaryCard(
             }
         }
     }
+
+    if (showInfoDialog) {
+        AlertDialog(
+            onDismissRequest = { showInfoDialog = false },
+            confirmButton = {
+                TextButton(onClick = { showInfoDialog = false }) {
+                    Text(stringResource(R.string.action_ok))
+                }
+            },
+            title = { Text(stringResource(R.string.label_plan_progress_card)) },
+            text = { Text(stringResource(R.string.msg_academic_completion_formula)) }
+        )
+    }
 }
 
 /**
- * 3. 核心学业指标网格 (官方 GPA, 专业排名, 加权均分, 累计学分, 挂科/重修)
+ * 3. 核心学业指标网格 (GPA, GPA专业排名, 平均成绩, 累计学分, 挂科/重修)
  */
 @Composable
 private fun AcademicStatsBanner(
@@ -591,7 +615,7 @@ private fun AcademicStatsBanner(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // 第一行：综合 GPA + 专业排名
+            // 第一行：GPA + GPA专业排名
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
@@ -615,7 +639,7 @@ private fun AcademicStatsBanner(
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
             )
 
-            // 第二行：加权平均成绩 + 已获总学分 + 挂科/重修
+            // 第二行：平均成绩 + 已获总学分 + 挂科/重修
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
@@ -1116,7 +1140,7 @@ private fun CourseDetailBottomSheetContent(
             DetailFieldRow(label = stringResource(R.string.field_course_type), value = course.courseType.ifBlank { "--" })
             DetailFieldRow(label = stringResource(R.string.field_course_belonging), value = course.courseBelonging.ifBlank { "--" })
             DetailFieldRow(label = stringResource(R.string.field_nature), value = course.nature.ifBlank { "--" })
-            DetailFieldRow(label = stringResource(R.string.field_attribute), value = course.courseAttribute.ifBlank { if (course.isElective) stringResource(R.string.label_elective) else stringResource(R.string.label_required) })
+            DetailFieldRow(label = stringResource(R.string.field_attribute), value = course.courseAttribute.ifBlank { "--" })
             DetailFieldRow(
                 label = stringResource(R.string.field_exam_type),
                 value = if (course.examType.isNotBlank()) "${course.examType} [${course.examTag}]" else "--"

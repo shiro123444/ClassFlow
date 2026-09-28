@@ -314,10 +314,10 @@
     <!-- 成績查詢與空教室查詢模組字串 -->
     <string name="section_campus_service">校園服務</string>
     <string name="item_grade_query">成績查詢</string>
-    <string name="desc_grade_query">加權GPA、加權均分、全科學分與成績明細</string>
+    <string name="desc_grade_query">各學期成績、篩選與成績明細</string>
     <string name="item_free_classroom_query">空教室查詢</string>
     <string name="desc_free_classroom_query">自習室空閒檢索、單教室整週課表探測</string>
-    <string name="desc_quick_grade_query">加權GPA、加權均分、全科成績列表</string>
+    <string name="desc_quick_grade_query">全科成績列表與篩選</string>
 
     <string name="dialog_title_campus_login">登入教務系統</string>
     <string name="dialog_desc_campus_login">登入後即可獲取最新成績與空教室資訊</string>
@@ -346,10 +346,6 @@
     <string name="action_relogin">重新登入</string>
     <string name="empty_grades_no_record">暫無成績記錄，請確認已登入教務系統</string>
     <string name="empty_grades_no_match">未匹配到符合篩選條件的課程成績</string>
-    <string name="stat_weighted_gpa">加權 GPA</string>
-    <string name="stat_weighted_score">加權均分</string>
-    <string name="stat_earned_credits">已獲學分</string>
-    <string name="stat_failed_count">不及格門數</string>
     <string name="format_credit_and_gpa">學分 %1$s · 績點 %2$s</string>
     <string name="detail_label_semester">歸屬學期</string>
     <string name="detail_label_course_code">課程編號</string>
@@ -421,20 +417,22 @@
 
     <!-- 學業完成度與課程進程模組 -->
     <string name="item_academic_progress">學業完成度與進程</string>
-    <string name="desc_academic_progress">培養方案總完成度、官方專業排名、各學期推進樹</string>
+    <string name="desc_academic_progress">學業完成度、GPA專業排名、各學期推進樹</string>
     <string name="title_academic_progress">學業完成度與進程</string>
     <string name="tab_semester_progress">課程進程 (學期)</string>
     <string name="tab_nature_progress">學業完成 (性質)</string>
-    <string name="label_plan_progress_card">培養方案總學分完成度</string>
-    <string name="desc_plan_progress_calc">依據教務系統官方模型實時計算</string>
+    <string name="label_plan_progress_card">學業完成度</string>
+    <string name="action_ok">確定</string>
+    <string name="msg_academic_completion_formula">計算方式：（所有相同課程性質獲得學分÷應修學分 相加之和）÷課程性質種類個數×100%</string>
+    <string name="a11y_academic_completion_info">查看學業完成度計算方式</string>
     <string name="format_total_plan_courses">全學期培養方案共 %1$d 門課程</string>
     <string name="format_progress_course_breakdown">已修完 %1$d 門 · 修讀中 %2$d 門 · 待修 %3$d 門</string>
     <string name="format_completed_courses_count">已修完 %1$d 門</string>
     <string name="format_studying_courses_count">修讀中 %1$d 門</string>
     <string name="format_uncompleted_courses_count">待修讀 %1$d 門</string>
-    <string name="stat_official_gpa">綜合 GPA</string>
-    <string name="stat_major_rank">專業排名</string>
-    <string name="stat_avg_score">加權平均成績</string>
+    <string name="stat_official_gpa">GPA</string>
+    <string name="stat_major_rank">GPA專業排名</string>
+    <string name="stat_avg_score">平均成績</string>
     <string name="stat_earned_credits_total">已獲總學分</string>
     <string name="stat_fail_and_retake">掛科 / 重修</string>
     <string name="hint_search_academic_course">搜尋課程名稱或課程代碼</string>

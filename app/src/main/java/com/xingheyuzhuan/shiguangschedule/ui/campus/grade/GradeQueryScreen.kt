@@ -186,18 +186,7 @@ fun GradeQueryScreen(
                     }
                 }
 
-                // 2. 统计看板卡片
-                item {
-                    GradeStatsBanner(
-                        gpa = uiState.stats.weightedGpa,
-                        score = uiState.stats.weightedScore,
-                        earnedCredits = uiState.stats.earnedCredits,
-                        failedCount = uiState.stats.failedCount,
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    )
-                }
-
-                // 3. 筛选与搜索区域
+                // 2. 筛选与搜索区域
                 item {
                     Column(
                         modifier = Modifier
@@ -352,118 +341,6 @@ fun GradeQueryScreen(
             }
         }
     }
-}
-
-/**
- * 统计看板：采用 2 行 × 2 列网格卡片，彻底解决单行并排在英文下溢出折行的问题
- */
-@Composable
-private fun GradeStatsBanner(
-    gpa: Double,
-    score: Double,
-    earnedCredits: Double,
-    failedCount: Int,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp, horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // 第一行：加权 GPA 与 加权均分
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(modifier = Modifier.weight(1f)) {
-                    StatItem(label = stringResource(R.string.stat_weighted_gpa), value = String.format("%.2f", gpa), highlight = true)
-                }
-                StatVerticalDivider()
-                Box(modifier = Modifier.weight(1f)) {
-                    StatItem(label = stringResource(R.string.stat_weighted_score), value = String.format("%.1f", score))
-                }
-            }
-
-            // 中间横向分割线
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(0.8.dp)
-                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-            )
-
-            // 第二行：已获学分 与 挂科门数
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(modifier = Modifier.weight(1f)) {
-                    StatItem(label = stringResource(R.string.stat_earned_credits), value = String.format("%.1f", earnedCredits))
-                }
-                StatVerticalDivider()
-                Box(modifier = Modifier.weight(1f)) {
-                    StatItem(
-                        label = stringResource(R.string.stat_failed_count),
-                        value = failedCount.toString(),
-                        isWarning = failedCount > 0
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatItem(
-    label: String,
-    value: String,
-    highlight: Boolean = false,
-    isWarning: Boolean = false
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp)
-    ) {
-        Text(
-            text = value,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.ExtraBold,
-            color = when {
-                isWarning -> MaterialTheme.colorScheme.error
-                highlight -> MaterialTheme.colorScheme.primary
-                else -> MaterialTheme.colorScheme.onSurface
-            }
-        )
-        Text(
-            text = label,
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-@Composable
-private fun StatVerticalDivider() {
-    Box(
-        modifier = Modifier
-            .width(0.8.dp)
-            .height(36.dp)
-            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-    )
 }
 
 /**

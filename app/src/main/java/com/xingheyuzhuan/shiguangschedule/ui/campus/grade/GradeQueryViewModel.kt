@@ -6,7 +6,6 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CourseGrade
-import com.xingheyuzhuan.shiguangschedule.data.model.wbu.GradeStats
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuQueryClient
@@ -30,8 +29,7 @@ data class GradeUiState(
     val filterPass: String = "", // "" 全部，"1" 及格，"0" 不及格
     val filterKcxz: String = "", // "" 全部性质
     val allGrades: List<CourseGrade> = emptyList(),
-    val filteredGrades: List<CourseGrade> = emptyList(),
-    val stats: GradeStats = GradeStats()
+    val filteredGrades: List<CourseGrade> = emptyList()
 )
 
 @HiltViewModel
@@ -159,41 +157,6 @@ class GradeQueryViewModel @Inject constructor(
             matchKw && matchPass && matchKcxz
         }
 
-        // 重新计算筛选后的统计指标
-        var totalXf = 0.0
-        var totalPassedXf = 0.0
-        var sumScoreXf = 0.0
-        var sumWeightedScore = 0.0
-        var sumXfjd = 0.0
-        var passedCount = 0
-        var failedCount = 0
-
-        filtered.forEach { item ->
-            totalXf += item.credit
-            totalPassedXf += item.earnedCredit
-            sumXfjd += item.gradePoint
-            if (item.isPassed) passedCount++ else failedCount++
-
-            val numericScore = item.score.toDoubleOrNull()
-            if (numericScore != null && item.credit > 0) {
-                sumWeightedScore += numericScore * item.credit
-                sumScoreXf += item.credit
-            }
-        }
-
-        val weightedGpa = if (totalXf > 0) Math.round((sumXfjd / totalXf) * 100.0) / 100.0 else 0.0
-        val weightedScore = if (sumScoreXf > 0) Math.round((sumWeightedScore / sumScoreXf) * 100.0) / 100.0 else 0.0
-
-        val newStats = GradeStats(
-            totalCredits = Math.round(totalXf * 10.0) / 10.0,
-            earnedCredits = Math.round(totalPassedXf * 10.0) / 10.0,
-            weightedGpa = weightedGpa,
-            weightedScore = weightedScore,
-            courseCount = filtered.size,
-            passedCount = passedCount,
-            failedCount = failedCount
-        )
-
-        _uiState.update { it.copy(filteredGrades = filtered, stats = newStats) }
+        _uiState.update { it.copy(filteredGrades = filtered) }
     }
 }

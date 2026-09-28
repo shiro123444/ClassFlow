@@ -314,10 +314,10 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <!-- Grade Query and Free Classroom Query Module Strings -->
     <string name="section_campus_service">Campus Services</string>
     <string name="item_grade_query">Grade Query</string>
-    <string name="desc_grade_query">Weighted GPA, weighted average score, credits and grades</string>
+    <string name="desc_grade_query">Grades, credits and details by semester</string>
     <string name="item_free_classroom_query">Empty Classroom</string>
     <string name="desc_free_classroom_query">Study room availability search, weekly room schedule probe</string>
-    <string name="desc_quick_grade_query">Weighted GPA, weighted score, all grade list</string>
+    <string name="desc_quick_grade_query">All course grades and filters</string>
 
     <string name="dialog_title_campus_login">Log In to Academic System</string>
     <string name="dialog_desc_campus_login">Log in to fetch the latest grades and empty classrooms</string>
@@ -346,10 +346,6 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="action_relogin">Re-login</string>
     <string name="empty_grades_no_record">No grade records. Please ensure you are logged in</string>
     <string name="empty_grades_no_match">No matching course grades found</string>
-    <string name="stat_weighted_gpa">Weighted GPA</string>
-    <string name="stat_weighted_score">Weighted Avg.</string>
-    <string name="stat_earned_credits">Earned Credits</string>
-    <string name="stat_failed_count">Failed Courses</string>
     <string name="format_credit_and_gpa">Credit %1$s · GP %2$s</string>
     <string name="detail_label_semester">Semester</string>
     <string name="detail_label_course_code">Course Code</string>
@@ -421,20 +417,22 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
 
     <!-- Academic Progress Module -->
     <string name="item_academic_progress">Academic Progress</string>
-    <string name="desc_academic_progress">Degree plan completion, major rank, curriculum timeline</string>
+    <string name="desc_academic_progress">Academic completion, GPA major rank, curriculum timeline</string>
     <string name="title_academic_progress">Academic Progress</string>
     <string name="tab_semester_progress">Timeline</string>
     <string name="tab_nature_progress">By Category</string>
-    <string name="label_plan_progress_card">Plan Completion</string>
-    <string name="desc_plan_progress_calc">Calculated in real-time from official system</string>
+    <string name="label_plan_progress_card">Academic Completion</string>
+    <string name="action_ok">OK</string>
+    <string name="msg_academic_completion_formula">Calculation: (sum of earned credits ÷ required credits for each course category) ÷ number of course categories × 100%</string>
+    <string name="a11y_academic_completion_info">View how academic completion is calculated</string>
     <string name="format_total_plan_courses">%1$d planned courses in degree plan</string>
     <string name="format_progress_course_breakdown">%1$d completed · %2$d in progress · %3$d planned</string>
     <string name="format_completed_courses_count">%1$d completed</string>
     <string name="format_studying_courses_count">%1$d in progress</string>
     <string name="format_uncompleted_courses_count">%1$d planned</string>
-    <string name="stat_official_gpa">Official GPA</string>
-    <string name="stat_major_rank">Major Rank</string>
-    <string name="stat_avg_score">Weighted Avg.</string>
+    <string name="stat_official_gpa">GPA</string>
+    <string name="stat_major_rank">GPA Major Rank</string>
+    <string name="stat_avg_score">Average Score</string>
     <string name="stat_earned_credits_total">Total Credits</string>
     <string name="stat_fail_and_retake">Failed / Retake</string>
     <string name="hint_search_academic_course">Search course name or code</string>
