@@ -386,7 +386,7 @@ fun WbuCampusAuthSheet(
                     if (result?.success == true) {
                         smsDialogSendInterval = result.cooldownSeconds
                     } else {
-                        smsError = "重新发送失败，请稍后重试"
+                        smsError = context.getString(R.string.err_resend_failed)
                     }
                 }
             },
@@ -467,12 +467,12 @@ fun WbuCampusAuthSheet(
                                     onLoginSuccess()
                                     if (dismissOnSuccess) onDismiss()
                                 } else {
-                                    errorMessage = "登录验证失败，请重试"
+                                    errorMessage = context.getString(R.string.err_login_verify_failed)
                                     qrState = QrUiState(qrContent = session.content, phase = QrPhase.ERROR, statusText = context.getString(R.string.status_qr_login_failed_retry))
                                 }
                             } catch (e: Exception) {
                                 isLoading = false
-                                errorMessage = e.message ?: "登录异常"
+                                errorMessage = e.message ?: context.getString(R.string.err_login_exception_short)
                             }
                             break
                         }
@@ -653,7 +653,7 @@ fun WbuCampusAuthSheet(
                             // 若要求持有有效 CASTGC（如访问图书馆），且当前是 JYXT_LEGACY 模式
                             val hasCastgc = engine.transport.cookieStore.any { it.name == "CASTGC" && !it.value.isBlank() }
                             if (requireUnifiedCas && !hasCastgc) {
-                                statusMessage = "正在完成统一身份认证..."
+                                statusMessage = context.getString(R.string.status_completing_unified_auth)
                                 // 若前面已索取过统一认证密码则直接复用；否则无论是否已记住密码都弹窗，
                                 // 让用户确认或修改，避免服务端改密后静默沿用旧密码导致登录失败
                                 var casPwd = customVpnPassword
@@ -758,7 +758,7 @@ fun WbuCampusAuthSheet(
                     val prep = dynamicPrep ?: engine.obtainDynamicCodeForm("${flowTagPrefix}_DYNAMIC", unifiedAuthOnly)
                     if (prep == null) {
                         isLoading = false
-                        errorMessage = "无法获取登录参数，请重试"
+                        errorMessage = context.getString(R.string.err_get_login_params_failed_short)
                         return@launch
                     }
                     val res = engine.dynamicCodeLogin(
@@ -794,11 +794,11 @@ fun WbuCampusAuthSheet(
                         onLoginSuccess()
                         if (dismissOnSuccess) onDismiss()
                     } else {
-                        errorMessage = res.message.ifBlank { "验证码登录失败" }
+                        errorMessage = res.message.ifBlank { context.getString(R.string.err_otp_login_failed_short) }
                     }
                 } catch (e: Exception) {
                     isLoading = false
-                    errorMessage = e.message ?: "动态码登录失败"
+                    errorMessage = e.message ?: context.getString(R.string.err_dynamic_code_login_failed_short)
                 }
             }
         },

@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.campus.grade
 
+import com.xingheyuzhuan.shiguangschedule.R
+
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -99,7 +101,7 @@ class GradeQueryViewModel @Inject constructor(
                         it.copy(
                             isLoading = false,
                             needLogin = isSessionExpired,
-                            errorMessage = err.message ?: "获取成绩失败"
+                            errorMessage = err.message ?: context.getString(R.string.err_get_grades_failed)
                         )
                     }
                 }

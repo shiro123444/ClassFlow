@@ -3,7 +3,9 @@
 package com.xingheyuzhuan.shiguangschedule.tool
 
 import android.content.ContentProviderOperation
+import android.content.Context
 import android.provider.CalendarContract
+import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.db.main.Course
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWithWeeks
 import com.xingheyuzhuan.shiguangschedule.data.db.main.TimeSlot
@@ -104,6 +106,7 @@ object IcsExportTool {
      * 生成 ICS 日历文件的内容字符串。
      */
     fun generateIcsFileContent(
+        context: Context,
         courses: List<CourseWithWeeks>,
         timeSlots: List<TimeSlot>,
         semesterStartDate: LocalDate,
@@ -136,12 +139,12 @@ object IcsExportTool {
             icsContent.append("DTEND;TZID=Asia/Shanghai:${formatDateTimeLocal(endDateTime)}\r\n")
             icsContent.append("SUMMARY:${escapeText(course.name)}\r\n")
             icsContent.append("LOCATION:${escapeText(course.position)}\r\n")
-            icsContent.append("DESCRIPTION:${escapeText("教师: ${course.teacher}")}\r\n")
+            icsContent.append("DESCRIPTION:${escapeText(context.getString(R.string.format_export_ics_teacher, course.teacher))}\r\n")
 
             if (alarmMinutes != null && alarmMinutes in 0..60) {
                 icsContent.append("BEGIN:VALARM\r\n")
                 icsContent.append("ACTION:DISPLAY\r\n")
-                icsContent.append("DESCRIPTION:课程提醒\r\n")
+                icsContent.append("DESCRIPTION:${context.getString(R.string.export_ics_reminder)}\r\n")
                 icsContent.append("TRIGGER:-PT${alarmMinutes}M\r\n")
                 icsContent.append("END:VALARM\r\n")
             }
@@ -157,6 +160,7 @@ object IcsExportTool {
      * 生成同步到 Android 系统日历的批量插入指令。
      */
     fun generateCalendarOps(
+        context: Context,
         courses: List<CourseWithWeeks>,
         timeSlots: List<TimeSlot>,
         semesterStartDate: LocalDate,
@@ -174,7 +178,7 @@ object IcsExportTool {
             val startMillis = start.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
             val endMillis = end.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
             val eventOpIndex = ops.size
-            val description = "教师: ${course.teacher}"
+            val description = context.getString(R.string.format_export_ics_teacher, course.teacher)
 
             ops.add(
                 ContentProviderOperation.newInsert(CalendarContract.Events.CONTENT_URI)

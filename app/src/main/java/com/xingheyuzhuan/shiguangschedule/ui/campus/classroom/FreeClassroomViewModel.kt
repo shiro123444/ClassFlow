@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.campus.classroom
 
+import com.xingheyuzhuan.shiguangschedule.R
+
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -183,7 +185,7 @@ class FreeClassroomViewModel @Inject constructor(
                         it.copy(
                             isLoading = false,
                             needLogin = isSessionExpired,
-                            errorMessage = err.message ?: "查询空教室失败"
+                            errorMessage = err.message ?: context.getString(R.string.err_query_free_classroom_failed)
                         )
                     }
                 }
@@ -495,7 +497,7 @@ class FreeClassroomViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isProbing = false,
-                            probeError = err.message ?: "探测课表失败",
+                            probeError = err.message ?: context.getString(R.string.err_probe_schedule_failed),
                             probeProgress = null
                         )
                     }

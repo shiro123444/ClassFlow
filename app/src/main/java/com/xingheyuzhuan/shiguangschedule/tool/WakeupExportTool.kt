@@ -3,6 +3,7 @@ package com.xingheyuzhuan.shiguangschedule.tool
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseTableConfig
 import com.xingheyuzhuan.shiguangschedule.data.db.main.CourseWithWeeks
 import com.xingheyuzhuan.shiguangschedule.data.db.main.TimeSlot
@@ -158,6 +159,7 @@ object WakeupExportTool {
      * 生成 5 行格式的 .wakeup_schedule 文本内容
      */
     fun generateWakeupContent(
+        context: Context,
         tableName: String,
         courses: List<CourseWithWeeks>,
         timeSlots: List<TimeSlot>,
@@ -167,7 +169,7 @@ object WakeupExportTool {
         val breakDuration = config?.defaultBreakDuration ?: 10
         val tt = WakeupTimeTable(
             id = 1,
-            name = "时间表",
+            name = context.getString(R.string.export_wakeup_timetable_name),
             courseLen = classDuration,
             sameBreakLen = true,
             theBreakLen = breakDuration
@@ -291,7 +293,7 @@ object WakeupExportTool {
         val shareTempDir = File(context.cacheDir, "share_temp").apply {
             if (!exists()) mkdirs()
         }
-        val safeTableName = tableName.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "课表" }
+        val safeTableName = tableName.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { context.getString(R.string.export_default_table_name) }
         val file = File(shareTempDir, "$safeTableName.wakeup_schedule")
         file.writeText(content, Charsets.UTF_8)
         return file
@@ -319,7 +321,7 @@ object WakeupExportTool {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            val chooser = Intent.createChooser(generalIntent, "选择打开方式（WakeUp 课程表）").apply {
+            val chooser = Intent.createChooser(generalIntent, context.getString(R.string.export_choose_open_with)).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(chooser)

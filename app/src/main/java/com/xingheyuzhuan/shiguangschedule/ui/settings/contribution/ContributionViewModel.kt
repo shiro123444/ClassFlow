@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.settings.contribution
 
+import com.xingheyuzhuan.shiguangschedule.R
+
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -49,7 +51,9 @@ class ContributionViewModel(application: Application) : AndroidViewModel(applica
                 _uiState.value = ContributionUiState.Success(data)
             } catch (e: IOException) {
                 // 捕获 I/O 或解析错误
-                _uiState.value = ContributionUiState.Error("数据加载失败: ${e.localizedMessage}")
+                _uiState.value = ContributionUiState.Error(
+                    getApplication<Application>().getString(R.string.format_err_data_load_failed, e.localizedMessage ?: "")
+                )
             }
         }
     }

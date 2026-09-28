@@ -3,6 +3,7 @@ package com.xingheyuzhuan.shiguangschedule.ui.schoolselection.web
 
 import android.content.Context
 import android.os.Handler
+import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.repository.normalizeImportedTimeSlots
 import android.os.Looper
@@ -99,7 +100,7 @@ class AndroidBridge(
             ).isSuccess
 
             if (!success) {
-                rejectJsPromise(promiseId, "原生 UI 事件队列已满。")
+                rejectJsPromise(promiseId, context.getString(R.string.err_native_ui_queue_full))
             }
         }
     }
@@ -165,7 +166,7 @@ class AndroidBridge(
             ).isSuccess
 
             if (!success) {
-                rejectJsPromise(promiseId, "原生 UI 事件队列已满。")
+                rejectJsPromise(promiseId, context.getString(R.string.err_native_ui_queue_full))
             }
         }
     }
@@ -196,13 +197,13 @@ class AndroidBridge(
                 ).isSuccess
 
                 if (!success) {
-                    rejectJsPromise(promiseId, "原生 UI 事件队列已满。")
+                    rejectJsPromise(promiseId, context.getString(R.string.err_native_ui_queue_full))
                 }
 
             } catch (e: Exception) {
                 Log.e(TAG, "解析单选列表 itemsJsonString 失败: ${e.message}", e)
-                Toast.makeText(context, "单选列表数据错误，无法显示。", Toast.LENGTH_LONG).show()
-                rejectJsPromise(promiseId, "选项列表 JSON 无效: ${e.message}")
+                Toast.makeText(context, context.getString(R.string.err_single_choice_data_invalid), Toast.LENGTH_LONG).show()
+                rejectJsPromise(promiseId, context.getString(R.string.err_options_json_invalid, e.message ?: ""))
             }
         }
     }
@@ -216,8 +217,8 @@ class AndroidBridge(
                 val tableId = importTableId
 
                 if (tableId == null) {
-                    Toast.makeText(context, "导入失败：未选择课表。", Toast.LENGTH_LONG).show()
-                    rejectJsPromise(promiseId, "课表选择已取消。")
+                    Toast.makeText(context, context.getString(R.string.toast_import_no_table_selected), Toast.LENGTH_LONG).show()
+                    rejectJsPromise(promiseId, context.getString(R.string.err_table_selection_cancelled))
                     return@launch
                 }
 
@@ -231,12 +232,12 @@ class AndroidBridge(
                 }
                 courseConversionRepository.importCoursesFromList(tableId, adjustedList)
 
-                Toast.makeText(context, "课程导入成功！课表已更新。", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.toast_courses_import_success), Toast.LENGTH_LONG).show()
                 resolveJsPromise(promiseId, "true")
             } catch (e: Exception) {
                 e.printStackTrace()
-                Toast.makeText(context, "课程导入失败: ${e.message}", Toast.LENGTH_LONG).show()
-                rejectJsPromise(promiseId, "课程导入失败: ${e.message}")
+                Toast.makeText(context, context.getString(R.string.format_toast_courses_import_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
+                rejectJsPromise(promiseId, context.getString(R.string.format_toast_courses_import_failed, e.message ?: ""))
             }
         }
     }
@@ -255,8 +256,8 @@ class AndroidBridge(
                 val tableId = importTableId
 
                 if (tableId == null) {
-                    Toast.makeText(context, "配置导入失败：未选择目标课表。", Toast.LENGTH_LONG).show()
-                    rejectJsPromise(promiseId, "课表选择已取消或未设置。")
+                    Toast.makeText(context, context.getString(R.string.toast_config_import_no_target), Toast.LENGTH_LONG).show()
+                    rejectJsPromise(promiseId, context.getString(R.string.err_table_selection_cancelled_or_unset))
                     return@launch
                 }
 
@@ -267,12 +268,12 @@ class AndroidBridge(
                 // 该方法会处理配置的合并逻辑（例如保留 showWeekends）
                 courseConversionRepository.importCourseConfig(tableId, importedConfig)
 
-                Toast.makeText(context, "课表配置导入成功！", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.toast_config_import_success), Toast.LENGTH_LONG).show()
                 resolveJsPromise(promiseId, "true")
             } catch (e: Exception) {
                 e.printStackTrace()
-                Toast.makeText(context, "课表配置导入失败: ${e.message}", Toast.LENGTH_LONG).show()
-                rejectJsPromise(promiseId, "课表配置导入失败: ${e.message}")
+                Toast.makeText(context, context.getString(R.string.format_toast_config_import_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
+                rejectJsPromise(promiseId, context.getString(R.string.format_toast_config_import_failed, e.message ?: ""))
             }
         }
     }
@@ -286,8 +287,8 @@ class AndroidBridge(
                 val tableId = importTableId
 
                 if (tableId == null) {
-                    Toast.makeText(context, "导入失败：未选择课表。", Toast.LENGTH_LONG).show()
-                    rejectJsPromise(promiseId, "课表选择已取消。")
+                    Toast.makeText(context, context.getString(R.string.toast_import_no_table_selected), Toast.LENGTH_LONG).show()
+                    rejectJsPromise(promiseId, context.getString(R.string.err_table_selection_cancelled))
                     return@launch
                 }
 
@@ -311,12 +312,12 @@ class AndroidBridge(
 
                 timeSlotRepository.replaceAllForCourseTable(tableId, normalizedTimeSlots)
 
-                Toast.makeText(context, "预设时间段导入成功！", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.toast_preset_slots_import_success), Toast.LENGTH_LONG).show()
                 resolveJsPromise(promiseId, "true")
             } catch (e: Exception) {
                 e.printStackTrace()
-                Toast.makeText(context, "预设时间段导入失败: ${e.message}", Toast.LENGTH_LONG).show()
-                rejectJsPromise(promiseId, "预设时间段导入失败: ${e.message}")
+                Toast.makeText(context, context.getString(R.string.format_toast_preset_slots_import_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
+                rejectJsPromise(promiseId, context.getString(R.string.format_toast_preset_slots_import_failed, e.message ?: ""))
             }
         }
     }
@@ -330,7 +331,7 @@ class AndroidBridge(
                 // 优先使用当前导入上下文中的 importTableId；若已置空则回退取当前活跃课表
                 val tableId = importTableId ?: appSettingsRepository.getAppSettingsOnce()?.currentCourseTableId
                 if (tableId == null) {
-                    rejectJsPromise(promiseId, "未选择目标课表。")
+                    rejectJsPromise(promiseId, context.getString(R.string.err_no_target_table))
                     return@launch
                 }
                 val obj = runCatching { JSONObject(metaJsonString) }.getOrNull()
@@ -367,7 +368,7 @@ class AndroidBridge(
                 resolveJsPromise(promiseId, "true")
             } catch (e: Exception) {
                 Log.e(TAG, "保存课表元数据失败: ${e.message}", e)
-                rejectJsPromise(promiseId, "保存课表元数据失败: ${e.message}")
+                rejectJsPromise(promiseId, context.getString(R.string.format_err_save_table_meta_failed, e.message ?: ""))
             }
         }
     }

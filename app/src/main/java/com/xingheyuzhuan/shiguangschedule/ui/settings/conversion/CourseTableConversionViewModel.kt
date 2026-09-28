@@ -168,7 +168,7 @@ class CourseTableConversionViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
-                val icsContent = courseConversionRepository.exportToIcsString(tableId, alarmMinutes)
+                val icsContent = courseConversionRepository.exportToIcsString(tableId, alarmMinutes, context)
                 if (icsContent != null) {
                     outputStream.bufferedWriter(Charset.forName("UTF-8")).use { writer ->
                         writer.write(icsContent)

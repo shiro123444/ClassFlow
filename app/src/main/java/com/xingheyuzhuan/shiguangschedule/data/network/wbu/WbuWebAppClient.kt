@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.data.network.wbu
 
+import com.xingheyuzhuan.shiguangschedule.R
+
 import android.content.Context
 import android.util.Log
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppDefinition
@@ -60,7 +62,7 @@ class WbuWebAppClient(
         val hasTgc = transport.cookieStore.any { it.name == "CASTGC" && it.value.isNotBlank() }
         if (!hasTgc) {
             Log.w("WbuWebAppClient", "No CASTGC found in cookie store for WebApp: ${def.id}")
-            throw WbuSessionExpiredException(message = "统一身份认证已失效，请重新登录")
+            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_unified_auth))
         }
 
         val noRedirectClient = client.newBuilder().followRedirects(false).build()
@@ -83,7 +85,7 @@ class WbuWebAppClient(
                     val loc = resp.header("Location").orEmpty()
                     Log.d("WbuWebAppClient", "SSO init resp: ${resp.code}, Location: $loc")
                     if (loc.contains("/por/login") || loc.contains("/por/login_psw") || loc.contains("/portal/")) {
-                        throw WbuSessionExpiredException(message = "WebVPN 门禁已失效，请重新登录")
+                        throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
                     }
                 }
             }.getOrThrow()
@@ -107,10 +109,10 @@ class WbuWebAppClient(
 
         if (casLocation.isNullOrBlank() || !casLocation.contains("ticket=")) {
             if (casLocation.orEmpty().contains("/por/") || casLocation.orEmpty().contains("webvpn")) {
-                throw WbuSessionExpiredException(message = "WebVPN 门禁已失效，请重新登录")
+                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
             }
             Log.w("WbuWebAppClient", "CAS failed to grant ST ticket. Location: $casLocation")
-            throw WbuSessionExpiredException(message = "统一认证会话已过期，请重新登录")
+            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_unified_auth))
         }
 
         // 3. 将 CAS 回跳的目标重写为当前通道宿主（WebVPN 下重写为代理宿主）
@@ -136,22 +138,22 @@ class WbuWebAppClient(
 
         if (finalLocation.isNullOrBlank()) {
             Log.e("WbuWebAppClient", "SSO callback returned no redirect Location")
-            throw IOException("SSO 认证回调未返回有效凭据")
+            throw IOException(context.getString(R.string.error_sso_callback_invalid))
         }
 
         if (finalLocation.contains("/por/") || finalLocation.contains("webvpn.wbu.edu.cn/por")) {
             Log.w("WbuWebAppClient", "SSO callback redirected to WebVPN portal: $finalLocation")
-            throw WbuSessionExpiredException(message = "WebVPN 门禁已失效，请重新登录")
+            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
         }
 
         // 5. 从重定向 URL 解析提取 token
         val token = extractTokenFromUrl(finalLocation)
         if (token.isNullOrBlank()) {
             if (finalLocation.contains("login")) {
-                throw WbuSessionExpiredException(message = "统一认证会话已过期，请重新登录")
+                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_unified_auth))
             }
             Log.e("WbuWebAppClient", "Failed to extract token from Location: $finalLocation")
-            throw WbuSessionExpiredException(message = "未能从 SSO 回调中解析出 Token 凭证，请重新登录")
+            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_sso_token))
         }
 
         transport.persistCookieStore()

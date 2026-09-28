@@ -365,7 +365,7 @@ private fun ActiveDispensingView(
                 Spacer(modifier = Modifier.height(12.dp))
                 InfoRow(label = stringResource(R.string.ujing_water_hot_amount), value = "${stage.detail?.hotWaterMl ?: 0} mL")
                 InfoRow(label = stringResource(R.string.ujing_water_warm_amount), value = "${stage.detail?.warmWaterMl ?: 0} mL")
-                InfoRow(label = stringResource(R.string.ujing_water_pay_type), value = stage.detail?.payTypeName ?: "一卡通免密")
+                InfoRow(label = stringResource(R.string.ujing_water_pay_type), value = stage.detail?.payTypeName ?: stringResource(R.string.label_campus_card_quick_pay))
                 InfoRow(label = stringResource(R.string.ujing_water_order_no), value = stage.orderResult.orderNo ?: "${stage.orderResult.orderId}")
             }
         }
@@ -432,7 +432,7 @@ private fun FinishedView(
                 InfoRow(label = stringResource(R.string.ujing_water_hot_amount), value = "${stage.detail.hotWaterMl} mL")
                 InfoRow(label = stringResource(R.string.ujing_water_warm_amount), value = "${stage.detail.warmWaterMl} mL")
                 InfoRow(label = stringResource(R.string.ujing_water_cost), value = "¥ ${String.format("%.2f", stage.detail.payPrice)}")
-                InfoRow(label = stringResource(R.string.ujing_water_pay_type), value = stage.detail.payTypeName ?: "一卡通免密")
+                InfoRow(label = stringResource(R.string.ujing_water_pay_type), value = stage.detail.payTypeName ?: stringResource(R.string.label_campus_card_quick_pay))
             }
         }
 

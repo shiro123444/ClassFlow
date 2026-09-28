@@ -72,7 +72,7 @@ fun WbuCourseImportSheet(
 
     suspend fun runDirectImportPipeline(engine: WbuSyncEngine, inputSid: String): Boolean {
         isImporting = true
-        importStatusMessage = "正在获取可选学期..."
+        importStatusMessage = context.getString(R.string.status_fetching_semesters)
         val options = engine.fetchSemesterOptions()
         val chosenSemester = if (options.isNotEmpty()) {
             val deferred = CompletableDeferred<String?>()
@@ -91,15 +91,15 @@ fun WbuCourseImportSheet(
         }
 
         if (chosenSemester.isBlank()) {
-            importErrorMessage = "未能识别学期"
+            importErrorMessage = context.getString(R.string.err_unrecognized_semester)
             isImporting = false
             importStatusMessage = ""
             return false
         }
 
-        importStatusMessage = "正在获取【$chosenSemester】课程数据..."
+        importStatusMessage = context.getString(R.string.format_status_fetching_semester_courses, chosenSemester)
         val sid = engine.lastResolvedStudentId ?: inputSid.ifBlank { WbuSyncEngine.getSavedStudentId(context) }
-        val candidateName = chosenSemester.ifBlank { "未命名课表" }
+        val candidateName = chosenSemester.ifBlank { context.getString(R.string.default_unnamed_table_name) }
         val hasConflictWithOtherSid = uiState.courseTables.any {
             it.name == candidateName && it.studentId != null && it.studentId != sid
         }
@@ -116,7 +116,7 @@ fun WbuCourseImportSheet(
 
         val coursesRaw = engine.fetchCourseData(newTable.id, chosenSemester)
         if (coursesRaw.isNullOrEmpty()) {
-            importErrorMessage = "该学期未获取到课表数据（可能尚未排课）"
+            importErrorMessage = context.getString(R.string.err_no_course_data_semester)
             isImporting = false
             importStatusMessage = ""
             return false
@@ -138,7 +138,7 @@ fun WbuCourseImportSheet(
             coursesRaw
         }
 
-        importStatusMessage = "正在写入课表..."
+        importStatusMessage = context.getString(R.string.status_writing_schedule)
         viewModel.importCourses(courses, newTable.id)
         val cfg = engine.fetchSemesterConfig(xnxq = chosenSemester, xqdm = engine.lastResolvedXqdm)
         viewModel.applySemesterConfig(cfg, newTable.id)
@@ -161,7 +161,7 @@ fun WbuCourseImportSheet(
 
         isImporting = false
         importStatusMessage = ""
-        Toast.makeText(context, "课表【$finalTableName】导入成功！", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, context.getString(R.string.format_toast_table_imported_success, finalTableName), Toast.LENGTH_LONG).show()
         onImportSuccess?.invoke(finalTableName)
         onDismissRequest()
         return true
@@ -180,7 +180,7 @@ fun WbuCourseImportSheet(
             } catch (e: Exception) {
                 isImporting = false
                 importStatusMessage = ""
-                importErrorMessage = "导入异常: ${e.message}"
+                importErrorMessage = context.getString(R.string.format_err_import_exception, e.message ?: "")
             }
         }
     }
@@ -330,7 +330,7 @@ fun WbuCourseImportSheet(
                         duplicateDeferred = null
                     }
                 ) {
-                    Text("确定")
+                    Text(stringResource(R.string.action_confirm))
                 }
             },
             dismissButton = {
@@ -341,7 +341,7 @@ fun WbuCourseImportSheet(
                         duplicateDeferred = null
                     }
                 ) {
-                    Text("取消")
+                    Text(stringResource(R.string.action_cancel))
                 }
             }
         )

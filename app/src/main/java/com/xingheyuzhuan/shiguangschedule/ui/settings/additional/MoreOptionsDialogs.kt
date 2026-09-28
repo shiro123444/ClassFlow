@@ -133,11 +133,15 @@ fun ChannelSelectionDialog(
             Column(modifier = Modifier.fillMaxWidth()) {
                 UPDATE_CHANNELS.forEach { channel ->
                     val isSelected = channel.url == currentSelectedUrl
+                    val channelTitle = when (channel.id) {
+                        "custom" -> stringResource(R.string.update_source_official)
+                        else -> channel.title
+                    }
                     ListItem(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onChannelSelected(channel.url) },
-                        headlineContent = { Text(text = channel.title) },
+                        headlineContent = { Text(text = channelTitle) },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         leadingContent = {
                             RadioButton(selected = isSelected, onClick = null)

@@ -73,7 +73,7 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
         overrideTargetUrl = initialTargetUrl
         val def = WebAppCatalog.findByIdString(appId)
         if (def == null) {
-            _uiState.update { it.copy(stage = WebAppStage.Error("未知网页应用: $appId")) }
+            _uiState.update { it.copy(stage = WebAppStage.Error(getApplication<Application>().getString(R.string.err_unknown_web_app, appId))) }
             return
         }
 
@@ -293,7 +293,10 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
                 }
             } catch (e: Exception) {
                 val msg = e.message.orEmpty()
-                if (msg.contains("失效") || msg.contains("过期") || msg.contains("登录") || msg.contains("WebVPN") || msg.contains("门禁")) {
+                if (e is WbuSessionExpiredException ||
+                    msg.contains("失效") || msg.contains("过期") || msg.contains("登录") || msg.contains("WebVPN") || msg.contains("门禁") ||
+                    msg.contains("expired", ignoreCase = true) || msg.contains("log in", ignoreCase = true) || msg.contains("login", ignoreCase = true)
+                ) {
                     _uiState.update {
                         it.copy(
                             needLogin = true,
@@ -304,7 +307,7 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
                 } else {
                     _uiState.update {
                         it.copy(
-                            stage = WebAppStage.Error(e.localizedMessage ?: "加载页面凭证失败")
+                            stage = WebAppStage.Error(e.localizedMessage ?: getApplication<Application>().getString(R.string.err_load_page_credential_failed))
                         )
                     }
                 }
@@ -326,7 +329,7 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
             // 直连应用（如一卡通）无校园网选择语义，取消登录即视为无法继续
             _uiState.update {
                 if (_uiState.value.definition?.directOnly == true) {
-                    it.copy(stage = WebAppStage.Error("需要登录统一身份认证后才能使用该服务"))
+                    it.copy(stage = WebAppStage.Error(getApplication<Application>().getString(R.string.err_unified_auth_required)))
                 } else {
                     it.copy(stage = WebAppStage.OffCampusChoice)
                 }

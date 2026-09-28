@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.campus.courseselection
 
+import androidx.annotation.StringRes
+
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -202,7 +204,7 @@ class CourseSelectionViewModel @Inject constructor(
                         if (batch.from == KkxFrom.CXXK) loadRetakeCourses(batch) else loadClasses(batch)
                     }
                 }
-                .onFailure { err -> handleFailure(err, "获取选课批次失败") }
+                .onFailure { err -> handleFailure(err, R.string.err_get_batches_failed) }
         }
     }
 
@@ -251,7 +253,7 @@ class CourseSelectionViewModel @Inject constructor(
                         it.copy(isLoading = false, allClasses = list.sortedBy { c -> c.kcmc })
                     }
                 }
-                .onFailure { err -> handleFailure(err, "获取教学班失败") }
+                .onFailure { err -> handleFailure(err, R.string.err_get_classes_failed) }
         }
     }
 
@@ -264,7 +266,7 @@ class CourseSelectionViewModel @Inject constructor(
                 }
                 .onFailure { err ->
                     _uiState.update { it.copy(isLoadingSelected = false) }
-                    handleFailure(err, "获取已选课程失败")
+                    handleFailure(err, R.string.err_get_selected_courses_failed)
                 }
         }
     }
@@ -276,7 +278,7 @@ class CourseSelectionViewModel @Inject constructor(
                 .onSuccess { list ->
                     _uiState.update { it.copy(isLoading = false, retakeCourses = list) }
                 }
-                .onFailure { err -> handleFailure(err, "获取重修课程失败") }
+                .onFailure { err -> handleFailure(err, R.string.err_get_retake_courses_failed) }
         }
     }
 
@@ -290,7 +292,7 @@ class CourseSelectionViewModel @Inject constructor(
                 .onSuccess { list ->
                     _uiState.update { it.copy(isLoading = false, allClasses = list) }
                 }
-                .onFailure { err -> handleFailure(err, "获取重修教学班失败") }
+                .onFailure { err -> handleFailure(err, R.string.err_get_retake_classes_failed) }
         }
     }
 
@@ -389,15 +391,15 @@ class CourseSelectionViewModel @Inject constructor(
                         // 抽签冲突：带 sfqc=1 重试
                         doSelect(teachingClass, childJxbid, sfqc = true)
                     } else if (outcome.success) {
-                        _uiState.update { it.copy(opMessage = "选课成功") }
+                        _uiState.update { it.copy(opMessage = getApplication<Application>().getString(R.string.msg_select_course_success)) }
                         refreshAfterOperation()
                     } else {
-                        _uiState.update { it.copy(opMessage = outcome.message.ifBlank { "选课失败" }) }
+                        _uiState.update { it.copy(opMessage = outcome.message.ifBlank { getApplication<Application>().getString(R.string.msg_select_course_failed) }) }
                     }
                 }
                 .onFailure { err ->
                     _uiState.update { it.copy(opInFlight = false) }
-                    handleFailure(err, "选课失败")
+                    handleFailure(err, R.string.msg_select_course_failed)
                 }
         }
     }
@@ -409,13 +411,13 @@ class CourseSelectionViewModel @Inject constructor(
             dataSource.dropClass(teachingClass.jxbid, batch.pcid)
                 .onSuccess { msg ->
                     _uiState.update {
-                        it.copy(opInFlight = false, opMessage = msg.ifBlank { "退课成功" })
+                        it.copy(opInFlight = false, opMessage = msg.ifBlank { getApplication<Application>().getString(R.string.msg_drop_course_success) })
                     }
                     refreshAfterOperation()
                 }
                 .onFailure { err ->
                     _uiState.update { it.copy(opInFlight = false) }
-                    handleFailure(err, "退课失败")
+                    handleFailure(err, R.string.msg_drop_course_failed)
                 }
         }
     }
@@ -427,13 +429,13 @@ class CourseSelectionViewModel @Inject constructor(
             dataSource.cancelWaitlist(teachingClass.jxbid, batch.pcid)
                 .onSuccess { msg ->
                     _uiState.update {
-                        it.copy(opInFlight = false, opMessage = msg.ifBlank { "已取消候补" })
+                        it.copy(opInFlight = false, opMessage = msg.ifBlank { getApplication<Application>().getString(R.string.msg_waitlist_cancelled) })
                     }
                     refreshAfterOperation()
                 }
                 .onFailure { err ->
                     _uiState.update { it.copy(opInFlight = false) }
-                    handleFailure(err, "取消候补失败")
+                    handleFailure(err, R.string.err_cancel_waitlist_failed)
                 }
         }
     }
@@ -466,7 +468,7 @@ class CourseSelectionViewModel @Inject constructor(
                     kcid = course.kcid,
                     cxmdid = course.cxmdid,
                     pcid = batch.pcid
-                ).map { it.ifBlank { "重修退课成功" } }
+                ).map { it.ifBlank { getApplication<Application>().getString(R.string.msg_retake_drop_success) } }
             } else {
                 dataSource.retakeSelect(
                     jxbid = tc.jxbid,
@@ -474,7 +476,7 @@ class CourseSelectionViewModel @Inject constructor(
                     kcid = course.kcid,
                     cxmdid = course.cxmdid,
                     pcid = batch.pcid
-                ).map { it.message.ifBlank { "重修选课成功" } }
+                ).map { it.message.ifBlank { getApplication<Application>().getString(R.string.msg_retake_select_success) } }
             }
             result
                 .onSuccess { msg ->
@@ -483,7 +485,7 @@ class CourseSelectionViewModel @Inject constructor(
                 }
                 .onFailure { err ->
                     _uiState.update { it.copy(opInFlight = false) }
-                    handleFailure(err, if (drop) "重修退课失败" else "重修选课失败")
+                    handleFailure(err, if (drop) R.string.msg_retake_drop_failed else R.string.msg_retake_select_failed)
                 }
         }
     }
@@ -497,8 +499,9 @@ class CourseSelectionViewModel @Inject constructor(
         _uiState.update { it.copy(needLogin = false) }
     }
 
-    private fun handleFailure(err: Throwable, fallback: String) {
+    private fun handleFailure(err: Throwable, @StringRes fallbackRes: Int) {
         val expired = err is WbuSessionExpiredException
+        val fallback = getApplication<Application>().getString(fallbackRes)
         _uiState.update {
             it.copy(
                 isLoading = false,

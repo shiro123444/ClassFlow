@@ -377,7 +377,7 @@ private fun StudentProfileCard(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = profile.name.take(1).ifBlank { "学" },
+                        text = profile.name.take(1).ifBlank { stringResource(R.string.label_student_avatar) },
                         color = MaterialTheme.colorScheme.onPrimary,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
@@ -1012,14 +1012,14 @@ private fun CourseRowItem(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "${course.planCredit} 学分",
+                        text = stringResource(R.string.format_credits_val, course.planCredit),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     if (course.isCompleted && course.score.isNotBlank()) {
                         Text(
-                            text = "${course.score}分",
+                            text = stringResource(R.string.format_score_val, course.score),
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
@@ -1116,7 +1116,7 @@ private fun CourseDetailBottomSheetContent(
             DetailFieldRow(label = stringResource(R.string.field_course_type), value = course.courseType.ifBlank { "--" })
             DetailFieldRow(label = stringResource(R.string.field_course_belonging), value = course.courseBelonging.ifBlank { "--" })
             DetailFieldRow(label = stringResource(R.string.field_nature), value = course.nature.ifBlank { "--" })
-            DetailFieldRow(label = stringResource(R.string.field_attribute), value = course.courseAttribute.ifBlank { if (course.isElective) "选修" else "必修" })
+            DetailFieldRow(label = stringResource(R.string.field_attribute), value = course.courseAttribute.ifBlank { if (course.isElective) stringResource(R.string.label_elective) else stringResource(R.string.label_required) })
             DetailFieldRow(
                 label = stringResource(R.string.field_exam_type),
                 value = if (course.examType.isNotBlank()) "${course.examType} [${course.examTag}]" else "--"

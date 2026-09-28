@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.campus.academic
 
+import com.xingheyuzhuan.shiguangschedule.R
+
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -151,7 +153,7 @@ class AcademicProgressViewModel @Inject constructor(
                     it.copy(
                         isLoading = false,
                         isRefreshing = false,
-                        errorMessage = err.message ?: "获取学业进程失败",
+                            errorMessage = err.message ?: getApplication<Application>().getString(R.string.err_load_academic_progress_failed),
                         needLogin = isExpired
                     )
                 }

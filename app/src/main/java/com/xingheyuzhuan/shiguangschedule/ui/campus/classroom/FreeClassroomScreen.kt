@@ -507,7 +507,7 @@ fun FreeClassroomScreen(
                                         OutlinedTextField(
                                             value = uiState.beginTime,
                                             onValueChange = { viewModel.setTimeRange(it, uiState.endTime) },
-                                            label = { Text("开始时间", fontSize = 11.sp) },
+                                            label = { Text(stringResource(R.string.label_start_time), fontSize = 11.sp) },
                                             singleLine = true,
                                             shape = RoundedCornerShape(10.dp),
                                             modifier = Modifier.weight(1f),
@@ -524,7 +524,7 @@ fun FreeClassroomScreen(
                                         OutlinedTextField(
                                             value = uiState.endTime,
                                             onValueChange = { viewModel.setTimeRange(uiState.beginTime, it) },
-                                            label = { Text("结束时间", fontSize = 11.sp) },
+                                            label = { Text(stringResource(R.string.label_end_time), fontSize = 11.sp) },
                                             singleLine = true,
                                             shape = RoundedCornerShape(10.dp),
                                             modifier = Modifier.weight(1f),

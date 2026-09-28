@@ -201,15 +201,19 @@ fun WallpaperAdjustScreen(
             )
         }
 
-        val previewDemoCourses = remember(demoUiState.currentMergedCourses) {
+        val demoMath = stringResource(R.string.demo_course_math)
+        val demoEnglish = stringResource(R.string.demo_course_english)
+        val demoAlgorithms = stringResource(R.string.demo_course_algorithms)
+        val demoNetworks = stringResource(R.string.demo_course_networks)
+        val previewDemoCourses = remember(demoUiState.currentMergedCourses, demoMath, demoEnglish, demoAlgorithms, demoNetworks) {
             demoUiState.currentMergedCourses.map { block ->
                 block.copy(
                     courses = block.courses.map { cww ->
                         val refinedName = when (cww.course.name) {
-                            "普通课程展示" -> "高等数学"
-                            "精准渲染演示" -> "大学英语"
-                            "冲突课程 A" -> "算法设计"
-                            "冲突课程 B" -> "计算机网络"
+                            "普通课程展示" -> demoMath
+                            "精准渲染演示" -> demoEnglish
+                            "冲突课程 A" -> demoAlgorithms
+                            "冲突课程 B" -> demoNetworks
                             else -> cww.course.name
                         }
                         cww.copy(course = cww.course.copy(name = refinedName))

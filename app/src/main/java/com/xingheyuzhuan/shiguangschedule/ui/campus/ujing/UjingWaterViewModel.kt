@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.campus.ujing
 
+import com.xingheyuzhuan.shiguangschedule.R
+
 import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
@@ -129,7 +131,7 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 // 1. 获取平台有效的 access_token
-                _uiState.update { it.copy(stage = UjingWaterUiStage.Loading("正在验证一卡通凭据...")) }
+                _uiState.update { it.copy(stage = UjingWaterUiStage.Loading(getApplication<Application>().getString(R.string.status_verifying_campus_card))) }
                 val platformToken = runCatching { cardClient.ensureValidAccessToken() }.getOrElse { e ->
                     if (e is WbuSessionExpiredException || e.message?.contains("失效") == true) {
                         // 尝试静默使用已保存的统一认证密码登录
@@ -152,15 +154,15 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
                 }
 
                 // 2. 建立 U净 会话（换票）
-                _uiState.update { it.copy(stage = UjingWaterUiStage.Loading("正在连接 U净 校园饮水...")) }
+                _uiState.update { it.copy(stage = UjingWaterUiStage.Loading(getApplication<Application>().getString(R.string.status_connecting_ujing))) }
                 ujingClient.connect(platformToken, appId = WbuUjingClient.WATER_APP_ID)
 
                 // 3. 绑定取水点
-                _uiState.update { it.copy(stage = UjingWaterUiStage.Loading("正在绑定取水点...")) }
+                _uiState.update { it.copy(stage = UjingWaterUiStage.Loading(getApplication<Application>().getString(R.string.status_binding_water_point))) }
                 val subject = ujingClient.bindWaterPoint(cd)
 
                 // 4. 下单出水
-                _uiState.update { it.copy(stage = UjingWaterUiStage.Loading("正在出水，请稍候...")) }
+                _uiState.update { it.copy(stage = UjingWaterUiStage.Loading(getApplication<Application>().getString(R.string.status_dispensing_water))) }
                 val order = ujingClient.dispenseWater(cd)
 
                 // 5. 进入出水进行中状态并开启监听
@@ -186,7 +188,7 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
             } catch (e: Exception) {
                 Log.e(TAG, "Water flow error", e)
                 _uiState.update {
-                    it.copy(stage = UjingWaterUiStage.Error(e.localizedMessage ?: "出水流程失败"))
+                    it.copy(stage = UjingWaterUiStage.Error(e.localizedMessage ?: getApplication<Application>().getString(R.string.err_dispensing_failed)))
                 }
             }
         }
@@ -294,8 +296,8 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
                             orderStatusName = WbuUjingClient.orderStatusName(status),
                             storeName = subject.storeName,
                             deviceNo = null,
-                            orderTypeName = "扫码取水",
-                            payTypeName = "一卡通免密",
+                            orderTypeName = getApplication<Application>().getString(R.string.label_scan_qr_water),
+                            payTypeName = getApplication<Application>().getString(R.string.label_campus_card_quick_pay),
                             hotWaterMl = 0,
                             warmWaterMl = 0,
                             payPrice = 0.0,
@@ -341,7 +343,7 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
         }
 
         return try {
-            _uiState.update { it.copy(stage = UjingWaterUiStage.Loading("正在使用已保存凭据登录...")) }
+            _uiState.update { it.copy(stage = UjingWaterUiStage.Loading(app.getString(R.string.status_login_saved_credentials))) }
             val viaWebVpn = WbuAuthTransport.getIdsViaWebVpn(app)
             val engine = WbuSyncEngine(app, useVpn = viaWebVpn)
             val success = engine.loginUnifiedAuthOnly(
@@ -369,7 +371,7 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
         _uiState.update {
             it.copy(
                 needLogin = false,
-                stage = UjingWaterUiStage.Error("需要登录统一认证以使用饮水机服务", canRetry = false)
+                stage = UjingWaterUiStage.Error(getApplication<Application>().getString(R.string.err_login_required_water), canRetry = false)
             )
         }
     }

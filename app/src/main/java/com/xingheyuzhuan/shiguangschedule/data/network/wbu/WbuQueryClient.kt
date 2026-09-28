@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.data.network.wbu
 
+import com.xingheyuzhuan.shiguangschedule.R
+
 import android.content.Context
 import android.util.Log
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.AcademicCourse
@@ -1029,7 +1031,7 @@ class WbuQueryClient(
         val tgcCookie = transport.cookieStore.find { it.name == "CASTGC" && !it.value.isBlank() }
         if (tgcCookie == null) {
             Log.w("WbuQueryClient", "No CASTGC found in cookie store for OPAC authentication")
-            throw WbuSessionExpiredException(message = "统一认证会话已过期，请重新登录")
+            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_unified_auth))
         }
 
         // 1. 请求 CAS 获取重定向到 OPAC 的 ST ticket
@@ -1052,7 +1054,7 @@ class WbuQueryClient(
 
         if (location.isNullOrBlank() || !location.contains("ticket=")) {
             Log.w("WbuQueryClient", "CAS failed to grant ST ticket for OPAC; redirect location=$location")
-            throw WbuSessionExpiredException(message = "统一认证票据失效，请重新登录")
+            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_ticket))
         }
 
         // 2. 将 CAS 回跳的目标地址映射到当前网络通道（WebVPN 下重写为代理子域以穿透校外网关）
@@ -1137,7 +1139,7 @@ class WbuQueryClient(
 
         val infoHtml = client.newCall(infoReq).execute().use { resp ->
             if (resp.header("Location").orEmpty().contains("login")) {
-                throw WbuSessionExpiredException(message = "图书馆会话已过期，请重新登录")
+                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_library))
             }
             resp.body?.string().orEmpty()
         }
@@ -1195,7 +1197,7 @@ class WbuQueryClient(
 
         val html = client.newCall(req).execute().use { resp ->
             if (resp.header("Location").orEmpty().contains("login")) {
-                throw WbuSessionExpiredException(message = "图书馆会话已过期，请重新登录")
+                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_library))
             }
             resp.body?.string().orEmpty()
         }
@@ -1293,7 +1295,7 @@ class WbuQueryClient(
 
         val html = client.newCall(req).execute().use { resp ->
             if (resp.header("Location").orEmpty().contains("login")) {
-                throw WbuSessionExpiredException(message = "图书馆会话已过期，请重新登录")
+                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_library))
             }
             resp.body?.string().orEmpty()
         }

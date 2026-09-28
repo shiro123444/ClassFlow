@@ -993,12 +993,12 @@ private fun FullScreenWebContent(
                         }.getOrElse {
                             Log.w("WebAppScreen", "Failed to launch intent for scheme $scheme", it)
                             val appName = when {
-                                scheme.startsWith("weixin") -> "微信"
-                                scheme.startsWith("alipay") -> "支付宝"
-                                scheme.startsWith("upwallet") -> "云闪付"
+                                scheme.startsWith("weixin") -> context.getString(R.string.label_wechat)
+                                scheme.startsWith("alipay") -> context.getString(R.string.label_alipay)
+                                scheme.startsWith("upwallet") -> context.getString(R.string.label_unionpay)
                                 else -> scheme
                             }
-                            Toast.makeText(context, "未找到可处理 $appName 调起请求的应用", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.format_no_app_handle_request, appName), Toast.LENGTH_SHORT).show()
                             true
                         }
                     }
@@ -1426,7 +1426,7 @@ private fun CampusNetworkProbeOverlay(
                                     contentColor = MaterialTheme.colorScheme.onSecondary
                                 ) {
                                     Text(
-                                        text = "推荐",
+                                        text = stringResource(R.string.label_recommended),
                                         style = MaterialTheme.typography.labelSmall,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )

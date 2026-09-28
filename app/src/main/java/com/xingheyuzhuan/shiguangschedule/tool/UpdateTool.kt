@@ -1,6 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.tool
 
 import android.content.Context
+import com.xingheyuzhuan.shiguangschedule.R
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -165,7 +166,7 @@ class UpdateChecker(private val context: Context) {
     ): UpdateStatus = withContext(Dispatchers.IO) {
         val apiUrl = customApiUrl?.trim()?.takeIf { it.isNotBlank() } ?: BuildConfig.UPDATE_API_URL.trim()
         if (apiUrl.isBlank()) {
-            return@withContext UpdateStatus.Error("未配置更新服务器地址，无法检查更新")
+            return@withContext UpdateStatus.Error(context.getString(R.string.err_update_server_not_configured))
         }
 
         try {
@@ -193,7 +194,7 @@ class UpdateChecker(private val context: Context) {
                 .build()
 
             val jsonString = httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw IOException("服务器响应异常: HTTP ${response.code}")
+                if (!response.isSuccessful) throw IOException(context.getString(R.string.format_err_server_response, response.code))
                 response.body.string()
             }
 
@@ -223,17 +224,17 @@ class UpdateChecker(private val context: Context) {
 
             // 如果服务端明确标记下载不可用
             if (!updateResponse.downloadAvailable) {
-                return@withContext UpdateStatus.Error("新版本 $versionDisplayName 已发布，但针对当前架构 ($arch) 的安装包暂未开放下载")
+                return@withContext UpdateStatus.Error(context.getString(R.string.format_err_arch_not_available, versionDisplayName, arch))
             }
 
             if (effectiveDownloadUrl.isBlank()) {
-                return@withContext UpdateStatus.Error("更新信息中未提供有效的下载地址")
+                return@withContext UpdateStatus.Error(context.getString(R.string.err_no_download_url))
             }
 
             val info = ReleaseUpdateInfo(
                 latestVersionName = versionDisplayName,
                 latestVersionCode = updateResponse.latestVersionCode,
-                releaseTitle = "发现新版本 $versionDisplayName",
+                releaseTitle = context.getString(R.string.title_update_found, versionDisplayName),
                 summary = updateResponse.changelog.trim(),
                 releaseUrl = effectiveDownloadUrl,
                 downloadUrl = effectiveDownloadUrl,
@@ -244,7 +245,12 @@ class UpdateChecker(private val context: Context) {
 
             UpdateStatus.Found(info)
         } catch (e: Exception) {
-            UpdateStatus.Error("检查更新失败: ${e.message ?: "未知网络错误"}")
+            UpdateStatus.Error(
+                context.getString(
+                    R.string.format_err_check_update,
+                    e.message ?: context.getString(R.string.err_unknown_network_error)
+                )
+            )
         }
     }
 
@@ -280,7 +286,7 @@ class UpdateChecker(private val context: Context) {
             val tempFile = File(updatesDir, "classflow-update-$safeVersion.apk.tmp")
 
             httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw IOException("下载失败: HTTP ${response.code}")
+                if (!response.isSuccessful) throw IOException(context.getString(R.string.format_err_download_failed, response.code))
                 val body = response.body
                 val totalBytes = body.contentLength()
                 var downloadedBytes = 0L
@@ -320,7 +326,7 @@ class UpdateChecker(private val context: Context) {
                 if (targetApk.length() != expectedSize) {
                     val actualSize = targetApk.length()
                     targetApk.delete()
-                    throw IOException("安装包大小校验失败: 预期 $expectedSize 字节，实际 $actualSize 字节")
+                    throw IOException(context.getString(R.string.format_err_size_mismatch, expectedSize, actualSize))
                 }
             }
 
@@ -329,7 +335,7 @@ class UpdateChecker(private val context: Context) {
                 val actualMd5 = calculateFileMd5(targetApk)
                 if (!actualMd5.equals(expectedMd5.trim(), ignoreCase = true)) {
                     targetApk.delete()
-                    throw IOException("安装包 MD5 校验不匹配: 预期 $expectedMd5，实际 $actualMd5")
+                    throw IOException(context.getString(R.string.format_err_md5_mismatch, expectedMd5, actualMd5))
                 }
             }
 

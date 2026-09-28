@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.settings.update
 
+import com.xingheyuzhuan.shiguangschedule.R
+
 import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -67,7 +69,7 @@ open class UpdateRepoViewModel @Inject constructor(
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
-                    logs = "错误：加载仓库列表失败。\n${e.message}"
+                    logs = application.getString(R.string.format_err_load_repo_list_failed, e.message ?: "")
                 )
             }
         }

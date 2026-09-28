@@ -125,8 +125,8 @@ class CourseAlarmReceiver : BroadcastReceiver() {
                         }
 
                     } else {
-                        val courseName = intent?.getStringExtra(EXTRA_COURSE_NAME) ?: "未知课程"
-                        val coursePosition = intent?.getStringExtra(EXTRA_COURSE_POSITION) ?: "地点未知"
+                        val courseName = intent?.getStringExtra(EXTRA_COURSE_NAME) ?: ctx.getString(R.string.notification_unknown_course)
+                        val coursePosition = intent?.getStringExtra(EXTRA_COURSE_POSITION) ?: ctx.getString(R.string.notification_unknown_position)
                         val courseIdString = intent?.getStringExtra(EXTRA_COURSE_ID)
 
                         if (!courseIdString.isNullOrEmpty()) {

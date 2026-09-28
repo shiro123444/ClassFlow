@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.settings.notification
 
+import com.xingheyuzhuan.shiguangschedule.R
+
 import android.content.Context
 import android.os.Build
 import androidx.lifecycle.ViewModel
@@ -182,7 +184,7 @@ class NotificationSettingsViewModel @Inject constructor(
                 }
                 onSuccess(context)
             } catch (e: Exception) {
-                onFailure(context, e.message ?: "未知错误")
+                onFailure(context, e.message ?: context.getString(R.string.err_unknown_error))
             } finally {
                 _uiState.value = _uiState.value.copy(isLoading = false)
             }
@@ -202,7 +204,7 @@ class NotificationSettingsViewModel @Inject constructor(
                 onSuccess(context)
                 dismissDialog()
             } catch (e: Exception) {
-                onFailure(context, e.message ?: "未知错误")
+                onFailure(context, e.message ?: context.getString(R.string.err_unknown_error))
             }
         }
     }

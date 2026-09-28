@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.data.network.wbu
 
+import com.xingheyuzhuan.shiguangschedule.R
+
 import android.content.Context
 import android.util.Base64
 import android.util.Log
@@ -207,7 +209,7 @@ class WbuCampusCardClient(
 
         val hasTgc = transport.cookieStore.any { it.name == "CASTGC" && it.value.isNotBlank() }
         if (!hasTgc) {
-            throw WbuSessionExpiredException(message = "统一身份认证已失效，请重新登录")
+            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_unified_auth))
         }
 
         val noRedirectClient = client.newBuilder().followRedirects(false).build()
@@ -259,10 +261,10 @@ class WbuCampusCardClient(
             }
 
             if (body.contains("pwdFromId") || body.contains("pwdEncryptSalt") || body.contains("authserver/login")) {
-                throw WbuSessionExpiredException(message = "统一身份认证凭据已失效，请重新登录")
+                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_unified_auth))
             }
 
-            throw IOException("未取到一卡通 SSO 票据 (终止于 $currentUrl, status=$code)")
+            throw IOException(context.getString(R.string.format_error_campus_card_sso_ticket, currentUrl, code))
         }
 
         val finalTicket = ticket ?: throw IOException("SSO 重定向链结束仍未获取到有效票据")

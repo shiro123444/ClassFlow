@@ -2,6 +2,7 @@ package com.xingheyuzhuan.shiguangschedule.tool
 
 import android.content.ContentValues
 import android.content.Context
+import com.xingheyuzhuan.shiguangschedule.R
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -78,18 +79,18 @@ object ScheduleImageExporter {
     /**
      * 将离散周次转为紧凑易读的周次文字，例如："1-16周"、"1-15周·单周"、"2-16周·双周"、"1-4,7-12周"、"第3周"
      */
-    fun formatWeeks(weeks: List<Int>): String {
+    fun formatWeeks(context: Context, weeks: List<Int>): String {
         val ws = weeks.filter { it > 0 }.distinct().sorted()
         if (ws.isEmpty()) return ""
-        if (ws.size == 1) return "第${ws[0]}周"
+        if (ws.size == 1) return context.getString(R.string.export_week_prefix, ws[0])
 
         val isOdd = ws.all { it % 2 == 1 }
         val isEven = ws.all { it % 2 == 0 }
         val isStep2 = ws.zipWithNext().all { (a, b) -> b - a == 2 }
 
         if (isStep2 && (isOdd || isEven)) {
-            val typeStr = if (isOdd) "单周" else "双周"
-            return "${ws.first()}-${ws.last()}周·$typeStr"
+            val typeStr = if (isOdd) context.getString(R.string.export_odd_week) else context.getString(R.string.export_even_week)
+            return context.getString(R.string.format_export_week_range, ws.first(), ws.last(), typeStr)
         }
 
         val runs = mutableListOf<String>()
@@ -106,7 +107,7 @@ object ScheduleImageExporter {
             }
         }
         runs.add(if (start == prev) "$start" else "$start-$prev")
-        return runs.joinToString(",") + "周"
+        return runs.joinToString(",") + context.getString(R.string.export_weeks_suffix)
     }
 
     /**
@@ -118,6 +119,7 @@ object ScheduleImageExporter {
      * 4. 仅在课程集合发生改变的冲突端点处执行切分。
      */
     private fun resolveBySmartSplitting(
+        context: Context,
         dayCourses: List<CourseWithWeeks>,
         breakNodes: List<Int>,
         totalSections: Int
@@ -130,7 +132,7 @@ object ScheduleImageExporter {
             val c = cw.course
             val s0 = (c.startSection ?: 1).coerceIn(1, totalSections)
             val e0 = (c.endSection ?: s0).coerceIn(s0, totalSections)
-            val item = CourseCellItem(c, formatWeeks(cw.weeks.map { it.weekNumber }))
+            val item = CourseCellItem(c, formatWeeks(context, cw.weeks.map { it.weekNumber }))
 
             var curStart = s0
             for (bx in breakNodes.sorted()) {
@@ -220,6 +222,7 @@ object ScheduleImageExporter {
      * 遇时间冲突时，在同一天内横向分配不同的 subColIndex（宽度对半开或多分列），保持课程原长
      */
     private fun resolveBySubColumnsPacking(
+        context: Context,
         dayCourses: List<CourseWithWeeks>,
         totalSections: Int
     ): List<LayoutCell> {
@@ -234,7 +237,7 @@ object ScheduleImageExporter {
         val rawList = dayCourses.map { cw ->
             val s = (cw.course.startSection ?: 1).coerceIn(1, totalSections)
             val e = (cw.course.endSection ?: s).coerceIn(s, totalSections)
-            RawCourseInfo(s, e, CourseCellItem(cw.course, formatWeeks(cw.weeks.map { it.weekNumber })))
+            RawCourseInfo(s, e, CourseCellItem(cw.course, formatWeeks(context, cw.weeks.map { it.weekNumber })))
         }.sortedWith(compareBy({ it.start }, { -(it.end - it.start) }))
 
         // 1. 将重叠的课程划分到冲突连通分量（Cluster）
@@ -367,9 +370,9 @@ object ScheduleImageExporter {
         for (d in days) {
             val dayCourses = courses.filter { it.course.day == d }
             val cells = if (autoSplitConflict) {
-                resolveBySmartSplitting(dayCourses, breakNodes, totalSections)
+                resolveBySmartSplitting(context, dayCourses, breakNodes, totalSections)
             } else {
-                resolveBySubColumnsPacking(dayCourses, totalSections)
+                resolveBySubColumnsPacking(context, dayCourses, totalSections)
             }
             dayCellsMap[d] = cells
         }
@@ -475,7 +478,7 @@ object ScheduleImageExporter {
         textPaint.textSize = sp(20f)
         textPaint.color = Color.parseColor("#1F2329")
         textPaint.textAlign = Paint.Align.LEFT
-        canvas.drawText(tableName.ifBlank { "我的课表" }, pad, pad + dp(22f), textPaint)
+        canvas.drawText(tableName.ifBlank { context.getString(R.string.default_my_table_name) }, pad, pad + dp(22f), textPaint)
 
         // 元数据描述
         val totalCoursesCount = courses.map { it.course.id }.distinct().size
@@ -483,9 +486,9 @@ object ScheduleImageExporter {
         val totalWeeks = config?.semesterTotalWeeks?.coerceIn(1, 60) ?: 20
         val startDateStr = config?.semesterStartDate?.takeIf { it.isNotBlank() }
         val metaStr = buildString {
-            if (startDateStr != null) append("$startDateStr 开学 · ")
-            append("共 $totalWeeks 周 · ")
-            append("$totalCoursesCount 门课程 / $totalArrangements 条安排")
+            if (startDateStr != null) append(context.getString(R.string.format_export_start_date, startDateStr))
+            append(context.getString(R.string.format_export_total_weeks, totalWeeks))
+            append(context.getString(R.string.format_export_course_summary, totalCoursesCount, totalArrangements))
         }
         textPaint.typeface = Typeface.DEFAULT
         textPaint.textSize = sp(12f)
@@ -497,13 +500,16 @@ object ScheduleImageExporter {
         textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         textPaint.textSize = sp(14.5f)
         textPaint.color = Color.parseColor("#4C6EF5")
-        val modeTag = if (autoSplitConflict) "全部课程 · 无色主题" else "全部课程 · 穿插并列"
+        val modeTag = if (autoSplitConflict) context.getString(R.string.export_mode_all_colorless) else context.getString(R.string.export_mode_all_interleave)
         canvas.drawText(modeTag, totalCanvasW - pad, pad + dp(22f), textPaint)
 
         textPaint.typeface = Typeface.DEFAULT
         textPaint.textSize = sp(10.5f)
         textPaint.color = Color.parseColor("#8F959E")
-        val exportTimeStr = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")) + " 导出"
+        val exportTimeStr = context.getString(
+            R.string.format_export_time,
+            LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+        )
         canvas.drawText(exportTimeStr, totalCanvasW - pad, pad + dp(44f), textPaint)
 
         val gridTop = pad + titleH
@@ -513,7 +519,7 @@ object ScheduleImageExporter {
         paint.color = Color.parseColor("#F2F3F5")
         canvas.drawRect(pad, gridTop, totalCanvasW - pad, gridTop + headerH, paint)
 
-        val dayNames = mapOf(1 to "周一", 2 to "周二", 3 to "周三", 4 to "周四", 5 to "周五", 6 to "周六", 7 to "周日")
+        val dayNames = context.resources.getStringArray(R.array.week_days_full_names)
         textPaint.textAlign = Paint.Align.CENTER
         textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         textPaint.textSize = sp(13.5f)
@@ -521,7 +527,7 @@ object ScheduleImageExporter {
 
         for ((idx, d) in days.withIndex()) {
             val cx = pad + nodeColW + idx * dayColW + dayColW / 2f
-            canvas.drawText(dayNames[d] ?: "周$d", cx, gridTop + dp(23f), textPaint)
+            canvas.drawText(dayNames.getOrNull(d - 1) ?: d.toString(), cx, gridTop + dp(23f), textPaint)
         }
 
         // 表头底部分割线
@@ -645,19 +651,19 @@ object ScheduleImageExporter {
                     textPaint.color = Color.parseColor("#555D6E")
 
                     if (item.course.teacher.isNotBlank()) {
-                        val teacherText = "教师：${item.course.teacher}"
+                        val teacherText = context.getString(R.string.format_export_teacher, item.course.teacher)
                         canvas.drawText(truncateText(teacherText, textPaint, textInnerW.toFloat()), textLeft, curTextY + dp(10f), textPaint)
                         curTextY += dp(14f)
                     }
 
                     if (item.weeksText.isNotBlank()) {
-                        val weekText = "周次：${item.weeksText}"
+                        val weekText = context.getString(R.string.format_export_weeks, item.weeksText)
                         canvas.drawText(truncateText(weekText, textPaint, textInnerW.toFloat()), textLeft, curTextY + dp(10f), textPaint)
                         curTextY += dp(14f)
                     }
 
                     if (item.course.position.isNotBlank()) {
-                        val roomText = "教室：${item.course.position}"
+                        val roomText = context.getString(R.string.format_export_room, item.course.position)
                         canvas.drawText(truncateText(roomText, textPaint, textInnerW.toFloat()), textLeft, curTextY + dp(10f), textPaint)
                         curTextY += dp(14f)
                     }
@@ -739,7 +745,7 @@ object ScheduleImageExporter {
             canvas.drawLine(pad, topY, totalCanvasW - pad, topY, breakBorderPaint)
             canvas.drawLine(pad, botY, totalCanvasW - pad, botY, breakBorderPaint)
 
-            val label = if (bn == breakNodes.firstOrNull()) "午休" else "晚修"
+            val label = if (bn == breakNodes.firstOrNull()) context.getString(R.string.export_lunch_break) else context.getString(R.string.export_evening_study)
             textPaint.textAlign = Paint.Align.CENTER
             textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textPaint.textSize = sp(11f)
@@ -748,9 +754,9 @@ object ScheduleImageExporter {
         }
 
         // 8. 直接保存到系统相册 (Pictures/ClassFlow)
-        val safeTableName = tableName.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "课表" }
+        val safeTableName = tableName.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { context.getString(R.string.export_default_table_name) }
         val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
-        val displayName = "${safeTableName}_课表_$timestamp.png"
+        val displayName = context.getString(R.string.format_export_image_filename, safeTableName, timestamp)
 
         val savedUri = saveBitmapToGallery(context, bitmap, displayName)
         bitmap.recycle()

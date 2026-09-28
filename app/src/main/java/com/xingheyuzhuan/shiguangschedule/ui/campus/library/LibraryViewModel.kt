@@ -1,5 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.ui.campus.library
 
+import com.xingheyuzhuan.shiguangschedule.R
+
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -105,7 +107,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                     it.copy(
                         isLoading = false,
                         isRefreshing = false,
-                        errorMessage = e.message ?: "加载图书馆数据失败",
+                        errorMessage = e.message ?: getApplication<Application>().getString(R.string.err_load_library_failed),
                         isSessionExpired = isExpired
                     )
                 }
@@ -118,7 +120,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
      */
     fun renewSingleBook(book: BorrowedBook) {
         if (!book.canRenew || book.renewCheck.isBlank()) {
-            viewModelScope.launch { _toastEvent.emit("该图书暂不支持续借或已超过限制") }
+            viewModelScope.launch { _toastEvent.emit(getApplication<Application>().getString(R.string.err_book_renew_not_supported)) }
             return
         }
         viewModelScope.launch {
@@ -142,7 +144,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isRenewing = false, renewingBarcode = null) }
-                _toastEvent.emit(e.message ?: "续借操作失败")
+                _toastEvent.emit(e.message ?: getApplication<Application>().getString(R.string.err_renew_failed))
             }
         }
     }
@@ -153,7 +155,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     fun renewAllEligibleBooks() {
         val eligibleList = _uiState.value.dashboardData?.currentBorrows?.filter { it.canRenew && it.renewCheck.isNotBlank() } ?: emptyList()
         if (eligibleList.isEmpty()) {
-            viewModelScope.launch { _toastEvent.emit("没有可续借的图书") }
+            viewModelScope.launch { _toastEvent.emit(getApplication<Application>().getString(R.string.toast_no_renewable_books)) }
             return
         }
 
@@ -180,7 +182,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             }
 
             _uiState.update { it.copy(isRenewing = false, renewingBarcode = null) }
-            _toastEvent.emit("续借完成: 成功 $successCount 本，失败 $failCount 本")
+            _toastEvent.emit(getApplication<Application>().getString(R.string.format_renew_result, successCount, failCount))
         }
     }
 
@@ -196,7 +198,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 _uiState.update { it.copy(isLoadingBookDetail = false, selectedBookDetail = detail) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoadingBookDetail = false) }
-                _toastEvent.emit("获取图书详情失败: ${e.message}")
+                _toastEvent.emit(getApplication<Application>().getString(R.string.format_err_book_detail, e.message ?: ""))
             }
         }
     }

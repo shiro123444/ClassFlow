@@ -332,7 +332,7 @@ class CourseConversionRepository @Inject constructor(
      * @param alarmMinutes 可选的提醒时间，单位分钟。传入null则不设置提醒。
      * @return 包含 ICS 日历文件内容的字符串，如果失败则返回 null。
      */
-    suspend fun exportToIcsString(tableId: String, alarmMinutes: Int?): String? {
+    suspend fun exportToIcsString(tableId: String, alarmMinutes: Int?, context: Context): String? {
         val courses = courseDao.getCoursesWithWeeksByTableId(tableId).first()
         val timeSlots = timeSlotDao.getTimeSlotsByCourseTableId(tableId).first()
 
@@ -350,6 +350,7 @@ class CourseConversionRepository @Inject constructor(
         }
 
         return IcsExportTool.generateIcsFileContent(
+            context = context,
             courses = courses,
             timeSlots = timeSlots,
             semesterStartDate = semesterStartDate,
@@ -404,6 +405,7 @@ class CourseConversionRepository @Inject constructor(
                 }
 
                 val ops = IcsExportTool.generateCalendarOps(
+                    context = context,
                     courses = courses,
                     timeSlots = timeSlots,
                     semesterStartDate = semesterStartDate,
@@ -433,6 +435,7 @@ class CourseConversionRepository @Inject constructor(
         val courseConfig = appSettingsRepository.getCourseConfigOnce(tableId)
 
         val content = WakeupExportTool.generateWakeupContent(
+            context = context,
             tableName = table.name,
             courses = courses,
             timeSlots = timeSlots,
