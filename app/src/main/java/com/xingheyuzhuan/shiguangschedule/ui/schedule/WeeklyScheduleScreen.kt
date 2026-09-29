@@ -57,7 +57,10 @@ import com.xingheyuzhuan.shiguangschedule.ui.components.CourseTablePickerDialog
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.VpnFullLoginStatus
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthMode
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.PortalCaptchaData
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.PortalCaptchaResult
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WebVpnClient
+import com.xingheyuzhuan.shiguangschedule.ui.components.PortalCaptchaDialog
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
@@ -186,6 +189,8 @@ fun WeeklyScheduleScreen(
     var smsDeferred by remember { mutableStateOf<CompletableDeferred<String?>?>(null) }
     var smsVerifying by remember { mutableStateOf(false) }
     var smsError by remember { mutableStateOf<String?>(null) }
+    var portalCaptchaData by remember { mutableStateOf<PortalCaptchaData?>(null) }
+    var portalCaptchaDeferred by remember { mutableStateOf<CompletableDeferred<PortalCaptchaResult?>?>(null) }
     // 保持 vpnEngine 引用以便 resend
     var activeVpnEngine by remember { mutableStateOf<WbuSyncEngine?>(null) }
 
@@ -1036,6 +1041,14 @@ fun WeeklyScheduleScreen(
                                 }
                                 d.await()
                             }
+                            engine.portalCaptchaProvider = { captcha ->
+                                val d = CompletableDeferred<PortalCaptchaResult?>()
+                                withContext(Dispatchers.Main) {
+                                    portalCaptchaData = captcha
+                                    portalCaptchaDeferred = d
+                                }
+                                d.await() ?: PortalCaptchaResult.Cancel
+                            }
                             // WebVPN 模式下先打通门禁：TWFID 缺失/失效时弹窗索取密码 + 短信二次验证
                             if (useVpn) {
                                 wbuSyncStatus = appContext.getString(R.string.status_logging_in_webvpn)
@@ -1124,6 +1137,27 @@ fun WeeklyScheduleScreen(
                 smsDeferred = null
                 smsVerifying = false
                 smsError = null
+            }
+        )
+    }
+
+    portalCaptchaData?.let { captcha ->
+        PortalCaptchaDialog(
+            captcha = captcha,
+            onSubmit = { code ->
+                portalCaptchaDeferred?.complete(PortalCaptchaResult.Submit(code))
+                portalCaptchaDeferred = null
+                portalCaptchaData = null
+            },
+            onRefresh = {
+                portalCaptchaDeferred?.complete(PortalCaptchaResult.Refresh)
+                portalCaptchaDeferred = null
+                portalCaptchaData = null
+            },
+            onDismiss = {
+                portalCaptchaDeferred?.complete(PortalCaptchaResult.Cancel)
+                portalCaptchaDeferred = null
+                portalCaptchaData = null
             }
         )
     }
@@ -1738,4 +1772,3 @@ private suspend fun SnackbarHostState.showSuccessSnackbar(message: String) {
         )
     )
 }
-

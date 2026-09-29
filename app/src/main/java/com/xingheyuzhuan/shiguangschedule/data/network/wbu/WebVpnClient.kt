@@ -5,6 +5,7 @@ import java.math.BigInteger
 import java.security.KeyFactory
 import java.security.spec.RSAPublicKeySpec
 import javax.crypto.Cipher
+import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
@@ -23,6 +24,28 @@ sealed class PortalLoginStep {
     object PortalAuthenticated : PortalLoginStep()
     data class Error(val message: String) : PortalLoginStep()
 }
+
+/** 图形验证码图片由门户会话下载，交给 UI 供用户手动辨认。 */
+data class PortalCaptchaData(
+    val imageBytes: ByteArray,
+    val attempt: Int = 1,
+    val previousErrorCode: String = ""
+)
+
+/** 用户对 WebVPN 图形验证码弹窗的操作。 */
+sealed class PortalCaptchaResult {
+    data class Submit(val code: String) : PortalCaptchaResult()
+    object Refresh : PortalCaptchaResult()
+    object Cancel : PortalCaptchaResult()
+}
+
+typealias PortalCaptchaProvider = suspend (PortalCaptchaData) -> PortalCaptchaResult
+
+internal fun isWebVpnCaptchaEnabled(rndImg: String?, enableHeader: String?, useRandCode: String?): Boolean =
+    rndImg == "1" || enableHeader == "1" || useRandCode == "1"
+
+internal fun isWebVpnCaptchaError(resultCode: String?, errorCode: String?): Boolean =
+    resultCode !in listOf("1", "2") && errorCode in setOf("20023", "20041", "20043")
 
 /** WebVPN 短信重发结果（包含服务端下发的最新重发冷却时间）。 */
 data class PortalResendSmsResult(
@@ -62,42 +85,96 @@ internal class WebVpnClient(
         }
     }
 
-    /** 门户密码登录（第一步：RSA 加密 → 提交 → 检测是否需要 SMS）。 */
-    suspend fun portalPasswordLogin(studentId: String, password: String): PortalLoginStep =
+    /** 门户密码登录（第一步：按需人工输入图形验证码，RSA 加密 → 提交 → 检测是否需要 SMS）。 */
+    suspend fun portalPasswordLogin(
+        studentId: String,
+        password: String,
+        captchaProvider: PortalCaptchaProvider? = null
+    ): PortalLoginStep =
         withContext(Dispatchers.IO) {
             try {
-                val targetUrl = "$vpnBase/por/login_auth.csp?apiversion=1"
-                val authXml = client.newCall(
-                    Request.Builder()
-                        .url(targetUrl)
-                        .get()
+                var captchaRequired = false
+                var captchaCode = ""
+                var captchaErrorCode = ""
+                var attackSignals = 0
+                var pswXml = ""
+                var completed = false
+
+                for (attempt in 1..MAX_PASSWORD_ATTEMPTS) {
+                    val authResponse = client.newCall(
+                        Request.Builder()
+                            .url("$vpnBase/por/login_auth.csp?apiversion=1")
+                            .get()
+                            .build()
+                    ).execute()
+                    val enableRandCode = authResponse.header("ENABLE_RANDCODE") == "1"
+                    val authXml = authResponse.use { it.body?.string().orEmpty() }
+                    val rndImg = extractXmlTag(authXml, "RndImg")
+                    if (!captchaRequired && isWebVpnCaptchaEnabled(rndImg, if (enableRandCode) "1" else "0", null)) {
+                        captchaRequired = true
+                    }
+                    val rsaKey = extractXmlTag(authXml, "RSA_ENCRYPT_KEY")
+                        ?: return@withContext PortalLoginStep.Error("无法获取加密密钥")
+                    val rsaExp = extractXmlTag(authXml, "RSA_ENCRYPT_EXP") ?: "65537"
+                    val csrfCode = extractXmlTag(authXml, "CSRF_RAND_CODE") ?: ""
+                    val nameField = extractXmlTag(authXml, "N_INPUTNAME") ?: "svpn_name"
+                    val passField = extractXmlTag(authXml, "N_INPUTPASS") ?: "svpn_password"
+
+                    if (captchaRequired) {
+                        val provider = captchaProvider
+                            ?: return@withContext PortalLoginStep.Error("WebVPN 需要图形验证码，但当前没有可用的输入界面")
+                        while (true) {
+                            val image = fetchPortalCaptcha()
+                                ?: return@withContext PortalLoginStep.Error("获取 WebVPN 图形验证码失败，请重试")
+                            when (val input = provider(PortalCaptchaData(image, attempt, captchaErrorCode))) {
+                                is PortalCaptchaResult.Submit -> {
+                                    captchaCode = input.code.trim()
+                                    if (captchaCode.length != CAPTCHA_LENGTH) {
+                                        return@withContext PortalLoginStep.Error("图形验证码应为 4 位")
+                                    }
+                                    break
+                                }
+                                PortalCaptchaResult.Refresh -> continue
+                                PortalCaptchaResult.Cancel -> return@withContext PortalLoginStep.Error("已取消 WebVPN 图形验证码输入")
+                            }
+                        }
+                    } else {
+                        captchaCode = ""
+                    }
+
+                    val plainForEncrypt = if (csrfCode.isNotBlank()) "${password}_$csrfCode" else password
+                    val encryptedPassword = rsaEncryptSangfor(plainForEncrypt, rsaKey, rsaExp)
+                    val form = FormBody.Builder()
+                        .add("mitm_result", "")
+                        .add("svpn_req_randcode", csrfCode)
+                        .add(nameField, studentId)
+                        .add(passField, encryptedPassword)
+                        .add("svpn_rand_code", captchaCode)
                         .build()
-                ).execute().use { it.body?.string().orEmpty() }
+                    pswXml = client.newCall(
+                        Request.Builder()
+                            .url("$vpnBase/por/login_psw.csp?anti_replay=1&encrypt=1&apiversion=1")
+                            .post(form)
+                            .build()
+                    ).execute().use { it.body?.string().orEmpty() }
+                    Log.d("WebVpnClient", "VPN login_psw response: ${pswXml.take(500)}")
 
-                val rsaKey = extractXmlTag(authXml, "RSA_ENCRYPT_KEY")
-                    ?: return@withContext PortalLoginStep.Error("无法获取加密密钥")
-                val rsaExp = extractXmlTag(authXml, "RSA_ENCRYPT_EXP") ?: "65537"
-                val csrfCode = extractXmlTag(authXml, "CSRF_RAND_CODE") ?: ""
-                val nameField = extractXmlTag(authXml, "N_INPUTNAME") ?: "svpn_name"
-                val passField = extractXmlTag(authXml, "N_INPUTPASS") ?: "svpn_password"
-
-                val plainForEncrypt = if (csrfCode.isNotBlank()) "${password}_$csrfCode" else password
-                val encryptedPassword = rsaEncryptSangfor(plainForEncrypt, rsaKey, rsaExp)
-
-                val form = FormBody.Builder()
-                    .add("mitm_result", "")
-                    .add("svpn_req_randcode", csrfCode)
-                    .add(nameField, studentId)
-                    .add(passField, encryptedPassword)
-                    .add("svpn_rand_code", "")
-                    .build()
-                val pswXml = client.newCall(
-                    Request.Builder()
-                        .url("$vpnBase/por/login_psw.csp?anti_replay=1&encrypt=1&apiversion=1")
-                        .post(form)
-                        .build()
-                ).execute().use { it.body?.string().orEmpty() }
-                Log.d("WebVpnClient", "VPN login_psw response: ${pswXml.take(500)}")
+                    val result = extractXmlTag(pswXml, "Result")
+                    val error = extractXmlTag(pswXml, "ErrorCode")
+                    if (isWebVpnCaptchaError(result, error)) {
+                        if (error == "20041" && ++attackSignals >= MAX_ATTACK_SIGNALS) {
+                            return@withContext PortalLoginStep.Error("WebVPN 连续触发登录风控，已停止重试；请稍后再登录")
+                        }
+                        captchaRequired = true
+                        captchaErrorCode = error.orEmpty()
+                        Log.i("WebVpnClient", "Portal requires captcha (ErrorCode=$error), retry $attempt/$MAX_PASSWORD_ATTEMPTS")
+                        if (attempt < MAX_PASSWORD_ATTEMPTS) continue
+                        return@withContext PortalLoginStep.Error("图形验证码多次未通过，请重试")
+                    }
+                    completed = true
+                    break
+                }
+                if (!completed) return@withContext PortalLoginStep.Error("WebVPN 登录尝试次数已达上限")
 
                 val resultCode = extractXmlTag(pswXml, "Result")
                 val errorCode = extractXmlTag(pswXml, "ErrorCode")
@@ -200,6 +277,33 @@ internal class WebVpnClient(
         }
     }
 
+    private fun fetchPortalCaptcha(): ByteArray? = try {
+        val url = "$vpnBase/por/rand_code.csp?rnd=${Random.nextDouble()}"
+        client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
+            val contentType = response.header("Content-Type").orEmpty()
+            val bytes = if (response.isSuccessful) response.body?.bytes() else null
+            val looksLikeImage = contentType.startsWith("image/", ignoreCase = true) ||
+                bytes?.let {
+                    it.size >= 3 && (
+                        it[0] == 0xFF.toByte() && it[1] == 0xD8.toByte() ||
+                            it.size >= 8 && it.copyOfRange(0, 8).contentEquals(
+                                byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+                            ) ||
+                            it[0] == 'G'.code.toByte() && it[1] == 'I'.code.toByte() && it[2] == 'F'.code.toByte()
+                        )
+                } == true
+            if (bytes != null && bytes.isNotEmpty() && looksLikeImage) {
+                bytes
+            } else {
+                Log.w("WebVpnClient", "Unexpected captcha response: ${response.code}, $contentType")
+                null
+            }
+        }
+    } catch (e: Exception) {
+        Log.w("WebVpnClient", "Failed to fetch portal captcha", e)
+        null
+    }
+
     /** 重发门户短信验证码，返回包含冷却秒数的结果。 */
     suspend fun portalResendSms(): PortalResendSmsResult = withContext(Dispatchers.IO) {
         try {
@@ -269,6 +373,10 @@ internal class WebVpnClient(
     }
 
     companion object {
+        private const val CAPTCHA_LENGTH = 4
+        private const val MAX_PASSWORD_ATTEMPTS = 4
+        private const val MAX_ATTACK_SIGNALS = 2
+
         /** 手动填写的 WebVPN TWFID（跨重启保留）。 */
         fun getTwfid(context: android.content.Context): String = WbuAuthTransport.getTwfid(context)
         fun setTwfid(context: android.content.Context, value: String) = WbuAuthTransport.setTwfid(context, value)

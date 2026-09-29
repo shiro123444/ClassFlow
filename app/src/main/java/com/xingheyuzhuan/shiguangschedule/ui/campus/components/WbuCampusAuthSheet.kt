@@ -53,9 +53,12 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthMode
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuLoginMethod
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.VpnFullLoginStatus
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.PortalCaptchaData
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.PortalCaptchaResult
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WebVpnClient
 import com.xingheyuzhuan.shiguangschedule.ui.components.QrPhase
 import com.xingheyuzhuan.shiguangschedule.ui.components.QrUiState
+import com.xingheyuzhuan.shiguangschedule.ui.components.PortalCaptchaDialog
 import com.xingheyuzhuan.shiguangschedule.ui.components.SliderCaptchaDialog
 import com.xingheyuzhuan.shiguangschedule.ui.components.SslIssueDialog
 import com.xingheyuzhuan.shiguangschedule.ui.components.VpnSmsCodeDialog
@@ -140,6 +143,10 @@ fun WbuCampusAuthSheet(
     var captchaDialogData by remember { mutableStateOf<SliderCaptchaData?>(null) }
     var captchaDeferred by remember { mutableStateOf<CompletableDeferred<SliderCaptchaResult?>?>(null) }
 
+    // WebVPN 门户字符验证码（与 CAS 滑块验证码分开处理）
+    var portalCaptchaData by remember { mutableStateOf<PortalCaptchaData?>(null) }
+    var portalCaptchaDeferred by remember { mutableStateOf<CompletableDeferred<PortalCaptchaResult?>?>(null) }
+
     // WebVPN 统一认证密码弹窗状态
     var vpnPasswordDeferred by remember { mutableStateOf<CompletableDeferred<String?>?>(null) }
 
@@ -162,6 +169,7 @@ fun WbuCampusAuthSheet(
             vpnPasswordDeferred?.complete(null)
             smsDeferred?.complete(null)
             captchaDeferred?.complete(SliderCaptchaResult.Cancel)
+            portalCaptchaDeferred?.complete(PortalCaptchaResult.Cancel)
             sslIssueDeferred?.complete(false)
         }
     }
@@ -176,6 +184,14 @@ fun WbuCampusAuthSheet(
                 sslIssueDeferred = deferred
             }
             deferred.await()
+        }
+        created.portalCaptchaProvider = { captcha ->
+            val deferred = CompletableDeferred<PortalCaptchaResult?>()
+            withContext(Dispatchers.Main) {
+                portalCaptchaData = captcha
+                portalCaptchaDeferred = deferred
+            }
+            deferred.await() ?: PortalCaptchaResult.Cancel
         }
         return created
     }
@@ -208,6 +224,28 @@ fun WbuCampusAuthSheet(
                 captchaDeferred?.complete(SliderCaptchaResult.Cancel)
                 captchaDeferred = null
                 captchaDialogData = null
+            }
+        )
+    }
+
+    // WebVPN 门户图形验证码：图片由当前认证会话获取，答案完全由用户输入。
+    portalCaptchaData?.let { captcha ->
+        PortalCaptchaDialog(
+            captcha = captcha,
+            onSubmit = { code ->
+                portalCaptchaDeferred?.complete(PortalCaptchaResult.Submit(code))
+                portalCaptchaDeferred = null
+                portalCaptchaData = null
+            },
+            onRefresh = {
+                portalCaptchaDeferred?.complete(PortalCaptchaResult.Refresh)
+                portalCaptchaDeferred = null
+                portalCaptchaData = null
+            },
+            onDismiss = {
+                portalCaptchaDeferred?.complete(PortalCaptchaResult.Cancel)
+                portalCaptchaDeferred = null
+                portalCaptchaData = null
             }
         )
     }

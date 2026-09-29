@@ -5,6 +5,14 @@
     <string name="action_reset_wallpaper_position">重置位置</string>
     <string name="desc_sakura_time_theme">按早/中/晚自动切换樱花色调；关闭后使用固定主题色（上游样式）</string>
     <string name="desc_wbu_vpn_webview_mode">开启后：VPN 登录会跳转网页手动完成验证码与统一认证。关闭后：优先走自动化引擎。</string>
+    <string name="title_webvpn_captcha">WebVPN 图形验证码</string>
+    <string name="desc_webvpn_captcha">请输入图片中的 4 位字符；不清楚时可刷新验证码。</string>
+    <string name="desc_webvpn_captcha_retry">验证码错误或已过期，请输入新图片中的字符。</string>
+    <string name="desc_webvpn_captcha_security">登录安全校验需要验证码，请输入图片中的字符。</string>
+    <string name="a11y_webvpn_captcha_image">WebVPN 图形验证码图片，点击刷新</string>
+    <string name="label_webvpn_captcha_code">验证码</string>
+    <string name="hint_webvpn_captcha_code">输入 4 位字符</string>
+    <string name="action_submit_webvpn_captcha">继续登录</string>
     <string name="dialog_option_on_vacation">假期中</string>
     <string name="font_style_apple">平方</string>
     <string name="font_style_default">默认</string>

@@ -2,6 +2,14 @@
 <resources>
     <!-- ClassFlow 定制字符串（独立文件，保持 strings.xml 与上游逐字一致，避免 merge 冲突） -->
     <string name="action_adjust_wallpaper">調整</string>
+    <string name="title_webvpn_captcha">WebVPN 圖形驗證碼</string>
+    <string name="desc_webvpn_captcha">請輸入圖片中的 4 位字元；看不清時可重新整理驗證碼。</string>
+    <string name="desc_webvpn_captcha_retry">驗證碼錯誤或已過期，請輸入新圖片中的字元。</string>
+    <string name="desc_webvpn_captcha_security">登入安全驗證需要圖形驗證碼，請輸入圖片中的字元。</string>
+    <string name="a11y_webvpn_captcha_image">WebVPN 圖形驗證碼圖片，點擊重新整理</string>
+    <string name="label_webvpn_captcha_code">驗證碼</string>
+    <string name="hint_webvpn_captcha_code">輸入 4 位字元</string>
+    <string name="action_submit_webvpn_captcha">繼續登入</string>
     <string name="dialog_option_on_vacation">假期中</string>
     <string name="font_style_apple">平方</string>
     <string name="font_style_default">預設</string>

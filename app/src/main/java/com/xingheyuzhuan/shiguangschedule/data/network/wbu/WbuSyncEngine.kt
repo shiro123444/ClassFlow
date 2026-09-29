@@ -223,6 +223,9 @@ class WbuSyncEngine(
         get() = transport.sslIssueHandler
         set(v) { transport.sslIssueHandler = v }
 
+    /** WebVPN 门户图形验证码交互回调；由登录 UI 提供，网络层不做 OCR。 */
+    var portalCaptchaProvider: PortalCaptchaProvider? = null
+
     /**
      * 教务服务端通过 getCurrentXnxq 真实返回的当前学期（不会因用户手动挑选其它学期而被覆盖）。
      */
@@ -417,7 +420,8 @@ class WbuSyncEngine(
     suspend fun ensureVpnTunnelReady(
         studentId: String,
         vpnPasswordProvider: suspend () -> String?,
-        smsCodeProvider: (suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?)? = null
+        smsCodeProvider: (suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?)? = null,
+        portalCaptchaProvider: PortalCaptchaProvider? = this.portalCaptchaProvider
     ): Boolean = withContext(Dispatchers.IO) {
         if (!useVpn) return@withContext true
 
@@ -446,7 +450,7 @@ class WbuSyncEngine(
         }
 
         val effectiveSid = studentId.ifBlank { lastResolvedStudentId ?: getSavedStudentId(context) }
-        val portalStep = portal.portalPasswordLogin(effectiveSid, vpnPassword)
+        val portalStep = portal.portalPasswordLogin(effectiveSid, vpnPassword, portalCaptchaProvider)
         when (portalStep) {
             is PortalLoginStep.Error -> {
                 Log.w("WbuSyncEngine", "WebVPN portal login failed: ${portalStep.message}")
@@ -751,18 +755,21 @@ class WbuSyncEngine(
             }
         }
 
-        var portalStep = portal.portalPasswordLogin(vpnStudentId, effectiveVpnPassword)
+        var portalStep = portal.portalPasswordLogin(vpnStudentId, effectiveVpnPassword, portalCaptchaProvider)
 
         // 回退机制：如果用户输入的用户名巧合符合学号模样，导致直接登录 WebVPN 失败，且此前未进行 IDS 预认证：
         // 自动回退走一次 IDS 预认证换取真实学号，再重试 WebVPN 门户登录。
-        if (portalStep is PortalLoginStep.Error && !didPreIdsAuth && authMode == WbuAuthMode.UNIFIED_CAS) {
+        if (portalStep is PortalLoginStep.Error &&
+            !portalStep.message.contains("验证码") &&
+            !didPreIdsAuth && authMode == WbuAuthMode.UNIFIED_CAS
+        ) {
             Log.w("WbuSyncEngine", "WebVPN 直接登录失败（${portalStep.message}），尝试回退走 IDS 解析真实学号...")
             val fallbackSid = performPreIdsAuthAndGetStudentId(studentId, effectiveVpnPassword, captchaProvider)
             if (fallbackSid != null && fallbackSid != vpnStudentId) {
                 Log.d("WbuSyncEngine", "回退成功解析出真实学号，正在重试登录 WebVPN...")
                 vpnStudentId = fallbackSid
                 didPreIdsAuth = true
-                portalStep = portal.portalPasswordLogin(vpnStudentId, effectiveVpnPassword)
+                portalStep = portal.portalPasswordLogin(vpnStudentId, effectiveVpnPassword, portalCaptchaProvider)
             }
         }
 
