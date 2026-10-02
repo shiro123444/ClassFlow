@@ -32,10 +32,17 @@ android {
         ?: System.getenv("CLASSFLOW_UPDATE_API_URL")
         ?: ""
 
-    val ujingNfcHost: String = (project.findProperty("CLASSFLOW_UJING_NFC_HOST") as? String)
-        ?: localProperties.getProperty("CLASSFLOW_UJING_NFC_HOST")
-        ?: System.getenv("CLASSFLOW_UJING_NFC_HOST")
-        ?: "ujing_test.wbu.edu.cn"
+    // U净 NFC/DeepLink 域名属于私有配置，不写入仓库代码：
+    // 通过 Gradle 属性 / local.properties（本机配置，Git 忽略）/ 环境变量注入；
+    // 均未提供（或为空）时直接报错，避免构建出指向错误域名的包。
+    val ujingNfcHost: String = sequenceOf(
+        project.findProperty("CLASSFLOW_UJING_NFC_HOST") as? String,
+        localProperties.getProperty("CLASSFLOW_UJING_NFC_HOST"),
+        System.getenv("CLASSFLOW_UJING_NFC_HOST"),
+    ).firstOrNull { !it.isNullOrBlank() }?.trim()
+        ?: throw GradleException(
+            "缺少 CLASSFLOW_UJING_NFC_HOST：请在 local.properties、Gradle -P 参数或环境变量中配置 U净 NFC/DeepLink 域名"
+        )
 
     defaultConfig {
         applicationId = "com.shiro.classflow"

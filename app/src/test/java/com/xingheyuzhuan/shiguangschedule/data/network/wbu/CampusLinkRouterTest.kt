@@ -11,7 +11,7 @@ class CampusLinkRouterTest {
 
     @Test
     fun parsesWaterUri() {
-        val dest = CampusLinkRouter.parse("https://ujing_test.wbu.edu.cn/w/0011202004140940")
+        val dest = CampusLinkRouter.parse("https://ujing.example.com/w/0011202004140940")
         assertNotNull(dest)
         assertTrue(dest is Destination.UjingWater)
         assertEquals("0011202004140940", (dest as Destination.UjingWater).cd)
@@ -19,7 +19,7 @@ class CampusLinkRouterTest {
 
     @Test
     fun parsesWasherUri() {
-        val dest = CampusLinkRouter.parse("https://ujing_test.wbu.edu.cn/wm/0000000000000A1234567202208040004678")
+        val dest = CampusLinkRouter.parse("https://ujing.example.com/wm/0000000000000A1234567202208040004678")
         assertNotNull(dest)
         assertTrue(dest is Destination.WebApp)
         val webApp = dest as Destination.WebApp
@@ -29,7 +29,7 @@ class CampusLinkRouterTest {
 
     @Test
     fun ignoresUnrelatedUri() {
-        val dest = CampusLinkRouter.parse("https://ujing_test.wbu.edu.cn/other/path")
+        val dest = CampusLinkRouter.parse("https://ujing.example.com/other/path")
         assertNull(dest)
     }
 }

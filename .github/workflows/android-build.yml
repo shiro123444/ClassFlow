@@ -72,6 +72,7 @@ jobs:
           chmod +x ./gradlew
           ./gradlew ${{ steps.resolve_vars.outputs.task }} \
             -PCLASSFLOW_UPDATE_API_URL="${{ secrets.CLASSFLOW_UPDATE_API_URL }}" \
+            -PCLASSFLOW_UJING_NFC_HOST="${{ secrets.CLASSFLOW_UJING_NFC_HOST }}" \
             -Pandroid.injected.signing.store.file="${{ github.workspace }}/app/release.jks" \
             -Pandroid.injected.signing.store.password="${{ secrets.CLASSFLOW_RELEASE_STORE_PASSWORD }}" \
             -Pandroid.injected.signing.key.alias="${{ secrets.CLASSFLOW_RELEASE_KEY_ALIAS }}" \

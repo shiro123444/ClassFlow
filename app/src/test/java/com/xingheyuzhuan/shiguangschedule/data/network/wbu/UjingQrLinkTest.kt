@@ -56,7 +56,7 @@ class UjingQrLinkTest {
 
     @Test
     fun parsesCampusNfcWaterUrl() {
-        val raw = "https://ujing_test.wbu.edu.cn/w/0011202004140940"
+        val raw = "https://ujing.example.com/w/0011202004140940"
         val res = UjingQrLink.parse(raw)
         assertTrue(res is UjingQrLink.Result.Water)
         assertEquals("0011202004140940", (res as UjingQrLink.Result.Water).cd)
@@ -65,7 +65,7 @@ class UjingQrLinkTest {
 
     @Test
     fun parsesCampusNfcWasherUrl() {
-        val raw = "https://ujing_test.wbu.edu.cn/wm/0000000000000A1234567202208040004678"
+        val raw = "https://ujing.example.com/wm/0000000000000A1234567202208040004678"
         val res = UjingQrLink.parse(raw)
         assertTrue(res is UjingQrLink.Result.Washer)
         val washer = res as UjingQrLink.Result.Washer
