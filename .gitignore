@@ -31,3 +31,11 @@ build/
 *.aab
 # CI 签名 keystore（由 KEYSTORE_BASE64 在 runner 上解码生成，禁止入库）
 app/release.jks
+
+# 本地开发/调试产物（有意不提交，仅本机使用）
+/.vscode/
+/.commandcode/
+/command-code-session-*.html
+/update_server.py
+/release_notes_*.txt
+/CHANGELOG.md
