@@ -460,6 +460,8 @@ fun CredentialManagementScreen(
                 svc == CredentialService.CAMPUS_CARD,
             defaultAuthMode = if (lockToCas) WbuAuthMode.UNIFIED_CAS else null,
             lockPasswordType = lockToCas,
+            webVpnPortalOnly = svc == CredentialService.WEBVPN,
+            passwordServiceOverride = if (svc == CredentialService.WEBVPN) CredentialService.WEBVPN else null,
             showSyncButton = !hideSync,
             // 一卡通「同步」：直接用已有的统一认证凭据换一卡通令牌，无需重新输入密码
             onSyncWithCredentials = if (svc == CredentialService.CAMPUS_CARD) {
@@ -471,7 +473,9 @@ fun CredentialManagementScreen(
             // WebVPN 卡的登录本身就是走 WebVPN，不提供「WebVPN 访问 / 校园网直连」开关；一卡通直连，也不需要
             hideNetworkSwitch = svc == CredentialService.WEBVPN || svc == CredentialService.CAMPUS_CARD,
             // 统一认证卡/一卡通卡只登录统一认证：不校验校园网、不登录教务、网络开关随「统一认证经过WebVPN」显隐
-            unifiedAuthOnly = svc == CredentialService.UNIFIED_AUTH || svc == CredentialService.CAMPUS_CARD,
+            unifiedAuthOnly = svc == CredentialService.UNIFIED_AUTH ||
+                svc == CredentialService.CAMPUS_CARD ||
+                svc == CredentialService.LIBRARY,
             tipsScenario = when (svc) {
                 CredentialService.LIBRARY -> WbuAuthTipsScenario.LIBRARY
                 CredentialService.UNIFIED_AUTH, CredentialService.WEBVPN, CredentialService.CAMPUS_CARD -> WbuAuthTipsScenario.IDENTITY
@@ -485,7 +489,8 @@ fun CredentialManagementScreen(
                     CredentialService.CAMPUS_CARD -> R.string.title_login_campus_card
                     else -> R.string.title_login_jiaowu
                 }
-            )
+            ),
+            initialUseVpnOverride = if (svc == CredentialService.WEBVPN) true else null
         )
     }
 }

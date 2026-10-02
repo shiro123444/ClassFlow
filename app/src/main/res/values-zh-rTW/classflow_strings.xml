@@ -2,6 +2,7 @@
 <resources>
     <!-- ClassFlow 定制字符串（独立文件，保持 strings.xml 与上游逐字一致，避免 merge 冲突） -->
     <string name="action_adjust_wallpaper">調整</string>
+    <string name="pref_fetch_id_before_vpn">登入WebVPN前必須獲取學號</string>
     <string name="title_webvpn_captcha">WebVPN 圖形驗證碼</string>
     <string name="desc_webvpn_captcha">請輸入圖片中的 4 位字元；看不清時可重新整理驗證碼。</string>
     <string name="desc_webvpn_captcha_retry">驗證碼錯誤或已過期，請輸入新圖片中的字元。</string>
@@ -270,7 +271,6 @@
     <string name="pref_qr_with_webvpn">二維碼內容包含WebVPN連結</string>
     <string name="pref_use_https_webvpn">使用 https 存取 WebVPN (443)</string>
     <string name="pref_send_english_sms">發送英語驗證碼（可能更慢）</string>
-    <string name="pref_fetch_id_before_vpn">登入WebVPN前必須獲取學號</string>
     <string name="pref_fixed_ticket_service">使用固定service獲取ticket</string>
     <string name="channel_stable_title">正式版 (stable)</string>
     <string name="channel_stable_desc">推薦所有使用者使用，版本穩定可靠</string>

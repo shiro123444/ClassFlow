@@ -181,7 +181,7 @@ class CredentialManagementViewModel @Inject constructor(
         refreshTrigger.update { it + 1 }
     }
 
-    /** 登录 WebVPN 前先获取学号。 */
+    /** Force IDS account resolution before WebVPN login, regardless of the ID format. */
     fun setForceFetchStudentIdBeforeVpn(enabled: Boolean) {
         wbuRepository.setForceFetchStudentIdBeforeVpn(enabled)
         refreshTrigger.update { it + 1 }
@@ -198,14 +198,21 @@ class CredentialManagementViewModel @Inject constructor(
 
     fun setAdvancedMode(enabled: Boolean) = wbuRepository.setAdvancedMode(enabled)
 
-    /** 登录成功后刷新该服务状态并重新核验。若是一卡通服务，顺便以新凭据做一次换票存储。 */
+    /** 登录成功后刷新本地状态；只对图书馆执行必要的 OPAC 会话建立/核验。 */
     fun refreshAfterServiceLogin(service: CredentialService) {
         viewModelScope.launch {
-            if (service == CredentialService.CAMPUS_CARD) {
-                syncCampusCardInternal(silent = true)
+            val state = when (service) {
+                CredentialService.LIBRARY -> runCatching { verifier.verify(service) }
+                    .getOrDefault(SessionState.UNKNOWN)
+                CredentialService.CAMPUS_CARD -> {
+                    if (syncCampusCardInternal(silent = true)) SessionState.VALID
+                    else SessionState.NOT_LOGGED_IN
+                }
+                // 这些登录流程本身已验证对应会话；再打一次验证探针没有额外价值。
+                else -> SessionState.VALID
             }
             refreshTrigger.update { it + 1 }
-            verify(service)
+            updateVerify(service) { VerifyState(verifying = false, state = state) }
         }
     }
 
@@ -218,8 +225,12 @@ class CredentialManagementViewModel @Inject constructor(
             updateVerify(CredentialService.CAMPUS_CARD) { it.copy(verifying = true) }
             val ok = syncCampusCardInternal(silent = false)
             refreshTrigger.update { it + 1 }
-            val result = runCatching { verifier.verify(CredentialService.CAMPUS_CARD) }
-                .getOrDefault(SessionState.UNKNOWN)
+            // Freshly exchanged tokens are accepted by the platform; avoid an immediate
+            // duplicate /user probe. If exchange failed, probe an existing token as fallback.
+            val result = if (ok) SessionState.VALID else {
+                runCatching { verifier.verify(CredentialService.CAMPUS_CARD) }
+                    .getOrDefault(SessionState.UNKNOWN)
+            }
             updateVerify(CredentialService.CAMPUS_CARD) { VerifyState(verifying = false, state = result) }
             if (ok) _campusCardSyncMessage.value = "success"
         }

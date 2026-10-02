@@ -3,6 +3,7 @@
     <!-- ClassFlow 定制字符串（独立文件，保持 strings.xml 与上游逐字一致，避免 merge 冲突） -->
     <string name="action_adjust_wallpaper">Adjust</string>
     <string name="desc_wbu_vpn_webview_mode">When enabled, VPN login opens WebView for captcha and CAS manually. When disabled, automation remains the primary path.</string>
+    <string name="pref_fetch_id_before_vpn">Fetch ID Before VPN</string>
     <string name="title_webvpn_captcha">WebVPN captcha</string>
     <string name="desc_webvpn_captcha">Enter the 4 characters shown in the image. Refresh it if needed.</string>
     <string name="desc_webvpn_captcha_retry">The captcha was incorrect or expired. Enter the new image.</string>
@@ -270,7 +271,6 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="pref_qr_with_webvpn">QR with WebVPN URL</string>
     <string name="pref_use_https_webvpn">Use HTTPS for WebVPN</string>
     <string name="pref_send_english_sms">Send English SMS</string>
-    <string name="pref_fetch_id_before_vpn">Fetch ID Before VPN</string>
     <string name="pref_fixed_ticket_service">Fixed Ticket Service</string>
     <string name="channel_stable_title">Stable</string>
     <string name="channel_stable_desc">Recommended for all users; stable &amp; reliable</string>

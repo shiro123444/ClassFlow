@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +43,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.xingheyuzhuan.shiguangschedule.R
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AuthForm
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.DynamicCodeSendResult
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.IdsCasClient
@@ -104,6 +106,9 @@ fun WbuCampusAuthSheet(
      * - 三种登录方式都不再尝试登录教务系统，也不改写全局「网络接入模式」偏好。
      */
     unifiedAuthOnly: Boolean = false,
+    /** 只认证 WebVPN 门户并取得 TWFID，不继续登录 IDS 或教务。 */
+    webVpnPortalOnly: Boolean = false,
+    passwordServiceOverride: CredentialService? = null,
     dismissOnSuccess: Boolean = true,
     externalLoading: Boolean = false,
     externalStatusMessage: String = "",
@@ -118,12 +123,16 @@ fun WbuCampusAuthSheet(
     val scope = rememberCoroutineScope()
 
     var loginMethod by remember { mutableStateOf(WbuLoginMethod.PASSWORD) }
+    LaunchedEffect(webVpnPortalOnly) {
+        if (webVpnPortalOnly) loginMethod = WbuLoginMethod.PASSWORD
+    }
     var isLoading by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
     var initialUseVpn by remember(initialUseVpnOverride) {
         mutableStateOf(
             initialUseVpnOverride ?: when {
+                webVpnPortalOnly -> true
                 forceDirectCampus -> false
                 // 仅登录统一认证：是否经 WebVPN 由「统一认证经过WebVPN」决定
                 // （该设置关闭时开关不显示，并由 Sheet 强制直连）
@@ -557,12 +566,14 @@ fun WbuCampusAuthSheet(
         },
         method = loginMethod,
         onMethodChange = { m ->
-            loginMethod = m
-            if (m != WbuLoginMethod.QR) {
-                qrJob?.cancel()
-                qrState = null
-            } else if (qrState == null) {
-                startQrFlow(initialUseVpn)
+            if (!webVpnPortalOnly || m == WbuLoginMethod.PASSWORD) {
+                loginMethod = m
+                if (m != WbuLoginMethod.QR) {
+                    qrJob?.cancel()
+                    qrState = null
+                } else if (qrState == null) {
+                    startQrFlow(initialUseVpn)
+                }
             }
         },
         onUseVpnChange = {
@@ -579,6 +590,8 @@ fun WbuCampusAuthSheet(
         initialUseVpn = if (forceDirectCampus) false else initialUseVpn,
         defaultAuthMode = defaultAuthMode,
         lockPasswordType = lockPasswordType,
+        passwordLoginOnly = webVpnPortalOnly,
+        passwordServiceOverride = passwordServiceOverride,
         title = title,
         hideSelectSemesterSwitch = hideSelectSemesterSwitch,
         hideImportPreferences = hideImportPreferences,
@@ -601,7 +614,34 @@ fun WbuCampusAuthSheet(
                     val engine = newEngine(useVpn)
                     activeVpnEngine = engine
 
-                    val ok = if (unifiedAuthOnly) {
+                    val ok = if (webVpnPortalOnly) {
+                        // 凭据管理中的 WebVPN 卡只需要门户 TWFID；不要顺带做 CAS/教务登录。
+                        engine.loginWebVpnPortalOnly(
+                            username = sid,
+                            password = pwd,
+                            smsCodeProvider = { maskedPhone, isStillValid, sendInterval, promptText ->
+                                val deferred = CompletableDeferred<String?>()
+                                withContext(Dispatchers.Main) {
+                                    smsError = null
+                                    smsVerifying = false
+                                    smsDeferred = deferred
+                                    smsDialogPhone = maskedPhone
+                                    smsDialogIsStillValid = isStillValid
+                                    smsDialogSendInterval = sendInterval
+                                    smsDialogPromptText = promptText
+                                }
+                                deferred.await()
+                            },
+                            captchaProvider = { captcha ->
+                                val deferred = CompletableDeferred<SliderCaptchaResult?>()
+                                withContext(Dispatchers.Main) {
+                                    captchaDeferred = deferred
+                                    captchaDialogData = captcha
+                                }
+                                deferred.await() ?: SliderCaptchaResult.Cancel
+                            }
+                        )
+                    } else if (unifiedAuthOnly) {
                         // 仅登录统一认证：只为拿到/续期 CASTGC，全程不登录教务系统。
                         // 经 WebVPN 时先用已输入的统一认证密码打通门禁；未输入则弹 WebVPN 密码窗。
                         var casVpnPassword: String? = null

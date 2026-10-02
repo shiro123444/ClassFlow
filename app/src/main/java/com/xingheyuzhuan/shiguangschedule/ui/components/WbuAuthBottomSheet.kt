@@ -174,6 +174,9 @@ fun WbuAuthBottomSheet(
     customLoadingTips: List<String>? = null,
     onNavigateToAccount: (() -> Unit)? = null,
     lockPasswordType: Boolean = false,
+    /** Hide QR/dynamic-code methods when a target service only supports portal password login. */
+    passwordLoginOnly: Boolean = false,
+    passwordServiceOverride: CredentialService? = null,
     title: String? = null,
     onSyncWithCredentials: (() -> Unit)? = null,
     /** 是否显示右下角双按钮里的「同步」小按钮（未提供 [onSyncWithCredentials] 时为统一认证登录）。 */
@@ -185,18 +188,21 @@ fun WbuAuthBottomSheet(
         mutableStateOf(defaultAuthMode ?: WbuAuthTransport.getSavedAuthMode(context))
     }
     // 记住密码按当前密码类型落到对应服务的槽位（教务系统密码与统一认证密码互不覆盖）
-    val passwordService = if (authMode == WbuAuthMode.JYXT_LEGACY) CredentialService.JIAOWU
-    else CredentialService.UNIFIED_AUTH
-    var rememberPassword by remember { mutableStateOf(WbuAuthTransport.isRememberPasswordEnabled(context, passwordService)) }
-    var hasSavedPassword by remember { mutableStateOf(WbuAuthTransport.hasSavedPassword(context, passwordService)) }
-    var isPasswordModified by remember { mutableStateOf(false) }
+    val passwordService = passwordServiceOverride ?: if (authMode == WbuAuthMode.JYXT_LEGACY) {
+        CredentialService.JIAOWU
+    } else {
+        CredentialService.UNIFIED_AUTH
+    }
+    var rememberPassword by remember(passwordService) { mutableStateOf(WbuAuthTransport.isRememberPasswordEnabled(context, passwordService)) }
+    var hasSavedPassword by remember(passwordService) { mutableStateOf(WbuAuthTransport.hasSavedPassword(context, passwordService)) }
+    var isPasswordModified by remember(passwordService) { mutableStateOf(false) }
     var studentId by remember(initialStudentId) { mutableStateOf(initialStudentId) }
-    var password by remember {
+    var password by remember(passwordService) {
         mutableStateOf(if (WbuAuthTransport.hasSavedPassword(context, passwordService)) "••••••••" else "")
     }
     var useVpn by remember(initialUseVpn) { mutableStateOf(initialUseVpn) }
     // 切换密码类型时刷新该类型自己的「已保存」状态与占位符（用户已在改密码则不动输入框）
-    LaunchedEffect(authMode) {
+    LaunchedEffect(passwordService) {
         rememberPassword = WbuAuthTransport.isRememberPasswordEnabled(context, passwordService)
         hasSavedPassword = WbuAuthTransport.hasSavedPassword(context, passwordService)
         if (!isPasswordModified) {
@@ -770,8 +776,10 @@ fun WbuAuthBottomSheet(
                 ) {
                     Text(stringResource(R.string.label_login_method), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     MethodRow(stringResource(R.string.method_password), WbuLoginMethod.PASSWORD, method, onMethodChange)
-                    MethodRow(stringResource(R.string.method_qr), WbuLoginMethod.QR, method, onMethodChange)
-                    MethodRow(stringResource(R.string.method_otp), WbuLoginMethod.DYNAMIC_CODE, method, onMethodChange)
+                    if (!passwordLoginOnly) {
+                        MethodRow(stringResource(R.string.method_qr), WbuLoginMethod.QR, method, onMethodChange)
+                        MethodRow(stringResource(R.string.method_otp), WbuLoginMethod.DYNAMIC_CODE, method, onMethodChange)
+                    }
                     if (onNavigateToAccount != null) {
                         Text(
                             text = stringResource(R.string.item_credential_management),

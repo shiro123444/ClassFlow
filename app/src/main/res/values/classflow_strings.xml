@@ -5,6 +5,7 @@
     <string name="action_reset_wallpaper_position">重置位置</string>
     <string name="desc_sakura_time_theme">按早/中/晚自动切换樱花色调；关闭后使用固定主题色（上游样式）</string>
     <string name="desc_wbu_vpn_webview_mode">开启后：VPN 登录会跳转网页手动完成验证码与统一认证。关闭后：优先走自动化引擎。</string>
+    <string name="pref_fetch_id_before_vpn">登录WebVPN前必须获取学号</string>
     <string name="title_webvpn_captcha">WebVPN 图形验证码</string>
     <string name="desc_webvpn_captcha">请输入图片中的 4 位字符；不清楚时可刷新验证码。</string>
     <string name="desc_webvpn_captcha_retry">验证码错误或已过期，请输入新图片中的字符。</string>
@@ -267,7 +268,6 @@
     <string name="pref_qr_with_webvpn">二维码内容包含WebVPN链接</string>
     <string name="pref_use_https_webvpn">使用 https 访问 WebVPN (443)</string>
     <string name="pref_send_english_sms">发送英语验证码（可能更慢）</string>
-    <string name="pref_fetch_id_before_vpn">登录WebVPN前必须获取学号</string>
     <string name="pref_fixed_ticket_service">使用固定service获取ticket</string>
     <string name="channel_stable_title">正式版 (stable)</string>
     <string name="channel_stable_desc">推荐所有用户使用，版本稳定可靠</string>

@@ -327,7 +327,7 @@ class WbuCredentialRepository @Inject constructor(
     fun setNoIndexMainVerify(enabled: Boolean) =
         WbuSyncEngine.setNoIndexMainVerify(context, enabled)
 
-    /** 登录 WebVPN 前先获取学号。 */
+    /** Explicit override to resolve the account through IDS before WebVPN login. */
     fun isForceFetchStudentIdBeforeVpn(): Boolean =
         WbuSyncEngine.getForceFetchStudentIdBeforeVpn(context)
 

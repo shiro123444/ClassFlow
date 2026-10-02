@@ -1239,7 +1239,7 @@ internal class WbuAuthTransport(
                 .edit().putBoolean(KEY_NO_INDEXMAIN_VERIFY, enabled).apply()
         }
 
-        /** 「登录WebVPN前必须获取学号」：为 true 时无论输入格式如何均先从 ids 换取学号。默认关闭。 */
+        /** Explicitly resolve the account through IDS before WebVPN login when enabled. */
         fun getForceFetchStudentIdBeforeVpn(context: Context): Boolean =
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .getBoolean(KEY_FORCE_FETCH_STUDENT_ID_BEFORE_VPN, false)

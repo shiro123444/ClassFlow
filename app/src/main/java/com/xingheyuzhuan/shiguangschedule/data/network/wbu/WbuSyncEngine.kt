@@ -63,6 +63,10 @@ enum class WbuLoginMethod {
     QR
 }
 
+/** WebVPN accepts direct portal login for 9-digit student IDs and 8-digit staff IDs. */
+internal fun isDirectWebVpnAccountId(value: String): Boolean =
+    value.trim().matches(Regex("""^(?:\d{8}|\d{9})$"""))
+
 /**
  * 二维码登录轮询状态。
  */
@@ -483,6 +487,75 @@ class WbuSyncEngine(
     }
 
     /**
+     * Authenticate only the WebVPN portal and persist TWFID; do not continue into CAS/JWXT.
+     * Student/staff IDs go directly to the portal. Other usernames are resolved through IDS
+     * first, but portal credential failures are never retried through IDS.
+     */
+    suspend fun loginWebVpnPortalOnly(
+        username: String,
+        password: String,
+        smsCodeProvider: suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?,
+        captchaProvider: SliderCaptchaProvider? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        lastLocalLoginNetworkError = false
+        lastLocalLoginError = null
+
+        val existingTwfid = transport.currentTwfid().trim().ifEmpty {
+            cookieStore.firstOrNull { it.name == "TWFID" && it.value.isNotBlank() }?.value.orEmpty()
+        }
+        if (existingTwfid.isNotBlank()) {
+            if (portal.validateTwfid(existingTwfid)) {
+                portal.injectTwfid(existingTwfid)
+                persistCurrentTwfid()
+                transport.persistCookieStore()
+                return@withContext true
+            }
+            WbuAuthTransport.clearTwfid(context)
+            portal.removeTwfidCookie()
+        }
+
+        val forceFetch = WbuAuthTransport.getForceFetchStudentIdBeforeVpn(context)
+        val portalUsername = if (forceFetch || !isDirectWebVpnAccountId(username)) {
+            performPreIdsAuthAndGetStudentId(username, password, captchaProvider) ?: return@withContext false
+        } else {
+            username.trim()
+        }
+        val portalStep = portal.portalPasswordLogin(portalUsername, password, portalCaptchaProvider)
+        val authenticated = when (portalStep) {
+            is PortalLoginStep.Error -> {
+                lastLocalLoginError = "WebVPN 登录失败: ${portalStep.message}"
+                false
+            }
+            is PortalLoginStep.PortalAuthenticated -> true
+            is PortalLoginStep.SmsRequired -> {
+                val code = smsCodeProvider(
+                    portalStep.maskedPhone,
+                    portalStep.isStillValid,
+                    portalStep.sendInterval,
+                    portalStep.promptText
+                )
+                when {
+                    code.isNullOrBlank() -> {
+                        lastLocalLoginError = "已取消 WebVPN 短信验证码输入"
+                        false
+                    }
+                    !portal.portalSubmitSms(code) -> {
+                        lastLocalLoginError = "WebVPN 短信验证码错误"
+                        false
+                    }
+                    else -> true
+                }
+            }
+        }
+        if (authenticated) {
+            persistCurrentTwfid()
+            transport.persistCookieStore()
+            prefs.edit().putString(WbuAuthTransport.prefKeyLastStudentId(context), portalUsername).apply()
+        }
+        authenticated
+    }
+
+    /**
      * 门户登录成功后把 Cookie 罐里的 TWFID 回写偏好槽。
      * 否则 TWFID 只存在于 Cookie 罐，账号页/登录弹窗读到的一直是空值。
      */
@@ -734,44 +807,22 @@ class WbuSyncEngine(
         // 解析登录 WebVPN 门户所需的账号与密码：
         var vpnStudentId = studentId
         val effectiveVpnPassword = vpnPassword ?: password
-        var didPreIdsAuth = false
 
-        // 判断是否需要先走公网 IDS 换取真实学号：
-        // 规则：当前学号为9位纯数字（年份后两位+专业代码+学生号，如260593099）。
-        // 1. 若开启「登录WebVPN前必须获取学号」，强制先获取；
-        // 2. 若当前输入的账号不符合9位纯数字（包含字母别名等），自动先去公网 IDS 获取真实学号；
-        // 3. 纯数字学号默认直接登录 WebVPN，不在前期多发无谓请求。
+        // 9 位学号与 8 位工号直接登录 WebVPN；只有别名/其它格式才经 IDS 解析学号。
         val forceFetch = WbuAuthTransport.getForceFetchStudentIdBeforeVpn(context)
-        val isStandardStudentId = isLikelyStudentId(studentId)
-        val needPreIds = authMode == WbuAuthMode.UNIFIED_CAS && (forceFetch || !isStandardStudentId)
+        val needPreIds = authMode == WbuAuthMode.UNIFIED_CAS &&
+            (forceFetch || !isDirectWebVpnAccountId(studentId))
 
         if (needPreIds) {
             val preSid = performPreIdsAuthAndGetStudentId(studentId, effectiveVpnPassword, captchaProvider)
             if (preSid != null) {
                 vpnStudentId = preSid
-                didPreIdsAuth = true
             } else {
                 return false
             }
         }
 
         var portalStep = portal.portalPasswordLogin(vpnStudentId, effectiveVpnPassword, portalCaptchaProvider)
-
-        // 回退机制：如果用户输入的用户名巧合符合学号模样，导致直接登录 WebVPN 失败，且此前未进行 IDS 预认证：
-        // 自动回退走一次 IDS 预认证换取真实学号，再重试 WebVPN 门户登录。
-        if (portalStep is PortalLoginStep.Error &&
-            !portalStep.message.contains("验证码") &&
-            !didPreIdsAuth && authMode == WbuAuthMode.UNIFIED_CAS
-        ) {
-            Log.w("WbuSyncEngine", "WebVPN 直接登录失败（${portalStep.message}），尝试回退走 IDS 解析真实学号...")
-            val fallbackSid = performPreIdsAuthAndGetStudentId(studentId, effectiveVpnPassword, captchaProvider)
-            if (fallbackSid != null && fallbackSid != vpnStudentId) {
-                Log.d("WbuSyncEngine", "回退成功解析出真实学号，正在重试登录 WebVPN...")
-                vpnStudentId = fallbackSid
-                didPreIdsAuth = true
-                portalStep = portal.portalPasswordLogin(vpnStudentId, effectiveVpnPassword, portalCaptchaProvider)
-            }
-        }
 
         when (portalStep) {
             is PortalLoginStep.Error -> {
@@ -805,12 +856,6 @@ class WbuSyncEngine(
         }
         return ok
     }
-
-    /**
-     * 判断字符串是否符合当前 9 位纯数字学号规范（年份后两位 + 专业代码4位 + 学生号3位，如 260593099）。
-     */
-    private fun isLikelyStudentId(input: String): Boolean =
-        input.trim().matches(Regex("""^\d{9}$"""))
 
     /**
      * 在公网 IDS 上完成预认证并提取标准学号。
@@ -1847,7 +1892,7 @@ class WbuSyncEngine(
         fun setNoIndexMainVerify(context: Context, enabled: Boolean) =
             WbuAuthTransport.setNoIndexMainVerify(context, enabled)
 
-        /** 「登录WebVPN前必须获取学号」：为 true 时无论输入格式如何均先从 ids 换取学号。默认关闭。 */
+        /** Explicit override: resolve the entered account to a student ID before WebVPN login. */
         fun getForceFetchStudentIdBeforeVpn(context: Context): Boolean =
             WbuAuthTransport.getForceFetchStudentIdBeforeVpn(context)
         fun setForceFetchStudentIdBeforeVpn(context: Context, enabled: Boolean) =
