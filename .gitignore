@@ -39,3 +39,9 @@ app/release.jks
 /update_server.py
 /release_notes_*.txt
 /CHANGELOG.md
+
+# 官网与本地调试页（本机维护、手动部署，不入库）
+/website/
+/scripts/classflow_landing.html
+# 深链 / NFC 调试页（含本机配置的私有域名，不入库）
+/scripts/deeplink_test.html
