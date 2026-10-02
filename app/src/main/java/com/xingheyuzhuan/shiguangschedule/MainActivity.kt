@@ -85,6 +85,8 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
@@ -108,6 +110,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.DisposableEffect
+import com.xingheyuzhuan.shiguangschedule.tool.InstallResult
 import com.xingheyuzhuan.shiguangschedule.tool.ReleaseUpdateInfo
 import com.xingheyuzhuan.shiguangschedule.tool.UpdateChecker
 import com.xingheyuzhuan.shiguangschedule.tool.UpdateStatus
@@ -387,6 +390,7 @@ fun AppNavigation(
     val showBottomDock = currentDestination?.isMainScreen == true && !isFloatingCourseMode
 
     val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
     val updateChecker = remember(context) { UpdateChecker(context.applicationContext) }
     var autoUpdateFoundInfo by remember { mutableStateOf<ReleaseUpdateInfo?>(null) }
     var autoUpdateStatus by remember { mutableStateOf<UpdateStatus>(UpdateStatus.Idle) }
@@ -396,12 +400,25 @@ fun AppNavigation(
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
+            // 仅在会话安装因缺少“安装未知应用”授权失败、用户去设置页授权后返回时重试
             if (event == Lifecycle.Event.ON_RESUME) {
                 val apk = autoPendingApkFile
                 if (apk != null && apk.exists() && updateChecker.canRequestPackageInstalls()) {
-                    updateChecker.installApk(apk)
-                    autoPendingApkFile = null
-                    showAutoInstallPermissionDialog = false
+                    coroutineScope.launch {
+                        val installResult = runCatching { updateChecker.installUpdate(apk) }.getOrElse {
+                            InstallResult.Error(it.message)
+                        }
+                        autoPendingApkFile = null
+                        showAutoInstallPermissionDialog = false
+                        if (installResult is InstallResult.Error) {
+                            snackbarHostState.showSnackbar(
+                                context.getString(
+                                    R.string.toast_install_failed,
+                                    installResult.message.orEmpty()
+                                )
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -893,12 +910,31 @@ fun AppNavigation(
                             )
                         if (result.isSuccess) {
                             val apk = result.getOrNull()
-                            autoPendingApkFile = apk
                             autoUpdateStatus = UpdateStatus.Idle
                             autoUpdateFoundInfo = null
                             appSettingsRepository.updateIgnoredUpdateVersion("")
-                            if (!updateChecker.canRequestPackageInstalls()) {
-                                showAutoInstallPermissionDialog = true
+                            if (apk != null && apk.exists()) {
+                                when (updateChecker.installUpdate(apk)) {
+                                    is InstallResult.Installed,
+                                    is InstallResult.UserAborted -> autoPendingApkFile = null
+
+                                    is InstallResult.Error -> {
+                                        if (!updateChecker.canRequestPackageInstalls()) {
+                                            // 缺少“安装未知应用”授权：先引导授权，返回前台后自动重试
+                                            autoPendingApkFile = apk
+                                            showAutoInstallPermissionDialog = true
+                                        } else {
+                                            // 会话安装异常时退回系统安装器
+                                            val launched = runCatching { updateChecker.installLegacy(apk) }.isSuccess
+                                            autoPendingApkFile = null
+                                            if (launched) {
+                                                snackbarHostState.showSnackbar(
+                                                    context.getString(R.string.toast_installer_launched)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         } else {
                             autoUpdateStatus = UpdateStatus.Idle
@@ -925,6 +961,12 @@ fun AppNavigation(
                 }
             )
         }
+
+        // 自更新结果提示（如授权返回后重试失败、已回退系统安装器）
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }
 

@@ -7,7 +7,6 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.appcompat.app.AppCompatDelegate
-import androidx.core.content.FileProvider
 import androidx.core.os.ConfigurationCompat
 import com.xingheyuzhuan.shiguangschedule.BuildConfig
 import kotlinx.coroutines.Dispatchers
@@ -339,14 +338,17 @@ class UpdateChecker(private val context: Context) {
                 }
             }
 
-            withContext(Dispatchers.Main) {
-                if (canRequestPackageInstalls()) {
-                    installApk(targetApk)
-                }
-            }
+            // 仅负责下载与校验，安装由调用方通过 SessionInstallManager 提交
             targetApk
         }
     }
+
+    /**
+     * 通过 PackageInstaller 会话安装已下载的更新包。
+     * 挂起直到拿到最终结果；系统需要用户确认时会自动调起确认界面。
+     */
+    suspend fun installUpdate(apkFile: File): InstallResult =
+        withContext(Dispatchers.IO) { SessionInstallManager.install(context, apkFile) }
 
     /**
      * 计算文件 MD5 哈希值
@@ -388,21 +390,10 @@ class UpdateChecker(private val context: Context) {
     }
 
     /**
-     * 调起系统应用包安装器
+     * 旧版兜底：交由系统安装器处理（Session 安装异常时使用）
      */
-    fun installApk(apkFile: File) {
-        val uri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            apkFile
-        )
-
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(intent)
+    fun installLegacy(apkFile: File) {
+        SessionInstallManager.installLegacy(context, apkFile)
     }
 
     /**

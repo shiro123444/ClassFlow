@@ -108,6 +108,9 @@
     <string name="toast_skipped_version">已跳过版本 %1$s</string>
     <string name="toast_installer_launched">已调起安装程序</string>
     <string name="toast_download_or_install_failed">下载或安装失败: %1$s</string>
+    <string name="toast_install_success">更新已安装完成</string>
+    <string name="toast_install_cancelled">已取消安装</string>
+    <string name="toast_install_failed">安装失败：%1$s</string>
     <string name="action_configure_address">配置地址</string>
     <string name="title_custom_update_server">自定义更新服务器</string>
     <string name="desc_custom_update_server">如需使用自建更新服务，可输入自定义 API 接口地址。留空则默认使用官方接口。</string>
@@ -155,10 +158,10 @@
     <string name="action_later">稍后</string>
     <string name="title_downloading_update">正在下载更新</string>
     <string name="status_connecting_update_server">正在连接更新服务器...</string>
-    <string name="desc_download_auto_install">下载完成后将自动唤起安装包安装程序</string>
+    <string name="desc_download_auto_install">下载完成后将自动完成安装（Android 12 及以上支持静默更新）</string>
     <string name="action_cancel_download">取消下载</string>
     <string name="title_need_install_permission">需要安装权限</string>
-    <string name="desc_need_install_permission">新版本已下载完成，需要授予“允许安装未知应用”权限才能继续完成安装。</string>
+    <string name="desc_need_install_permission">系统拦截了本次安装，需在系统设置中允许“安装未知应用”后才能继续。</string>
     <string name="action_install_later">稍后安装</string>
     <string name="title_select_import_semester">选择导入的学年学期</string>
     <string name="desc_select_import_semester">请选择要导入的学期（将同步课表及周历配置）：</string>

@@ -82,6 +82,7 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WebVpnClient
 import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.Sync
 import com.xingheyuzhuan.shiguangschedule.data.model.UpdateChannelType
+import com.xingheyuzhuan.shiguangschedule.tool.InstallResult
 import com.xingheyuzhuan.shiguangschedule.tool.UpdateChecker
 import com.xingheyuzhuan.shiguangschedule.tool.UpdateStatus
 import com.xingheyuzhuan.shiguangschedule.ui.components.AppDownloadProgressDialog
@@ -128,9 +129,22 @@ fun MoreOptionsScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 val apk = pendingApkFile
                 if (apk != null && apk.exists() && updateChecker.canRequestPackageInstalls()) {
-                    updateChecker.installApk(apk)
-                    pendingApkFile = null
-                    showInstallPermissionDialog = false
+                    // 用户去设置页授予“安装未知应用”后返回，自动重试
+                    coroutineScope.launch {
+                        val installResult = runCatching { updateChecker.installUpdate(apk) }.getOrElse {
+                            InstallResult.Error(it.message)
+                        }
+                        pendingApkFile = null
+                        showInstallPermissionDialog = false
+                        if (installResult is InstallResult.Error) {
+                            snackbarHostState.showSnackbar(
+                                context.getString(
+                                    R.string.toast_install_failed,
+                                    installResult.message.orEmpty()
+                                )
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -626,13 +640,39 @@ fun MoreOptionsScreen(
                             )
                             if (result.isSuccess) {
                                 val apk = result.getOrNull()
-                                pendingApkFile = apk
                                 updateStatus = UpdateStatus.Idle
                                 viewModel.clearIgnoredUpdateVersion()
-                                if (!updateChecker.canRequestPackageInstalls()) {
-                                    showInstallPermissionDialog = true
-                                } else {
-                                    snackbarHostState.showSnackbar(context.getString(R.string.toast_installer_launched))
+                                if (apk != null && apk.exists()) {
+                                    when (updateChecker.installUpdate(apk)) {
+                                        is InstallResult.Installed -> {
+                                            pendingApkFile = null
+                                            snackbarHostState.showSnackbar(
+                                                context.getString(R.string.toast_install_success)
+                                            )
+                                        }
+
+                                        is InstallResult.UserAborted -> {
+                                            pendingApkFile = null
+                                            snackbarHostState.showSnackbar(
+                                                context.getString(R.string.toast_install_cancelled)
+                                            )
+                                        }
+
+                                        is InstallResult.Error -> {
+                                            if (!updateChecker.canRequestPackageInstalls()) {
+                                                // 缺少“安装未知应用”授权：引导授权后返回重试
+                                                pendingApkFile = apk
+                                                showInstallPermissionDialog = true
+                                            } else {
+                                                // 会话安装异常时退回系统安装器
+                                                runCatching { updateChecker.installLegacy(apk) }
+                                                pendingApkFile = null
+                                                snackbarHostState.showSnackbar(
+                                                    context.getString(R.string.toast_installer_launched)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             } else {
                                 updateStatus = UpdateStatus.Error(

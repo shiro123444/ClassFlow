@@ -94,6 +94,9 @@
     <string name="toast_skipped_version">Skipped version %1$s</string>
     <string name="toast_installer_launched">Installer launched</string>
     <string name="toast_download_or_install_failed">Download or install failed: %1$s</string>
+    <string name="toast_install_success">Update installed</string>
+    <string name="toast_install_cancelled">Installation cancelled</string>
+    <string name="toast_install_failed">Installation failed: %1$s</string>
     <string name="action_configure_address">Configure</string>
     <string name="title_custom_update_server">Custom Update Server</string>
     <string name="desc_custom_update_server">Enter a custom API URL to use your own update server. Leave blank to use the official endpoint.</string>
@@ -141,10 +144,10 @@ Latest: %2$s</string>
     <string name="action_later">Later</string>
     <string name="title_downloading_update">Downloading Update</string>
     <string name="status_connecting_update_server">Connecting to update server...</string>
-    <string name="desc_download_auto_install">Installer will launch automatically after download</string>
+    <string name="desc_download_auto_install">Installation starts automatically after download (silent on Android 12+)</string>
     <string name="action_cancel_download">Cancel Download</string>
     <string name="title_need_install_permission">Permission Required</string>
-    <string name="desc_need_install_permission">Update downloaded. Please grant "Install Unknown Apps" permission to complete installation.</string>
+    <string name="desc_need_install_permission">The system blocked this install. Please allow \'Install unknown apps\' in system settings to continue.</string>
     <string name="action_install_later">Install Later</string>
     <string name="title_select_import_semester">Select Semester to Import</string>
     <string name="desc_select_import_semester">Select a semester to import (schedules &amp; calendar config will sync):</string>

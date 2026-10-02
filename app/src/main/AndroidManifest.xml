@@ -10,6 +10,12 @@
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 卸载/回滚时申请删除包的能力 -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <!-- 允许在能力达标时以“无需用户操作”的方式静默完成自更新（normal 权限） -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+    <!-- Android 14+：声明更新归属，避免更新权被其它商店抢占（normal 权限） -->
+    <uses-permission android:name="android.permission.ENFORCE_UPDATE_OWNERSHIP" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
