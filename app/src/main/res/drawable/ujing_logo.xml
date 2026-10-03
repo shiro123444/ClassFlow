@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- U净 Logo（矢量版，由 ujing_water_splash.png 1:1 重绘，误差 0.4% 像素） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="297dp"
+    android:height="300dp"
+    android:viewportWidth="297"
+    android:viewportHeight="300">
+
+    <!-- U 形主体：左直臂 → 外弧 → 右直臂 → 内弧 -->
+    <path
+        android:fillColor="#4542CE"
+        android:pathData="M0.49 35.3V151.565A148.01 148.01 0 0 0 296.51 151.565V127.064H227.208V157.155A78.708 78.708 0 0 1 69.792 157.155V35.3Z" />
+
+    <!-- 左臂顶端圆帽 -->
+    <path
+        android:fillColor="#4542CE"
+        android:pathData="M35.141,35.3m-34.651,0a34.651,34.651 0,1 1,69.302 0a34.651,34.651 0,1 1,-69.302 0" />
+
+    <!-- 右臂顶端圆帽 -->
+    <path
+        android:fillColor="#4542CE"
+        android:pathData="M261.859,127.064m-34.651,0a34.651,34.651 0,1 1,69.302 0a34.651,34.651 0,1 1,-69.302 0" />
+
+    <!-- 右上圆点 -->
+    <path
+        android:fillColor="#4542CE"
+        android:pathData="M261.914,36.031m-34.835,0a34.835,34.835 0,1 1,69.67 0a34.835,34.835 0,1 1,-69.67 0" />
+</vector>

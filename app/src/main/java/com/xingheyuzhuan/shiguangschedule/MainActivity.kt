@@ -87,6 +87,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
@@ -130,6 +131,9 @@ import com.xingheyuzhuan.shiguangschedule.data.repository.CourseConversionReposi
 import com.xingheyuzhuan.shiguangschedule.data.repository.CourseTableRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.TimeSlotRepository
 import com.xingheyuzhuan.shiguangschedule.ui.components.BottomNavigationBar
+import com.xingheyuzhuan.shiguangschedule.ui.components.BrandEntryOverlay
+import com.xingheyuzhuan.shiguangschedule.ui.components.EntryOverlayController
+import com.xingheyuzhuan.shiguangschedule.ui.components.LocalEntryOverlayController
 import com.xingheyuzhuan.shiguangschedule.ui.components.LeftNavigationRail
 import com.xingheyuzhuan.shiguangschedule.ui.components.isWideScreen
 import com.xingheyuzhuan.shiguangschedule.ui.components.isOnboardingCompleted
@@ -176,10 +180,22 @@ class MainActivity : AppCompatActivity() {
         const val ACTION_QR_SCAN = "com.xingheyuzhuan.shiguangschedule.action.QR_SCAN"
         /** 桌面快捷方式「一卡通」入口 action（见 res/xml/shortcuts.xml）。 */
         const val ACTION_CAMPUS_CARD = "com.xingheyuzhuan.shiguangschedule.action.CAMPUS_CARD"
+
+        /** 官网下载页入口的入场动画时长。 */
+        private const val DOWNLOAD_ENTRY_ANIM_MS = 2700
+
+        /** 吹风机入口的品牌过场时长：与支付宝调起并行播放，不等待其启动。 */
+        private const val HAIRDRYER_ENTRY_ANIM_MS = 1800
     }
 
     /** 快捷方式入口产生的待处理跳转，由 AppNavigation 消费后清空。 */
     private val pendingDeepLink = MutableStateFlow<Destination?>(null)
+
+    /** 品牌入场动画开关（官网下载页 / 吹风机入口）。 */
+    private val showEntryOverlay = MutableStateFlow(false)
+
+    /** 当前入场动画时长（毫秒）。 */
+    private val entryOverlayDurationMs = MutableStateFlow(DOWNLOAD_ENTRY_ANIM_MS)
 
     private var nfcAdapter: NfcAdapter? = null
 
@@ -218,6 +234,8 @@ class MainActivity : AppCompatActivity() {
 
             // 等待设置就绪后再进入导航，保证启动页面设置生效（上游同步）
             val readySettings = settings ?: return@setContent
+            val showWelcome by showEntryOverlay.collectAsState()
+            val entryDurationMs by entryOverlayDurationMs.collectAsState()
 
             val darkTheme = when (readySettings.themeMode) {
                 AppThemeMode.FOLLOW_SYSTEM -> isSystemInDarkTheme()
@@ -231,18 +249,37 @@ class MainActivity : AppCompatActivity() {
                 customLightPrimary = Color(readySettings.customLightPrimary),
                 customDarkPrimary = Color(readySettings.customDarkPrimary)
             ) {
-                AppNavigation(
-                    startDestination = when (readySettings.startScreen) {
-                        StartScreen.COURSE_SCHEDULE -> Destination.CourseSchedule
-                        StartScreen.TODAY_SCHEDULE -> Destination.TodaySchedule
-                    },
-                    pendingDeepLink = pendingDeepLink,
-                    onDeepLinkConsumed = { pendingDeepLink.value = null },
-                    courseConversionRepository = courseConversionRepository,
-                    courseTableRepository = courseTableRepository,
-                    timeSlotRepository = timeSlotRepository,
-                    appSettingsRepository = appSettingsRepository
-                )
+                Box(modifier = Modifier.fillMaxSize()) {
+                    val entryOverlayController = remember {
+                        EntryOverlayController { durationMillis ->
+                            entryOverlayDurationMs.value = durationMillis
+                            showEntryOverlay.value = true
+                        }
+                    }
+                    CompositionLocalProvider(
+                        LocalEntryOverlayController provides entryOverlayController
+                    ) {
+                        AppNavigation(
+                            startDestination = when (readySettings.startScreen) {
+                                StartScreen.COURSE_SCHEDULE -> Destination.CourseSchedule
+                                StartScreen.TODAY_SCHEDULE -> Destination.TodaySchedule
+                            },
+                            pendingDeepLink = pendingDeepLink,
+                            onDeepLinkConsumed = { pendingDeepLink.value = null },
+                            courseConversionRepository = courseConversionRepository,
+                            courseTableRepository = courseTableRepository,
+                            timeSlotRepository = timeSlotRepository,
+                            appSettingsRepository = appSettingsRepository
+                        )
+                    }
+                    // 官网下载页 / 吹风机入口：全屏品牌过场动画（普通启动不触发）
+                    if (showWelcome) {
+                        BrandEntryOverlay(
+                            durationMillis = entryDurationMs,
+                            onFinished = { showEntryOverlay.value = false }
+                        )
+                    }
+                }
             }
         }
     }
@@ -255,6 +292,12 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         disableNfcForegroundDispatch()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // 已切到支付宝 / 浏览器等前台后，返回本页时不再补播剩余过场动画
+        showEntryOverlay.value = false
     }
 
     private fun enableNfcForegroundDispatch() {
@@ -316,42 +359,57 @@ class MainActivity : AppCompatActivity() {
 
         val hairdryer = com.xingheyuzhuan.shiguangschedule.data.network.wbu.CampusLinkRouter.extractHairdryer(intent)
         if (hairdryer != null) {
-            val scheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayScheme(hairdryer.cd)
-            val ulinkUrl = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayUrl(hairdryer.cd)
-            val nfcScheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerNfcScheme(hairdryer.cd)
-            val explicitIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
-                setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            runCatching {
-                startActivity(explicitIntent)
-            }.getOrElse {
-                val genericIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                runCatching {
-                    startActivity(genericIntent)
-                }.getOrElse {
-                    val nfcIntent = Intent(NfcAdapter.ACTION_NDEF_DISCOVERED, Uri.parse(nfcScheme)).apply {
-                        setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    runCatching {
-                        startActivity(nfcIntent)
-                    }.getOrElse {
-                        val ulinkIntent = Intent(Intent.ACTION_VIEW, Uri.parse(ulinkUrl)).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        runCatching { startActivity(ulinkIntent) }
-                    }
-                }
-            }
+            // 吹风机：不等待支付宝启动——立即发起调起，同时本页播放品牌过场，
+            // 正好盖住支付宝冷启动的空白期；被覆盖后由 onStop 清掉剩余动画，返回时不会补播
+            entryOverlayDurationMs.value = HAIRDRYER_ENTRY_ANIM_MS
+            showEntryOverlay.value = true
+            launchHairdryerAlipay(hairdryer.cd)
             return
         }
 
         val destination = com.xingheyuzhuan.shiguangschedule.data.network.wbu.CampusLinkRouter.extractDestination(intent)
         if (destination != null) {
             pendingDeepLink.value = destination
+        } else if (com.xingheyuzhuan.shiguangschedule.data.network.wbu.CampusLinkRouter.isDownloadEntry(intent)) {
+            // 官网下载页（/w/download）：不打设备深链，播放专属入场动画
+            entryOverlayDurationMs.value = DOWNLOAD_ENTRY_ANIM_MS
+            showEntryOverlay.value = true
+        }
+    }
+
+    /**
+     * 调起支付宝 U净 吹风机页面：显式包名 → 通用 Scheme → NFC Action → Universal Link 逐级兜底。
+     */
+    private fun launchHairdryerAlipay(cd: String) {
+        val scheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayScheme(cd)
+        val ulinkUrl = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayUrl(cd)
+        val nfcScheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerNfcScheme(cd)
+        val explicitIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
+            setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching {
+            startActivity(explicitIntent)
+        }.getOrElse {
+            val genericIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching {
+                startActivity(genericIntent)
+            }.getOrElse {
+                val nfcIntent = Intent(NfcAdapter.ACTION_NDEF_DISCOVERED, Uri.parse(nfcScheme)).apply {
+                    setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                runCatching {
+                    startActivity(nfcIntent)
+                }.getOrElse {
+                    val ulinkIntent = Intent(Intent.ACTION_VIEW, Uri.parse(ulinkUrl)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    runCatching { startActivity(ulinkIntent) }
+                }
+            }
         }
     }
 

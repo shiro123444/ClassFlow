@@ -46,6 +46,7 @@ import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
+import com.xingheyuzhuan.shiguangschedule.ui.components.LocalEntryOverlayController
 
 /**
  * 扫一扫：以本机已登录的统一认证会话，确认其它端（PC）展示的登录二维码。
@@ -67,6 +68,9 @@ fun QrScanScreen(
     val washerOffline by viewModel.washerOffline.collectAsState()
     val washerLoading by viewModel.washerLoading.collectAsState()
 
+    /** 应用级品牌过场：扫码 → 吹风机时本页会被 pop，动画挂在应用层才不会被销毁。 */
+    val entryOverlay = LocalEntryOverlayController.current
+
     var showAuthSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -86,6 +90,8 @@ fun QrScanScreen(
                 }
                 is QrScanEvent.OpenHairdryer -> {
                     val schemeUri = Uri.parse(event.scheme)
+                    // 先请求应用层品牌过场：本页随后会 pop，动画不受影响，正好盖住支付宝冷启动空白期
+                    entryOverlay.show(1800)
                     // 1. 优先使用标准 alipays:// Scheme 显式调起支付宝官方客户端（经实测可直接唤起吹风机原生小程序）
                     val explicitIntent = Intent(Intent.ACTION_VIEW, schemeUri).apply {
                         setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
@@ -245,6 +251,7 @@ fun QrScanScreen(
         )
     }
 }
+
 
 /** 底部状态面板：随扫码状态切换。 */
 @Composable
