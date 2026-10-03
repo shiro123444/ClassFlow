@@ -74,6 +74,23 @@ class UjingQrLinkTest {
     }
 
     @Test
+    fun rejectsReservedDownloadSegment() {
+        // 官网下载页路径不是设备码
+        assertNull(UjingQrLink.parse("https://ujing.example.com/w/download"))
+        assertNull(UjingQrLink.parse("https://ujing.example.com/wm/download"))
+        assertNull(UjingQrLink.parse("https://ujing.example.com/hd/download"))
+    }
+
+    @Test
+    fun parsesHairdryerDeepLink() {
+        val raw = "https://ujing.example.com/hd/0014202206120446"
+        val res = UjingQrLink.parse(raw)
+        assertTrue(res is UjingQrLink.Result.Hairdryer)
+        assertEquals("0014202206120446", (res as UjingQrLink.Result.Hairdryer).cd)
+        assertEquals(raw, res.raw)
+    }
+
+    @Test
     fun buildsHairdryerAlipaySchemeAndUrl() {
         val cd = "0014202206120446"
         val scheme = UjingQrLink.buildHairdryerAlipayScheme(cd)

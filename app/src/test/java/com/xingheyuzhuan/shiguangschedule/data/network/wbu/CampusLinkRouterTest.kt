@@ -32,4 +32,12 @@ class CampusLinkRouterTest {
         val dest = CampusLinkRouter.parse("https://ujing.example.com/other/path")
         assertNull(dest)
     }
+
+    @Test
+    fun ignoresDownloadPage() {
+        // 官网下载页 /w/download（以及 /wm/download）不能被当成设备码路由
+        assertNull(CampusLinkRouter.parse("https://ujing.example.com/w/download"))
+        assertNull(CampusLinkRouter.parse("https://ujing.example.com/wm/download"))
+        assertNull(CampusLinkRouter.parse("https://ujing.example.com/w/download?from=qr"))
+    }
 }

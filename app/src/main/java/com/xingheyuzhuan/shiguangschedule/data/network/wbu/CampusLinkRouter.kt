@@ -13,6 +13,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
  * 规范（方案 A）：
  * - `/w/{cd}` -> 饮水机原生出水页面 `Destination.UjingWater(cd)`
  * - `/wm/{uuid}` -> 洗衣机 H5 页面 `Destination.WebApp`
+ * - `/hd/{cd}` -> 吹风机（由 [extractHairdryer] 单独处理：调起支付宝 U净 页面）
  */
 object CampusLinkRouter {
 
@@ -35,7 +36,8 @@ object CampusLinkRouter {
         val waterMatch = Regex("^/w/([a-zA-Z0-9_-]+)", RegexOption.IGNORE_CASE).find(path)
         if (waterMatch != null) {
             val cd = waterMatch.groupValues[1]
-            if (cd.isNotBlank()) {
+            // 保留段（如官网下载页 /w/download）不是设备码，不做深链路由
+            if (cd.isNotBlank() && !UjingQrLink.isReservedSegment(cd)) {
                 return Destination.UjingWater(cd = cd, scanId = scanId)
             }
         }
@@ -44,7 +46,7 @@ object CampusLinkRouter {
         val washerMatch = Regex("^/wm/([a-zA-Z0-9_-]+)", RegexOption.IGNORE_CASE).find(path)
         if (washerMatch != null) {
             val uuid = washerMatch.groupValues[1]
-            if (uuid.isNotBlank()) {
+            if (uuid.isNotBlank() && !UjingQrLink.isReservedSegment(uuid)) {
                 val washerRaw = "http://app.littleswan.com/u_download.html?type=Ujing&uuid=$uuid"
                 return Destination.WebApp(
                     appId = com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId.CAMPUS_CARD.name,
@@ -100,6 +102,35 @@ object CampusLinkRouter {
         }
 
         return null
+    }
+
+    /**
+     * 是否是官网/下载页（保留段，如 `/w/download`）入口。
+     * 这类链接不做设备深链路由，但可用来触发专属欢迎动画。
+     */
+    fun isDownloadEntry(intent: Intent?): Boolean {
+        if (intent == null) return false
+
+        intent.data?.let { if (isDownloadUri(it)) return true }
+
+        @Suppress("DEPRECATION")
+        val rawMessages = intent.getParcelableArrayExtra(NfcAdapter.EXTRA_NDEF_MESSAGES) ?: return false
+        for (raw in rawMessages) {
+            val msg = raw as? NdefMessage ?: continue
+            for (record in msg.records) {
+                val uri = record.toUri() ?: continue
+                if (isDownloadUri(uri)) return true
+            }
+        }
+        return false
+    }
+
+    private fun isDownloadUri(uri: Uri): Boolean {
+        val path = uri.encodedPath?.lowercase().orEmpty()
+        val knownPath = path.startsWith("/w/") || path.startsWith("/wm/") || path.startsWith("/hd/")
+        if (!knownPath) return false
+        val segment = uri.lastPathSegment?.trim().orEmpty()
+        return segment.isNotEmpty() && UjingQrLink.isReservedSegment(segment)
     }
 
     /**

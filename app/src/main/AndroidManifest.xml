@@ -78,12 +78,13 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
 
-            <!-- 校园服务 NFC 感应直达入口 (NDEF_DISCOVERED: 饮水机 /w/ 与 洗衣机 /wm/) -->
+            <!-- 校园服务 NFC 感应直达入口 (NDEF_DISCOVERED: 饮水机 /w/、洗衣机 /wm/、吹风机 /hd/) -->
             <intent-filter>
                 <action android:name="android.nfc.action.NDEF_DISCOVERED" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/w/" />
                 <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/wm/" />
+                <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/hd/" />
             </intent-filter>
 
             <!-- 校园服务 DeepLink / 网页链接直达入口 (VIEW) -->
@@ -93,6 +94,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/w/" />
                 <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/wm/" />
+                <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/hd/" />
             </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"

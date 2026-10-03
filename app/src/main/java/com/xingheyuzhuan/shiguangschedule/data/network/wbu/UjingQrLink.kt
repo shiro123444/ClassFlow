@@ -32,6 +32,16 @@ object UjingQrLink {
     }
 
     /**
+     * 保留路径段：官网/下载页等 Web 路径，不是设备码。
+     * 例如官网下载页 `https://<host>/w/download`，若被当成设备码会进入取水页空转。
+     */
+    private val RESERVED_SEGMENTS = setOf("download")
+
+    /** 判断路径段是否为保留字（大小写不敏感），保留字不应按设备码处理。 */
+    fun isReservedSegment(segment: String): Boolean =
+        segment.trim().lowercase() in RESERVED_SEGMENTS
+
+    /**
      * 生成吹风机设备的支付宝内部 Scheme 链接（alipays 协议头，用于应用间直接调起）。
      */
     fun buildHairdryerAlipayScheme(cd: String): String {
@@ -90,18 +100,25 @@ object UjingQrLink {
                 }
             }
 
-            // 3. NFC / 校园直达格式: /w/{cd} (饮水机) 与 /wm/{uuid} (洗衣机)
+            // 3. NFC / 校园直达格式: /w/{cd} (饮水机)、/wm/{uuid} (洗衣机)、/hd/{cd} (吹风机)
             val waterPathMatch = Regex("^/w/([a-zA-Z0-9_-]+)", RegexOption.IGNORE_CASE).find(rawPath)
             if (waterPathMatch != null) {
                 val cd = waterPathMatch.groupValues[1]
-                if (cd.isNotBlank()) return Result.Water(cd = cd, raw = trimmed)
+                if (cd.isNotBlank() && !isReservedSegment(cd)) return Result.Water(cd = cd, raw = trimmed)
             }
             val washerPathMatch = Regex("^/wm/([a-zA-Z0-9_-]+)", RegexOption.IGNORE_CASE).find(rawPath)
             if (washerPathMatch != null) {
                 val uuid = washerPathMatch.groupValues[1]
-                if (uuid.isNotBlank()) {
+                if (uuid.isNotBlank() && !isReservedSegment(uuid)) {
                     val rawUrl = "http://app.littleswan.com/u_download.html?type=Ujing&uuid=$uuid"
                     return Result.Washer(uuid = uuid, raw = rawUrl)
+                }
+            }
+            val hairdryerPathMatch = Regex("^/hd/([a-zA-Z0-9_-]+)", RegexOption.IGNORE_CASE).find(rawPath)
+            if (hairdryerPathMatch != null) {
+                val cd = hairdryerPathMatch.groupValues[1]
+                if (cd.isNotBlank() && !isReservedSegment(cd)) {
+                    return Result.Hairdryer(cd = cd, raw = trimmed)
                 }
             }
 
