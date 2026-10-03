@@ -110,6 +110,7 @@ import com.xingheyuzhuan.shiguangschedule.ui.campus.qrscan.QrScannerOverlay
 import com.xingheyuzhuan.shiguangschedule.ui.components.UjingBrandLoading
 import com.xingheyuzhuan.shiguangschedule.ui.components.WbuLoadingPlaceholder
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WasherEntryResolver
+import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.web.DESKTOP_USER_AGENT
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -767,6 +768,22 @@ fun WebAppScreen(
 
 
 /**
+ * 判断是否是一卡通缴费页（需要切换为桌面/H5 UA）。
+ *
+ * 一卡通支付网关会按 UA 判定「官方移动端模块」：Android UA 返回 4030
+ * 「安卓模块未授权(12)」，iOS UA 返回「IOS模块未授权(11)」；桌面/H5 UA 才会放行。
+ * 缴费页不需要 SynATP 原生扫码，因此只在 /charge-app/ 与 /blade-pay/ 上切换。
+ */
+private fun isCampusCardPaymentUrl(url: String?): Boolean {
+    if (url.isNullOrBlank()) return false
+    val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
+    if (!uri.host.equals("yktfwpt.wbu.edu.cn", ignoreCase = true)) return false
+    val path = uri.path.orEmpty()
+    return path.startsWith("/charge-app") || path.startsWith("/blade-pay")
+}
+
+
+/**
  * 判断当前 URL 是否处于应用定义的「主页/首页」路由。
  */
 private fun isAtHomeRoute(currentUrl: String, def: WebAppDefinition?): Boolean {
@@ -871,12 +888,22 @@ private fun FullScreenWebContent(
         // 当为一卡通平台时，追加 "SynATP E-Mobile" 使得：
         // 1. 新中新扩展应用（applications/lifeService）识别为 SynATP / TjtcApp，解锁原生扫码；
         // 2. 独立控水（yktxyyy.wbu.edu.cn:5001）识别为 TjtcApp，解锁 em.scanQRCode 原生扫码；
-        // 3. 绝不追加 Synjones-E-Campus，保证 sessionStorage.agentType 保持为 "h5"，彻底避免"安卓模块未授权（12）"！
+        // 3. 绝不追加 Synjones-E-Campus，保证 sessionStorage.agentType 保持为 "h5"。
+        //
+        // 但缴费页（/charge-app/）必须例外：一卡通的支付网关会按 UA 判定「官方移动端模块」，
+        // 非官方 App 使用 Android UA 会被 401 拒绝（4030 安卓模块未授权(12)），iOS UA 则是 11。
+        // 因此缴费页单独使用桌面/H5 UA，服务端会按普通 H5 放行。
         if (enableScanBridge && !defaultUserAgent.contains("SynATP")) {
             "$defaultUserAgent SynATP E-Mobile"
         } else {
             defaultUserAgent
         }
+    }
+    // 初始页面如果本身就是缴费页（如外部深链直达 /charge-app/），创建 WebView 时就要用 H5 UA
+    val initialUserAgent = if (enableScanBridge && isCampusCardPaymentUrl(targetUrl)) {
+        DESKTOP_USER_AGENT
+    } else {
+        customUserAgent
     }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
@@ -898,7 +925,7 @@ private fun FullScreenWebContent(
             settings.allowFileAccess = true
             settings.textZoom = 100
             settings.cacheMode = WebSettings.LOAD_DEFAULT
-            settings.userAgentString = customUserAgent
+            settings.userAgentString = initialUserAgent
             settings.mediaPlaybackRequiresUserGesture = false
 
             setLayerType(WebView.LAYER_TYPE_HARDWARE, null)
@@ -1002,6 +1029,26 @@ private fun FullScreenWebContent(
             }
 
             webViewClient = object : WebViewClient() {
+                /**
+                 * 根据主框架 URL 在「SynATP 移动 UA」与「桌面/H5 UA」之间切换。
+                 *
+                 * 一卡通缴费页 (/charge-app/) 必须使用 H5 UA：支付网关会按 UA 判定官方移动端模块，
+                 * Android UA 会返回 4030「安卓模块未授权(12)」。其余页面保留移动 UA 以免影响原生扫码。
+                 *
+                 * 注意：只能在 onPageStarted / doUpdateVisitedHistory 中调用，绝不能在
+                 * shouldOverrideUrlLoading 里调用——该回调中修改 userAgentString 后返回 false
+                 * 会让当前这次跳转被 WebView 直接取消（表现为点应用图标没反应）。
+                 */
+                private fun applyCampusCardUserAgent(view: WebView?, url: String?) {
+                    if (!enableScanBridge || url.isNullOrBlank()) return
+                    val useDesktop = isCampusCardPaymentUrl(url)
+                    val desired = if (useDesktop) DESKTOP_USER_AGENT else customUserAgent
+                    if (view?.settings?.userAgentString != desired) {
+                        Log.i("WebAppScreen", "Switch UA for $url -> ${if (useDesktop) "desktop" else "mobile"}")
+                        view?.settings?.userAgentString = desired
+                    }
+                }
+
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                     val url = request?.url?.toString() ?: return false
 
@@ -1072,6 +1119,7 @@ private fun FullScreenWebContent(
 
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
+                    applyCampusCardUserAgent(view, url)
                     // document 早期注入 wx 桩（幂等），保证 U净 扫码/支付桥可用
                     if (enableScanBridge) {
                         view?.evaluateJavascript(WX_STUB_JS, null)
@@ -1092,6 +1140,7 @@ private fun FullScreenWebContent(
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
+                    applyCampusCardUserAgent(view, url)
                     // 兜底再注入一次（部分机型 onPageStarted 时 JS 上下文尚未就绪）
                     if (enableScanBridge) {
                         view?.evaluateJavascript(WX_STUB_JS, null)
@@ -1108,6 +1157,12 @@ private fun FullScreenWebContent(
                             view?.evaluateJavascript(autoJs, null)
                         }
                     }
+                }
+
+                override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                    super.doUpdateVisitedHistory(view, url, isReload)
+                    // SPA 内部 pushState/replaceState 也会回调这里，确保缴费页始终使用 H5 UA
+                    applyCampusCardUserAgent(view, url)
                 }
 
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
