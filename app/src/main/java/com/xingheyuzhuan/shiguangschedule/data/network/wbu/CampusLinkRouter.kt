@@ -5,6 +5,7 @@ import android.net.Uri
 import android.nfc.NdefMessage
 import android.nfc.NfcAdapter
 import com.xingheyuzhuan.shiguangschedule.Destination
+import com.xingheyuzhuan.shiguangschedule.data.network.link.LinkHubUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
@@ -14,6 +15,8 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
  * - `/w/{cd}` -> 饮水机原生出水页面 `Destination.UjingWater(cd)`
  * - `/wm/{uuid}` -> 洗衣机 H5 页面 `Destination.WebApp`
  * - `/hd/{cd}` -> 吹风机（由 [extractHairdryer] 单独处理：调起支付宝 U净 页面）
+ * - `/url/{code}`、短别名 `/u/{code}` -> 通用链接节点 `Destination.LinkHub`
+ *   （host 必须是 [LinkHubUrl.host]，详见 `LINK_HUB_PROTOCOL.md`）
  */
 object CampusLinkRouter {
 
@@ -55,7 +58,18 @@ object CampusLinkRouter {
             }
         }
 
-        // 3. 通用 U 净/小天鹅链接兜底解析
+        // 3. 通用链接节点: /url/{code}、短别名 /u/{code}（服务端短码或内嵌 fragment 载荷）
+        //    先于 U净 兜底解析：内嵌载荷是 base64url，不会与设备码形式冲突
+        LinkHubUrl.parse(trimmed)?.let { node ->
+            return Destination.LinkHub(
+                code = node.code,
+                inline = node.inline,
+                origin = node.origin,
+                scanId = scanId
+            )
+        }
+
+        // 4. 通用 U 净/小天鹅链接兜底解析
         val ujingRes = UjingQrLink.parse(trimmed)
         if (ujingRes is UjingQrLink.Result.Water) {
             return Destination.UjingWater(cd = ujingRes.cd, scanId = scanId)

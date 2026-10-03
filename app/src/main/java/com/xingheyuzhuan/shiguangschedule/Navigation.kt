@@ -69,7 +69,9 @@ sealed interface Destination : NavKey {
     @Serializable
     data class WebView(
         val initialUrl: String? = "about:blank",
-        val assetJsPath: String? = null
+        val assetJsPath: String? = null,
+        /** 通用链接节点等非 WBU 场景：隐藏底部「导入课程」引导栏。 */
+        val hideImportBar: Boolean = false
     ) : Destination
 
     @Serializable
@@ -82,6 +84,23 @@ sealed interface Destination : NavKey {
     @Serializable
     data class UjingWater(
         val cd: String,
+        val scanId: Long = 0L
+    ) : Destination
+
+    /**
+     * 通用链接节点（`/url/{code}`、短别名 `/u/{code}`）。
+     *
+     * 回退栈里只携带 code 与内嵌载荷，不携带整条 raw URL：
+     * 既避免 fragment 参与导航序列化，也保证「复制链接」统一使用规范形式重建。
+     */
+    @Serializable
+    data class LinkHub(
+        /** 服务端短码；纯内嵌节点为 null。 */
+        val code: String? = null,
+        /** 内嵌紧凑载荷（base64url）。 */
+        val inline: String? = null,
+        /** 链接来源（`scheme://host[:port]`）：短码按它请求，兼容本地联调地址。 */
+        val origin: String? = null,
         val scanId: Long = 0L
     ) : Destination
 

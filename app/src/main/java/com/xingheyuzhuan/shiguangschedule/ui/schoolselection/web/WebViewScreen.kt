@@ -130,6 +130,8 @@ fun WebViewScreen(
     courseTableRepository: CourseTableRepository,
     timeSlotRepository: TimeSlotRepository,
     appSettingsRepository: AppSettingsRepository,
+    /** 通用链接节点等非 WBU 场景：隐藏底部「导入课程」引导栏。 */
+    hideImportBar: Boolean = false,
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -618,6 +620,7 @@ fun WebViewScreen(
             )
         },
         bottomBar = {
+            if (hideImportBar) return@Scaffold
             BottomAppBar(
                 modifier = Modifier.fillMaxWidth(),
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,

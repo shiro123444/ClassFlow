@@ -903,6 +903,37 @@
     <string name="export_wakeup_timetable_name">時間表</string>
     <string name="export_choose_open_with">選擇開啟方式（WakeUp 課程表）</string>
 
+    <!-- 通用連結節點（/url/{code}、短別名 /u/{code}）讀取端 -->
+    <string name="link_hub_title">分享的內容</string>
+    <string name="link_hub_back">返回</string>
+    <string name="link_hub_apply">套用</string>
+    <string name="link_hub_cancel">取消</string>
+    <string name="link_hub_done">完成</string>
+    <string name="link_hub_copy_link">複製連結</string>
+    <string name="link_hub_copied">連結已複製</string>
+    <string name="link_hub_resolving">正在解析…</string>
+    <string name="link_hub_applying">正在套用…</string>
+    <string name="link_hub_origin_server">伺服器驗證</string>
+    <string name="link_hub_origin_inline">內嵌內容 · 未經伺服器驗證</string>
+    <string name="link_hub_inline_notice">此內容直接來自連結本身，伺服器無法撤銷；請確認來源可信後再套用。</string>
+    <string name="link_hub_type_open">網頁連結</string>
+    <string name="link_hub_type_text">文字</string>
+    <string name="link_hub_type_proxy">網路代理</string>
+    <string name="link_hub_type_plugin">版面外掛</string>
+    <string name="link_hub_type_unknown">未知類型</string>
+    <string name="link_hub_unsupported_title">無法套用此分享內容</string>
+    <string name="link_hub_unsupported_type">無法辨識的分享類型：%1$s</string>
+    <string name="link_hub_reserved_type">此類型需要更新 App 後才能使用</string>
+    <string name="link_hub_error_invalid">連結無效或已損毀</string>
+    <string name="link_hub_error_expired">此分享內容已失效</string>
+    <string name="link_hub_error_app_version">需要更新 App 後才能使用此內容</string>
+    <string name="link_hub_error_network">網路異常，無法取得此分享內容</string>
+    <string name="link_hub_retry">重試</string>
+    <string name="link_hub_applied_text">文字已複製到剪貼簿</string>
+    <string name="link_hub_applied_open">即將開啟連結</string>
+    <string name="link_hub_fact_target_host">目標位址</string>
+    <string name="link_hub_fact_text_preview">內容預覽</string>
+
     <string-array name="language_tags">
         <item>zh-CN</item>
         <item>zh-TW</item>

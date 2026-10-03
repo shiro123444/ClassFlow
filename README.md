@@ -187,6 +187,10 @@ cd ClassFlow
 ```properties
 # U净 NFC / DeepLink 域名：必填，缺失会直接构建失败（避免打出指向错误域名的包）
 CLASSFLOW_UJING_NFC_HOST=ujing.example.edu.cn
+# 可选：通用链接节点（/url/、/u/）hub 域名；缺省时回落到上面的 U净 域名
+CLASSFLOW_LINK_HUB_HOST=hub.example.com
+# 可选（仅 debug 构建生效）：通用链接节点本地联调地址，配合 `adb reverse` 用本地服务端跑通读侧
+# CLASSFLOW_LINK_HUB_DEBUG_BASE=http://127.0.0.1:8090
 # 可选：应用内更新接口地址
 CLASSFLOW_UPDATE_API_URL=https://example.com/classflow/update
 # 可选：指定本机 JDK
@@ -203,6 +207,22 @@ org.gradle.java.home=C:\\path\\to\\jdk-21
 
 - 正式包签名通过 `-Pandroid.injected.signing.*` 注入；本地 release 默认使用 debug 签名，仅供测试
 - CI 见 [`.github/workflows/android-build.yml`](.github/workflows/android-build.yml)（手动触发构建 + 签名）与 [`android-release.yml`](.github/workflows/android-release.yml)（基于构建产物发布 Release）
+
+## 通用链接节点（二维码 / NFC 分享）
+
+除设备直达链接（`/w/`、`/wm/`、`/hd/`）外，`/url/{code}`（短别名 `/u/{code}`）是一个通用命名空间，
+用来分享小配置（如网络代理、文本、网页链接）与后续的布局插件：
+
+- 服务端短码：`https://<hub>/url/{code}`，App 带 `Accept: application/json` 取回动作信封；
+- 内嵌小配置：`https://<hub>/u/#<紧凑载荷>`，全部信息就在链接里，离线可用、不经服务端；
+- 入口：NFC 触碰、App 内扫一扫（相机 / 相册选图）、外部链接（需 hub host 部署 `assetlinks.json` 后开启）；
+- 无论哪种来源都必须由用户在确认卡片上手动「应用」，不存在自动落地路径。
+
+完整字段、紧凑线格式与 NFC 标签容量预算（含「多小的标签放得下什么」实测表）见
+[`LINK_HUB_PROTOCOL.md`](LINK_HUB_PROTOCOL.md)；示例服务端与生成器页面见 [`server/`](server/README.md)。
+
+本机想不部署公网就联调：`python -m http.server` 之外的那一套见 `server/README.md` 的「本地联调」一节
+（`php -S` 起本地服务端 + `adb reverse tcp:8090 tcp:8090` + `CLASSFLOW_LINK_HUB_DEBUG_BASE`）。
 
 ## 项目结构
 

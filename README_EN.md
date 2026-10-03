@@ -164,6 +164,8 @@ Add the following to `local.properties` (already git-ignored):
 ```properties
 # Ujing NFC / deep-link host: required — the build fails without it
 CLASSFLOW_UJING_NFC_HOST=ujing.example.edu.cn
+# Optional: generic link node (/url/, /u/) hub host; falls back to the Ujing host above
+CLASSFLOW_LINK_HUB_HOST=hub.example.com
 # Optional: in-app update API endpoint
 CLASSFLOW_UPDATE_API_URL=https://example.com/classflow/update
 # Optional: local JDK

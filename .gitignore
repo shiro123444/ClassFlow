@@ -45,3 +45,8 @@ app/release.jks
 /scripts/classflow_landing.html
 # 深链 / NFC 调试页（含本机配置的私有域名，不入库）
 /scripts/deeplink_test.html
+
+# 通用链接节点示例服务端：节点数据落盘文件不提交
+/server/data/
+/server/linkhub-data.json
+/server/linkhub-data.php

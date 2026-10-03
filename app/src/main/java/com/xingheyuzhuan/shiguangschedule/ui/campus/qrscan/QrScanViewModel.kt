@@ -66,6 +66,8 @@ sealed interface QrScanEvent {
     data class NavigateToWater(val cd: String) : QrScanEvent
     data class NavigateToWasher(val initialUrl: String?, val pendingAutoScan: String) : QrScanEvent
     data class OpenHairdryer(val cd: String, val scheme: String, val ulinkUrl: String) : QrScanEvent
+    /** 通用链接节点（`/url/{code}`、短别名 `/u/{code}`）。 */
+    data class OpenLinkHub(val code: String?, val inline: String?, val origin: String) : QrScanEvent
 }
 
 /**
@@ -128,6 +130,9 @@ class QrScanViewModel @Inject constructor(
     /** 已处理过的 U净 二维码原文，避免相机高频回调重复触发。 */
     private var handledUjing: String? = null
 
+    /** 已处理过的通用链接节点原文，避免相机高频回调重复触发。 */
+    private var handledLinkHub: String? = null
+
     init {
         attachSslHandler(engine)
     }
@@ -175,6 +180,7 @@ class QrScanViewModel @Inject constructor(
             // 用户主动选图：允许重复提交同一张（否则失败后重选会被去重逻辑挡掉）
             handledUuid = null
             handledUjing = null
+            handledLinkHub = null
             if (raw.isNullOrBlank()) notifyPhotoNoCode() else submitDecoded(raw)
         }
     }
@@ -183,7 +189,7 @@ class QrScanViewModel @Inject constructor(
     private fun submitDecoded(raw: String) {
         val casUuid = CasQrLink.parseUuid(raw)
         if (casUuid == null) {
-            if (handleUjingIfMatched(raw)) return
+            if (handleCampusLinkIfMatched(raw)) return
             notifyRejected()
             return
         }
@@ -198,6 +204,26 @@ class QrScanViewModel @Inject constructor(
                 QrScanOutcome.ERROR -> _state.value = QrScanUiState.Failed(QrScanError.NETWORK)
             }
         }
+    }
+
+    /**
+     * 校园直达链接分流：U净 设备码 / 通用链接节点。命中返回 true。
+     */
+    private fun handleCampusLinkIfMatched(raw: String): Boolean =
+        handleUjingIfMatched(raw) || handleLinkHubIfMatched(raw)
+
+    /**
+     * 通用链接节点（`/url/{code}`、短别名 `/u/{code}`）分流。命中返回 true。
+     */
+    private fun handleLinkHubIfMatched(raw: String): Boolean {
+        val node = com.xingheyuzhuan.shiguangschedule.data.network.link.LinkHubUrl.parse(raw) ?: return false
+        if (raw == handledLinkHub) return true
+        handledLinkHub = raw
+        android.util.Log.i(TAG, "Link hub node matched: code=${node.code} inline=${node.inline != null}")
+        _scanEvent.tryEmit(
+            QrScanEvent.OpenLinkHub(code = node.code, inline = node.inline, origin = node.origin)
+        )
+        return true
     }
 
     /**
@@ -263,12 +289,14 @@ class QrScanViewModel @Inject constructor(
     fun dismissHairdryerDialog() {
         _hairdryerPrompt.value = false
         handledUjing = null
+        handledLinkHub = null
         handledUuid = null
     }
 
     fun dismissWasherOfflineDialog() {
         _washerOffline.value = false
         handledUjing = null
+        handledLinkHub = null
         handledUuid = null
     }
 
@@ -292,6 +320,7 @@ class QrScanViewModel @Inject constructor(
     fun rescan() {
         handledUuid = null
         handledUjing = null
+        handledLinkHub = null
         _transientNotice.value = null
         transientJob?.cancel()
         _state.value = if (engine.hasUnifiedAuthSession()) QrScanUiState.Scanning else QrScanUiState.NeedLogin

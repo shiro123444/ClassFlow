@@ -903,6 +903,37 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="export_wakeup_timetable_name">Timetable</string>
     <string name="export_choose_open_with">Choose how to open (WakeUp)</string>
 
+    <!-- Generic link hub (/url/{code}, short alias /u/{code}) reader -->
+    <string name="link_hub_title">Shared content</string>
+    <string name="link_hub_back">Back</string>
+    <string name="link_hub_apply">Apply</string>
+    <string name="link_hub_cancel">Cancel</string>
+    <string name="link_hub_done">Done</string>
+    <string name="link_hub_copy_link">Copy link</string>
+    <string name="link_hub_copied">Link copied</string>
+    <string name="link_hub_resolving">Resolving…</string>
+    <string name="link_hub_applying">Applying…</string>
+    <string name="link_hub_origin_server">Verified by server</string>
+    <string name="link_hub_origin_inline">Embedded content · not server-verified</string>
+    <string name="link_hub_inline_notice">This content comes from the link itself and cannot be revoked by the server. Make sure you trust the source before applying.</string>
+    <string name="link_hub_type_open">Web link</string>
+    <string name="link_hub_type_text">Text</string>
+    <string name="link_hub_type_proxy">Network proxy</string>
+    <string name="link_hub_type_plugin">Layout plugin</string>
+    <string name="link_hub_type_unknown">Unknown type</string>
+    <string name="link_hub_unsupported_title">Cannot apply this shared content</string>
+    <string name="link_hub_unsupported_type">Unrecognized share type: %1$s</string>
+    <string name="link_hub_reserved_type">This type requires a newer version of the app</string>
+    <string name="link_hub_error_invalid">The link is invalid or corrupted</string>
+    <string name="link_hub_error_expired">This shared content has expired</string>
+    <string name="link_hub_error_app_version">Update the app to use this content</string>
+    <string name="link_hub_error_network">Network error, could not fetch this shared content</string>
+    <string name="link_hub_retry">Retry</string>
+    <string name="link_hub_applied_text">Text copied to clipboard</string>
+    <string name="link_hub_applied_open">Opening link…</string>
+    <string name="link_hub_fact_target_host">Target host</string>
+    <string name="link_hub_fact_text_preview">Preview</string>
+
     <string-array name="language_tags">
         <item>zh-CN</item>
         <item>zh-TW</item>

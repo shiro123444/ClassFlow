@@ -44,6 +44,38 @@ android {
             "缺少 CLASSFLOW_UJING_NFC_HOST：请在 local.properties、Gradle -P 参数或环境变量中配置 U净 NFC/DeepLink 域名"
         )
 
+    // 通用链接节点（/url/{code}、/u/{code}）的 hub 域名，同属私有配置，同样不写入仓库代码。
+    // 与 U净 域名不同：此项可缺省——未提供时回落到 U净 域名，保证 CI / 协作者无需新增密钥即可构建。
+    val linkHubHostRaw: String? = sequenceOf(
+        project.findProperty("CLASSFLOW_LINK_HUB_HOST") as? String,
+        localProperties.getProperty("CLASSFLOW_LINK_HUB_HOST"),
+        System.getenv("CLASSFLOW_LINK_HUB_HOST"),
+    ).firstOrNull { !it.isNullOrBlank() }?.trim()
+
+    val linkHubHost: String = linkHubHostRaw?.let { raw ->
+        val normalized = raw
+            .removePrefix("https://")
+            .removePrefix("http://")
+            .trimEnd('/')
+            .substringBefore('/')
+            .lowercase()
+        // 只接受主机名：不允许端口、路径、通配符等（NFC/DeepLink 过滤器与 host 白名单都按精确匹配使用）
+        if (!normalized.matches(Regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"))) {
+            throw GradleException(
+                "CLASSFLOW_LINK_HUB_HOST 非法：$raw（应为主机名，如 hub.example.com，不要带 scheme/端口/路径）"
+            )
+        }
+        normalized
+    } ?: ujingNfcHost
+
+    // 通用链接节点的本地联调地址（仅 debug 构建生效），例如 http://127.0.0.1:8090。
+    // 配合 `adb reverse tcp:8090 tcp:8090`，可以不部署公网就把 Stage B（服务端 JSON 解析）跑通。
+    val linkHubDebugBase: String = sequenceOf(
+        project.findProperty("CLASSFLOW_LINK_HUB_DEBUG_BASE") as? String,
+        localProperties.getProperty("CLASSFLOW_LINK_HUB_DEBUG_BASE"),
+        System.getenv("CLASSFLOW_LINK_HUB_DEBUG_BASE"),
+    ).firstOrNull { !it.isNullOrBlank() }?.trim()?.trimEnd('/') ?: ""
+
     defaultConfig {
         applicationId = "com.shiro.classflow"
         minSdk = 26
@@ -53,7 +85,10 @@ android {
 
         buildConfigField("String", "UPDATE_API_URL", "\"$updateApiUrl\"")
         buildConfigField("String", "UJING_NFC_HOST", "\"$ujingNfcHost\"")
+        buildConfigField("String", "LINK_HUB_HOST", "\"$linkHubHost\"")
+        buildConfigField("String", "LINK_HUB_DEBUG_BASE", "\"$linkHubDebugBase\"")
         manifestPlaceholders["ujingNfcHost"] = ujingNfcHost
+        manifestPlaceholders["linkHubHost"] = linkHubHost
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

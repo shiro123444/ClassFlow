@@ -88,6 +88,16 @@ fun QrScanScreen(
                         )
                     )
                 }
+                is QrScanEvent.OpenLinkHub -> {
+                    // 通用链接节点：本页是过渡页，直接替换栈顶（不带品牌过场，节点页自行展示确认卡片）
+                    navBridge.replace(
+                        com.xingheyuzhuan.shiguangschedule.Destination.LinkHub(
+                            code = event.code,
+                            inline = event.inline,
+                            origin = event.origin
+                        )
+                    )
+                }
                 is QrScanEvent.OpenHairdryer -> {
                     val schemeUri = Uri.parse(event.scheme)
                     // 先请求应用层品牌过场：本页随后会 pop，动画不受影响，正好盖住支付宝冷启动空白期

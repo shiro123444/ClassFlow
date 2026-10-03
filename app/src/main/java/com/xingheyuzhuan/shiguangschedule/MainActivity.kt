@@ -868,6 +868,7 @@ fun AppNavigation(
                                 navBridge = navBridge,
                                 initialUrl = destination.initialUrl,
                                 assetJsPath = destination.assetJsPath,
+                                hideImportBar = destination.hideImportBar,
                                 courseConversionRepository = courseConversionRepository,
                                 courseTableRepository = courseTableRepository,
                                 timeSlotRepository = timeSlotRepository,
@@ -885,6 +886,13 @@ fun AppNavigation(
                                 cd = destination.cd,
                                 scanId = destination.scanId,
                                 navBridge = navBridge
+                            )
+
+                            is Destination.LinkHub -> com.xingheyuzhuan.shiguangschedule.ui.link.LinkHubScreen(
+                                navBridge = navBridge,
+                                code = destination.code,
+                                inline = destination.inline,
+                                origin = destination.origin
                             )
 
                             is Destination.AddEditCourse -> AddEditCourseScreen(
