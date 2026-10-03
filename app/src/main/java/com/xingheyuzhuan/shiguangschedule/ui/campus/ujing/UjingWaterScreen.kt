@@ -1,14 +1,6 @@
 package com.xingheyuzhuan.shiguangschedule.ui.campus.ujing
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,7 +27,6 @@ import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -51,15 +42,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -70,6 +56,7 @@ import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
+import com.xingheyuzhuan.shiguangschedule.ui.components.UjingBrandLoading
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,192 +66,122 @@ fun UjingWaterScreen(
     navBridge: NavBridge,
     viewModel: UjingWaterViewModel = viewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    var lastHandledScanId by rememberSaveable(cd) { mutableStateOf(-1L) }
+    // 本页自带 U净 品牌首屏（logo + 转圈），不再叠加 ClassFlow 过场动画：
+    // 两段品牌动画先后出现反而割裂，只保留 U净 这一段。
+    Box(modifier = Modifier.fillMaxSize()) {
+        val uiState by viewModel.uiState.collectAsState()
+        var lastHandledScanId by rememberSaveable(cd) { mutableStateOf(-1L) }
 
-    LaunchedEffect(cd, scanId) {
-        if (cd.isNotBlank()) {
-            if (scanId > 0L && scanId != lastHandledScanId) {
-                lastHandledScanId = scanId
-                // NFC 再次刷卡唤醒：直接重新进入出水流程
-                viewModel.restart(cd)
-            } else if (lastHandledScanId == -1L) {
-                lastHandledScanId = scanId
-                viewModel.start(cd)
+        LaunchedEffect(cd, scanId) {
+            if (cd.isNotBlank()) {
+                if (scanId > 0L && scanId != lastHandledScanId) {
+                    lastHandledScanId = scanId
+                    // NFC 再次刷卡唤醒：直接重新进入出水流程
+                    viewModel.restart(cd)
+                } else if (lastHandledScanId == -1L) {
+                    lastHandledScanId = scanId
+                    viewModel.start(cd)
+                }
             }
         }
-    }
 
-    BackHandler {
-        UjingWaterViewModel.clearSession()
-        navBridge.popBackStack()
-    }
+        BackHandler {
+            UjingWaterViewModel.clearSession()
+            navBridge.popBackStack()
+        }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.title_ujing_water)) },
-                navigationIcon = {
-                    IconButton(onClick = {
-                        UjingWaterViewModel.clearSession()
-                        navBridge.popBackStack()
-                    }) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                            contentDescription = stringResource(R.string.action_exit)
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.title_ujing_water)) },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            UjingWaterViewModel.clearSession()
+                            navBridge.popBackStack()
+                        }) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                                contentDescription = stringResource(R.string.action_exit)
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
+                )
+            }
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .background(MaterialTheme.colorScheme.surface)
+            ) {
+                val stage = uiState.stage
+                // Splash → Loading 走同一个 composable 实例：logo 不重播淡入，
+                // 入场转场与首屏等待读起来才是同一段动画
+                if (stage is UjingWaterUiStage.Splash || stage is UjingWaterUiStage.Loading) {
+                    UjingBrandLoading(
+                        message = when (stage) {
+                            is UjingWaterUiStage.Loading -> stage.message
+                            else -> stringResource(R.string.ujing_water_connecting)
+                        },
+                        showSpinner = stage is UjingWaterUiStage.Loading
+                    )
+                } else when (stage) {
+                    is UjingWaterUiStage.Active -> {
+                        ActiveDispensingView(
+                            stage = stage,
+                            onDone = {
+                                UjingWaterViewModel.clearSession()
+                                navBridge.popBackStack()
+                            }
                         )
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
-            )
-        }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .background(MaterialTheme.colorScheme.surface)
-        ) {
-            when (val stage = uiState.stage) {
-                is UjingWaterUiStage.Splash -> {
-                    SplashScreenView()
+
+                    is UjingWaterUiStage.Finished -> {
+                        FinishedView(
+                            stage = stage,
+                            onRepeat = { viewModel.restart(cd) },
+                            onDone = {
+                                UjingWaterViewModel.clearSession()
+                                navBridge.popBackStack()
+                            },
+                            onContinueScan = {
+                                UjingWaterViewModel.clearSession()
+                                navBridge.replace(Destination.QrScan)
+                            }
+                        )
+                    }
+
+                    is UjingWaterUiStage.Error -> {
+                        ErrorView(
+                            message = stage.message,
+                            canRetry = stage.canRetry,
+                            onRetry = viewModel::retry,
+                            onExit = {
+                                UjingWaterViewModel.clearSession()
+                                navBridge.popBackStack()
+                            }
+                        )
+                    }
                 }
 
-                is UjingWaterUiStage.Loading -> {
-                    LoadingView(message = stage.message)
-                }
-
-                is UjingWaterUiStage.Active -> {
-                    ActiveDispensingView(
-                        stage = stage,
-                        onDone = {
-                            UjingWaterViewModel.clearSession()
-                            navBridge.popBackStack()
-                        }
+                if (uiState.needLogin) {
+                    WbuCampusAuthSheet(
+                        onDismiss = { viewModel.onLoginDismissed() },
+                        onLoginSuccess = { viewModel.onLoginSuccess() },
+                        requireUnifiedCas = true,
+                        unifiedAuthOnly = true,
+                        title = stringResource(R.string.service_campus_card),
+                        tipsScenario = WbuAuthTipsScenario.IDENTITY
                     )
                 }
-
-                is UjingWaterUiStage.Finished -> {
-                    FinishedView(
-                        stage = stage,
-                        onRepeat = { viewModel.restart(cd) },
-                        onDone = {
-                            UjingWaterViewModel.clearSession()
-                            navBridge.popBackStack()
-                        },
-                        onContinueScan = {
-                            UjingWaterViewModel.clearSession()
-                            navBridge.replace(Destination.QrScan)
-                        }
-                    )
-                }
-
-                is UjingWaterUiStage.Error -> {
-                    ErrorView(
-                        message = stage.message,
-                        canRetry = stage.canRetry,
-                        onRetry = viewModel::retry,
-                        onExit = {
-                            UjingWaterViewModel.clearSession()
-                            navBridge.popBackStack()
-                        }
-                    )
-                }
-            }
-
-            if (uiState.needLogin) {
-                WbuCampusAuthSheet(
-                    onDismiss = { viewModel.onLoginDismissed() },
-                    onLoginSuccess = { viewModel.onLoginSuccess() },
-                    requireUnifiedCas = true,
-                    unifiedAuthOnly = true,
-                    title = stringResource(R.string.service_campus_card),
-                    tipsScenario = WbuAuthTipsScenario.IDENTITY
-                )
             }
         }
     }
 }
 
-/**
- * 居中过场动画视图：复用 U净 饮水机自带的 splash 动效图。
- */
-@Composable
-private fun SplashScreenView() {
-    var visible by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        visible = true
-    }
-
-    val scale by animateFloatAsState(
-        targetValue = if (visible) 1f else 0.8f,
-        animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
-        label = "splashScale"
-    )
-
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        AnimatedVisibility(
-            visible = visible,
-            enter = fadeIn(tween(400)) + scaleIn(tween(400)),
-            exit = fadeOut(tween(300))
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Image(
-                    painter = painterResource(R.drawable.ujing_water_splash),
-                    contentDescription = stringResource(R.string.title_ujing_water),
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .size(200.dp)
-                        .scale(scale)
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = stringResource(R.string.ujing_water_connecting),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LoadingView(message: String) {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Image(
-                painter = painterResource(R.drawable.ujing_water_splash),
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.size(120.dp)
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-            CircularProgressIndicator(strokeWidth = 3.dp)
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
 
 @Composable
 private fun ActiveDispensingView(

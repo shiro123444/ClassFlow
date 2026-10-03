@@ -60,9 +60,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -80,6 +80,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -106,6 +107,9 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import com.xingheyuzhuan.shiguangschedule.ui.campus.qrscan.QrScannerOverlay
+import com.xingheyuzhuan.shiguangschedule.ui.components.UjingBrandLoading
+import com.xingheyuzhuan.shiguangschedule.ui.components.WbuLoadingPlaceholder
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WasherEntryResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -325,387 +329,442 @@ fun WebAppScreen(
     pendingAutoScan: String? = null,
     viewModel: WebAppViewModel = viewModel()
 ) {
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    val uiState by viewModel.uiState.collectAsState()
+    /** 仅洗衣机（/wm/ 或小天鹅链接）进入时显示 U净 品牌首屏。 */
+    val isWasherEntry = pendingAutoScan?.contains("littleswan.com", ignoreCase = true) == true
+    /** 只带设备码、没有直达地址的洗衣机深链：需要先解析出洗衣机 H5 真实入口。 */
+    val isWasherDeepLink = isWasherEntry && initialTargetUrl.isNullOrBlank()
+    Box(modifier = Modifier.fillMaxSize()) {
+        val context = LocalContext.current
+        val coroutineScope = rememberCoroutineScope()
+        val uiState by viewModel.uiState.collectAsState()
 
-    var showAuthSheet by remember { mutableStateOf(false) }
-    var sslErrorState by remember { mutableStateOf<Pair<SslErrorHandler, SslError>?>(null) }
-    var webViewInstance by remember { mutableStateOf<WebView?>(null) }
-    var scanRequest by remember { mutableStateOf<ScanRequest?>(null) }
+        var showAuthSheet by remember { mutableStateOf(false) }
+        var sslErrorState by remember { mutableStateOf<Pair<SslErrorHandler, SslError>?>(null) }
+        var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+        var scanRequest by remember { mutableStateOf<ScanRequest?>(null) }
 
-    LaunchedEffect(appId, initialTargetUrl) {
-        viewModel.start(appId, initialTargetUrl)
-    }
+        /** 最终用于加载的入口地址（洗衣机深链解析完成后才有值；其余场景等于入参）。 */
+        var resolvedInitialUrl by rememberSaveable(pendingAutoScan) { mutableStateOf(initialTargetUrl) }
+        var washerResolving by rememberSaveable(pendingAutoScan) { mutableStateOf(isWasherDeepLink) }
+        var washerOffline by remember { mutableStateOf(false) }
 
-    val dismissScan = remember(webViewInstance) {
-        {
-            val request = scanRequest
-            val webView = webViewInstance
-            if (request != null && webView != null) {
-                when (request) {
-                    is ScanRequest.Bridge -> {
-                        // 取消：回调 null 触发 U净 的 fail 分支
-                        webView.evaluateJavascript(
-                            "window.__cfScanResolve(${JSONObject.quote(request.callbackId)}, null);",
-                            null
-                        )
-                    }
-                    is ScanRequest.EmBridge -> {
-                        webView.evaluateJavascript(
-                            "window.__cfEmScanResolve(${JSONObject.quote(request.callbackId)}, null);",
-                            null
-                        )
-                    }
-                    is ScanRequest.JsAgent -> {
-                        val callback = request.callbackName.ifBlank { "scanCallback" }
-                        webView.evaluateJavascript(
-                            """
-                            (function() {
-                                var cb = window[${JSONObject.quote(callback)}];
-                                if (typeof cb === 'function') {
-                                    try { cb({ code: 500, msg: '用户取消' }); } catch (e) {}
-                                }
-                            })();
-                            """.trimIndent(),
-                            null
-                        )
-                    }
-                    is ScanRequest.AndroidFunc -> {
-                        val callback = request.callbackName.ifBlank { "scanCallback" }
-                        webView.evaluateJavascript(
-                            """
-                            (function() {
-                                var cb = window[${JSONObject.quote(callback)}];
-                                if (typeof cb === 'function') {
-                                    try { cb(null); } catch (e) {}
-                                }
-                            })();
-                            """.trimIndent(),
-                            null
-                        )
-                    }
-                    is ScanRequest.Redirect -> { /* 页面跳转类取消无需主动注入 */ }
+        /**
+         * VM 是否已按应用定义开始流程。
+         *
+         * 未开始时 [WebAppUiState.stage] 只是默认占位值（ProbingNetwork）：
+         * 洗衣机深链解析中、设备离线（此时根本不会启动 VM）都属于这种情况，
+         * 若照常渲染就会露出「校园网环境检测」这一与洗衣机无关的页面。
+         */
+        var vmStarted by rememberSaveable(pendingAutoScan) { mutableStateOf(false) }
+
+        LaunchedEffect(pendingAutoScan) {
+            if (isWasherDeepLink) {
+                // /wm/{uuid}：先解析洗衣机 H5 真实入口，避免只停在一卡通首页
+                when (val result = WasherEntryResolver.resolve(context, pendingAutoScan)) {
+                    is WasherEntryResolver.Result.Ready -> resolvedInitialUrl = result.url
+                    WasherEntryResolver.Result.Offline -> washerOffline = true
+                    WasherEntryResolver.Result.Failed -> resolvedInitialUrl = null
                 }
+                washerResolving = false
             }
-            scanRequest = null
-        }
-    }
-
-    if (uiState.needLogin || showAuthSheet) {
-        WbuCampusAuthSheet(
-            onDismiss = {
-                showAuthSheet = false
-                viewModel.onLoginDismissed()
-            },
-            onLoginSuccess = {
-                showAuthSheet = false
-                viewModel.onLoginSuccess()
-            },
-            requireUnifiedCas = true,
-            unifiedAuthOnly = true,
-            initialUseVpnOverride = uiState.requireVpnForLogin || uiState.temporaryUseVpn,
-            title = uiState.definition?.let { stringResource(it.titleRes) },
-            tipsScenario = WbuAuthTipsScenario.IDENTITY,
-            onNavigateToAccount = { navBridge.navigate(Destination.CredentialManagement) }
-        )
-    }
-
-    // 拦截返回键：主页退出或历史回退
-    BackHandler {
-        // 优先关闭正在进行的扫码浮层并通知页面取消，防止按返回键时退回上一页
-        if (scanRequest != null) {
-            dismissScan()
-            return@BackHandler
         }
 
-        val webView = webViewInstance
-        if (webView != null) {
-            val currentUrl = webView.url.orEmpty()
-            val def = uiState.definition
-            val isDeepLinked = !initialTargetUrl.isNullOrBlank() || !pendingAutoScan.isNullOrBlank()
+        LaunchedEffect(appId, resolvedInitialUrl, washerResolving, washerOffline) {
+            if (!washerResolving && !washerOffline) {
+                viewModel.start(appId, resolvedInitialUrl)
+                vmStarted = true
+            }
+        }
 
-            if (isDeepLinked) {
-                // 全局扫码直达场景：用户扫码直接进入洗衣/洗烘程序选择页（programV2 / reserveV2）。
-                // 在程序选择页、扫码异常页（scanError）或落地首页（home）按返回键直接退出容器回 ClassFlow，
-                // 彻底解决在第三方 OAuth 历史链与自动跳转逻辑间卡住「退不出去」的问题。
-                if (isThirdPartyEntryRoute(currentUrl, def)) {
-                    Log.i("WebAppScreen", "Back on deep-linked third-party entry route ($currentUrl), exiting to ClassFlow")
+        if (washerOffline) {
+            AlertDialog(
+                onDismissRequest = {
+                    washerOffline = false
                     navBridge.popBackStack()
-                    return@BackHandler
+                },
+                title = { Text(stringResource(R.string.dialog_ujing_washer_offline_title)) },
+                text = { Text(stringResource(R.string.dialog_ujing_washer_offline_message)) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        washerOffline = false
+                        navBridge.popBackStack()
+                    }) {
+                        Text(stringResource(R.string.action_confirm))
+                    }
                 }
-            } else {
-                // 普通平台门户浏览场景：按之前要求，仅在 #/home 时跳回平台主页
-                val home = def?.homeUrl
-                if (!home.isNullOrBlank() && isThirdPartyHomeRoute(currentUrl, def)) {
-                    Log.i("WebAppScreen", "Back on third-party home route, returning to platform home: $home")
-                    webView.loadUrl(home)
-                    return@BackHandler
+            )
+        }
+
+        val dismissScan = remember(webViewInstance) {
+            {
+                val request = scanRequest
+                val webView = webViewInstance
+                if (request != null && webView != null) {
+                    when (request) {
+                        is ScanRequest.Bridge -> {
+                            // 取消：回调 null 触发 U净 的 fail 分支
+                            webView.evaluateJavascript(
+                                "window.__cfScanResolve(${JSONObject.quote(request.callbackId)}, null);",
+                                null
+                            )
+                        }
+                        is ScanRequest.EmBridge -> {
+                            webView.evaluateJavascript(
+                                "window.__cfEmScanResolve(${JSONObject.quote(request.callbackId)}, null);",
+                                null
+                            )
+                        }
+                        is ScanRequest.JsAgent -> {
+                            val callback = request.callbackName.ifBlank { "scanCallback" }
+                            webView.evaluateJavascript(
+                                """
+                                (function() {
+                                    var cb = window[${JSONObject.quote(callback)}];
+                                    if (typeof cb === 'function') {
+                                        try { cb({ code: 500, msg: '用户取消' }); } catch (e) {}
+                                    }
+                                })();
+                                """.trimIndent(),
+                                null
+                            )
+                        }
+                        is ScanRequest.AndroidFunc -> {
+                            val callback = request.callbackName.ifBlank { "scanCallback" }
+                            webView.evaluateJavascript(
+                                """
+                                (function() {
+                                    var cb = window[${JSONObject.quote(callback)}];
+                                    if (typeof cb === 'function') {
+                                        try { cb(null); } catch (e) {}
+                                    }
+                                })();
+                                """.trimIndent(),
+                                null
+                            )
+                        }
+                        is ScanRequest.Redirect -> { /* 页面跳转类取消无需主动注入 */ }
+                    }
                 }
+                scanRequest = null
+            }
+        }
+
+        if (uiState.needLogin || showAuthSheet) {
+            WbuCampusAuthSheet(
+                onDismiss = {
+                    showAuthSheet = false
+                    viewModel.onLoginDismissed()
+                },
+                onLoginSuccess = {
+                    showAuthSheet = false
+                    viewModel.onLoginSuccess()
+                },
+                requireUnifiedCas = true,
+                unifiedAuthOnly = true,
+                initialUseVpnOverride = uiState.requireVpnForLogin || uiState.temporaryUseVpn,
+                title = uiState.definition?.let { stringResource(it.titleRes) },
+                tipsScenario = WbuAuthTipsScenario.IDENTITY,
+                onNavigateToAccount = { navBridge.navigate(Destination.CredentialManagement) }
+            )
+        }
+
+        // 拦截返回键：主页退出或历史回退
+        BackHandler {
+            // 优先关闭正在进行的扫码浮层并通知页面取消，防止按返回键时退回上一页
+            if (scanRequest != null) {
+                dismissScan()
+                return@BackHandler
             }
 
-            if (!isAtHomeRoute(currentUrl, def) && webView.canGoBack()) {
-                webView.goBack()
+            val webView = webViewInstance
+            if (webView != null) {
+                val currentUrl = webView.url.orEmpty()
+                val def = uiState.definition
+                val isDeepLinked = !initialTargetUrl.isNullOrBlank() || !pendingAutoScan.isNullOrBlank()
+
+                if (isDeepLinked) {
+                    // 全局扫码直达场景：用户扫码直接进入洗衣/洗烘程序选择页（programV2 / reserveV2）。
+                    // 在程序选择页、扫码异常页（scanError）或落地首页（home）按返回键直接退出容器回 ClassFlow，
+                    // 彻底解决在第三方 OAuth 历史链与自动跳转逻辑间卡住「退不出去」的问题。
+                    if (isThirdPartyEntryRoute(currentUrl, def)) {
+                        Log.i("WebAppScreen", "Back on deep-linked third-party entry route ($currentUrl), exiting to ClassFlow")
+                        navBridge.popBackStack()
+                        return@BackHandler
+                    }
+                } else {
+                    // 普通平台门户浏览场景：按之前要求，仅在 #/home 时跳回平台主页
+                    val home = def?.homeUrl
+                    if (!home.isNullOrBlank() && isThirdPartyHomeRoute(currentUrl, def)) {
+                        Log.i("WebAppScreen", "Back on third-party home route, returning to platform home: $home")
+                        webView.loadUrl(home)
+                        return@BackHandler
+                    }
+                }
+
+                if (!isAtHomeRoute(currentUrl, def) && webView.canGoBack()) {
+                    webView.goBack()
+                } else {
+                    navBridge.popBackStack()
+                }
             } else {
                 navBridge.popBackStack()
             }
-        } else {
-            navBridge.popBackStack()
         }
-    }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surface)
-                .safeDrawingPadding()
-        ) {
-        when (val stage = uiState.stage) {
-            is WebAppStage.ProbingNetwork -> {
-                CampusNetworkProbeOverlay(
-                    statusText = uiState.probeStatusText,
-                    isOffCampus = false,
-                    onSelectCampus = { viewModel.chooseContinueDirect() },
-                    onSelectVpn = { viewModel.chooseUseVpnTemporarily() }
-                )
-            }
-
-            is WebAppStage.OffCampusChoice -> {
-                CampusNetworkProbeOverlay(
-                    statusText = stringResource(R.string.desc_off_campus_detected),
-                    isOffCampus = true,
-                    onSelectCampus = { viewModel.chooseContinueDirect() },
-                    onSelectVpn = { viewModel.chooseUseVpnTemporarily() }
-                )
-            }
-
-            is WebAppStage.LoadingToken -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        CircularProgressIndicator()
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = stringResource(R.string.status_fetching_webapp_token),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+        Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .safeDrawingPadding()
+            ) {
+            val stage = uiState.stage
+            when {
+                // 洗衣机（U净）：深链解析中 → 取 token 全程显示同一个 U净 品牌首屏，
+                // logo 不重播淡入；离线时不显示加载态，交由离线弹窗说明
+                isWasherEntry && (!vmStarted || stage is WebAppStage.LoadingToken) -> {
+                    if (!washerOffline) {
+                        UjingBrandLoading(
+                            message = stringResource(R.string.ujing_washer_checking),
+                            showSpinner = true
                         )
                     }
                 }
-            }
 
-            is WebAppStage.ContentReady -> {
-                FullScreenWebContent(
-                    targetUrl = stage.url,
-                    useVpn = stage.useVpn,
-                    definition = uiState.definition,
-                    platformToken = stage.token,
-                    pendingAutoScan = pendingAutoScan,
-                    onSslError = { handler, error -> sslErrorState = Pair(handler, error) },
-                    onSessionExpired = { showAuthSheet = true },
-                    onInterceptScan = { redirectUrl -> scanRequest = ScanRequest.Redirect(redirectUrl) },
-                    onBridgeScan = { callbackId -> scanRequest = ScanRequest.Bridge(callbackId) },
-                    onEmScan = { callbackId -> scanRequest = ScanRequest.EmBridge(callbackId) },
-                    onJsAgentScan = { callbackName -> scanRequest = ScanRequest.JsAgent(callbackName) },
-                    onAndroidFuncScan = { callbackName -> scanRequest = ScanRequest.AndroidFunc(callbackName) },
-                    onWebViewReady = { webViewInstance = it }
-                )
-            }
+                // 非洗衣机网页应用（一卡通 / 图书馆）才走校园网探测与通道选择
+                stage is WebAppStage.ProbingNetwork -> {
+                    CampusNetworkProbeOverlay(
+                        statusText = uiState.probeStatusText,
+                        isOffCampus = false,
+                        onSelectCampus = { viewModel.chooseContinueDirect() },
+                        onSelectVpn = { viewModel.chooseUseVpnTemporarily() }
+                    )
+                }
 
-            is WebAppStage.Error -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                stage is WebAppStage.OffCampusChoice -> {
+                    CampusNetworkProbeOverlay(
+                        statusText = stringResource(R.string.desc_off_campus_detected),
+                        isOffCampus = true,
+                        onSelectCampus = { viewModel.chooseContinueDirect() },
+                        onSelectVpn = { viewModel.chooseUseVpnTemporarily() }
+                    )
+                }
+
+                stage is WebAppStage.LoadingToken -> {
+                    // 非洗衣机网页应用（预留）：淡蓝底 + WBU 编钟纹样
+                    WbuLoadingPlaceholder(
+                        message = stringResource(R.string.status_fetching_webapp_token)
+                    )
+                }
+
+                stage is WebAppStage.ContentReady -> {
+                    FullScreenWebContent(
+                        targetUrl = stage.url,
+                        useVpn = stage.useVpn,
+                        definition = uiState.definition,
+                        platformToken = stage.token,
+                        pendingAutoScan = pendingAutoScan,
+                        onSslError = { handler, error -> sslErrorState = Pair(handler, error) },
+                        onSessionExpired = { showAuthSheet = true },
+                        onInterceptScan = { redirectUrl -> scanRequest = ScanRequest.Redirect(redirectUrl) },
+                        onBridgeScan = { callbackId -> scanRequest = ScanRequest.Bridge(callbackId) },
+                        onEmScan = { callbackId -> scanRequest = ScanRequest.EmBridge(callbackId) },
+                        onJsAgentScan = { callbackName -> scanRequest = ScanRequest.JsAgent(callbackName) },
+                        onAndroidFuncScan = { callbackName -> scanRequest = ScanRequest.AndroidFunc(callbackName) },
+                        onWebViewReady = { webViewInstance = it }
+                    )
+                }
+
+                stage is WebAppStage.Error -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = stringResource(R.string.title_load_failed),
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        Text(
-                            text = stage.message,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            OutlinedButton(onClick = { navBridge.popBackStack() }) {
-                                Text(stringResource(R.string.action_exit))
-                            }
-                            Button(onClick = { viewModel.retry() }) {
-                                Text(stringResource(R.string.action_retry))
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.title_load_failed),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                text = stage.message,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                OutlinedButton(onClick = { navBridge.popBackStack() }) {
+                                    Text(stringResource(R.string.action_exit))
+                                }
+                                Button(onClick = { viewModel.retry() }) {
+                                    Text(stringResource(R.string.action_retry))
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        // 可拖拽的悬浮退出球（仅在页面内容或加载阶段显示）
-        if (uiState.stage is WebAppStage.ContentReady || uiState.stage is WebAppStage.LoadingToken) {
-            DraggableExitFab(
-                onExit = { navBridge.popBackStack() }
-            )
-        }
+            // 可拖拽的悬浮退出球（仅在页面内容或加载阶段显示）
+            if (uiState.stage is WebAppStage.ContentReady || uiState.stage is WebAppStage.LoadingToken) {
+                DraggableExitFab(
+                    onExit = { navBridge.popBackStack() }
+                )
+            }
 
-        // SSL 证书异常弹窗
-        sslErrorState?.let { (handler, _) ->
-            AlertDialog(
-                onDismissRequest = {
-                    handler.cancel()
-                    sslErrorState = null
-                },
-                title = { Text(stringResource(R.string.dialog_ssl_error_title)) },
-                text = { Text(stringResource(R.string.dialog_ssl_error_message)) },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            handler.proceed()
-                            sslErrorState = null
+            // SSL 证书异常弹窗
+            sslErrorState?.let { (handler, _) ->
+                AlertDialog(
+                    onDismissRequest = {
+                        handler.cancel()
+                        sslErrorState = null
+                    },
+                    title = { Text(stringResource(R.string.dialog_ssl_error_title)) },
+                    text = { Text(stringResource(R.string.dialog_ssl_error_message)) },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                handler.proceed()
+                                sslErrorState = null
+                            }
+                        ) {
+                            Text(stringResource(R.string.action_continue_browsing))
                         }
-                    ) {
-                        Text(stringResource(R.string.action_continue_browsing))
+                    },
+                    dismissButton = {
+                        Button(
+                            onClick = {
+                                handler.cancel()
+                                sslErrorState = null
+                            }
+                        ) {
+                            Text(stringResource(R.string.action_cancel))
+                        }
                     }
-                },
-                dismissButton = {
-                    Button(
-                        onClick = {
-                            handler.cancel()
-                            sslErrorState = null
-                        }
-                    ) {
-                        Text(stringResource(R.string.action_cancel))
-                    }
-                }
-            )
-        }
-        }
+                )
+            }
+            }
 
-        // 原生扫码浮层（复用「扫一扫」的相机取景；针对 U净 wx 桩桥接 / 平台扫码页回填）
-        // 放在 safeDrawingPadding 之外：取景与顶部渐变遮罩可覆盖状态栏，横竖屏一致
-        scanRequest?.let { request ->
-            QrScannerOverlay(
-                onDismiss = dismissScan,
-                onScanned = { rawResult ->
-                    val webView = webViewInstance
-                    scanRequest = null
-                    val hairdryer = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.parse(rawResult) as? com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.Result.Hairdryer
-                    if (hairdryer != null) {
-                        val scheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayScheme(hairdryer.cd)
-                        val ulinkUrl = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayUrl(hairdryer.cd)
-                        val nfcScheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerNfcScheme(hairdryer.cd)
-                        val explicitIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
-                            setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        val launched = runCatching {
-                            context.startActivity(explicitIntent)
-                            true
-                        }.getOrElse {
-                            val genericIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
+            // 原生扫码浮层（复用「扫一扫」的相机取景；针对 U净 wx 桩桥接 / 平台扫码页回填）
+            // 放在 safeDrawingPadding 之外：取景与顶部渐变遮罩可覆盖状态栏，横竖屏一致
+            scanRequest?.let { request ->
+                QrScannerOverlay(
+                    onDismiss = dismissScan,
+                    onScanned = { rawResult ->
+                        val webView = webViewInstance
+                        scanRequest = null
+                        val hairdryer = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.parse(rawResult) as? com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.Result.Hairdryer
+                        if (hairdryer != null) {
+                            val scheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayScheme(hairdryer.cd)
+                            val ulinkUrl = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayUrl(hairdryer.cd)
+                            val nfcScheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerNfcScheme(hairdryer.cd)
+                            val explicitIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
+                                setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
-                            runCatching {
-                                context.startActivity(genericIntent)
+                            val launched = runCatching {
+                                context.startActivity(explicitIntent)
                                 true
                             }.getOrElse {
-                                val nfcIntent = Intent(android.nfc.NfcAdapter.ACTION_NDEF_DISCOVERED, Uri.parse(nfcScheme)).apply {
-                                    setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
+                                val genericIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
                                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                 }
                                 runCatching {
-                                    context.startActivity(nfcIntent)
+                                    context.startActivity(genericIntent)
                                     true
                                 }.getOrElse {
-                                    val ulinkIntent = Intent(Intent.ACTION_VIEW, Uri.parse(ulinkUrl)).apply {
+                                    val nfcIntent = Intent(android.nfc.NfcAdapter.ACTION_NDEF_DISCOVERED, Uri.parse(nfcScheme)).apply {
+                                        setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
                                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                     }
                                     runCatching {
-                                        context.startActivity(ulinkIntent)
+                                        context.startActivity(nfcIntent)
                                         true
-                                    }.getOrDefault(false)
+                                    }.getOrElse {
+                                        val ulinkIntent = Intent(Intent.ACTION_VIEW, Uri.parse(ulinkUrl)).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        runCatching {
+                                            context.startActivity(ulinkIntent)
+                                            true
+                                        }.getOrDefault(false)
+                                    }
+                                }
+                            }
+                            if (!launched) {
+                                Toast.makeText(context, context.getString(R.string.ujing_alipay_not_installed), Toast.LENGTH_SHORT).show()
+                            }
+                            return@QrScannerOverlay
+                        }
+                        if (webView != null && rawResult.isNotBlank()) {
+                            when (request) {
+                                is ScanRequest.Redirect -> {
+                                    val separator = if (request.redirectUrl.contains("?")) "&" else "?"
+                                    val encoded = java.net.URLEncoder.encode(rawResult, "UTF-8")
+                                    val finalCallbackUrl = "${request.redirectUrl}${separator}scanResult=$encoded"
+                                    Log.i("WebAppScreen", "Loading scan callback URL: $finalCallbackUrl")
+                                    webView.loadUrl(finalCallbackUrl)
+                                }
+
+                                is ScanRequest.Bridge -> {
+                                    val js = "window.__cfScanResolve(${JSONObject.quote(request.callbackId)}, ${JSONObject.quote(rawResult)});"
+                                    Log.i("WebAppScreen", "Resolving wx stub scan result")
+                                    webView.evaluateJavascript(js, null)
+                                }
+
+                                is ScanRequest.EmBridge -> {
+                                    val js = "window.__cfEmScanResolve(${JSONObject.quote(request.callbackId)}, ${JSONObject.quote(rawResult)});"
+                                    Log.i("WebAppScreen", "Resolving em stub scan result")
+                                    webView.evaluateJavascript(js, null)
+                                }
+
+                                is ScanRequest.JsAgent -> {
+                                    val callback = request.callbackName.ifBlank { "scanCallback" }
+                                    val js = """
+                                        (function() {
+                                            var cb = window[${JSONObject.quote(callback)}];
+                                            if (typeof cb === 'function') {
+                                                try {
+                                                    cb({ code: 200, data: { qrCodeUTF: ${JSONObject.quote(rawResult)} } });
+                                                } catch (e) {}
+                                            }
+                                        })();
+                                    """.trimIndent()
+                                    Log.i("WebAppScreen", "Resolving JsAgent scan result: $callback")
+                                    webView.evaluateJavascript(js, null)
+                                }
+
+                                is ScanRequest.AndroidFunc -> {
+                                    val callback = request.callbackName.ifBlank { "scanCallback" }
+                                    val js = """
+                                        (function() {
+                                            var cb = window[${JSONObject.quote(callback)}];
+                                            if (typeof cb === 'function') {
+                                                try { cb(${JSONObject.quote(rawResult)}); } catch (e) {}
+                                            } else if (typeof window.scanCallback === 'function') {
+                                                try { window.scanCallback(${JSONObject.quote(rawResult)}); } catch (e2) {}
+                                            }
+                                        })();
+                                    """.trimIndent()
+                                    Log.i("WebAppScreen", "Resolving AndroidFunc scan result: $callback")
+                                    webView.evaluateJavascript(js, null)
                                 }
                             }
                         }
-                        if (!launched) {
-                            Toast.makeText(context, context.getString(R.string.ujing_alipay_not_installed), Toast.LENGTH_SHORT).show()
-                        }
-                        return@QrScannerOverlay
-                    }
-                    if (webView != null && rawResult.isNotBlank()) {
-                        when (request) {
-                            is ScanRequest.Redirect -> {
-                                val separator = if (request.redirectUrl.contains("?")) "&" else "?"
-                                val encoded = java.net.URLEncoder.encode(rawResult, "UTF-8")
-                                val finalCallbackUrl = "${request.redirectUrl}${separator}scanResult=$encoded"
-                                Log.i("WebAppScreen", "Loading scan callback URL: $finalCallbackUrl")
-                                webView.loadUrl(finalCallbackUrl)
-                            }
-
-                            is ScanRequest.Bridge -> {
-                                val js = "window.__cfScanResolve(${JSONObject.quote(request.callbackId)}, ${JSONObject.quote(rawResult)});"
-                                Log.i("WebAppScreen", "Resolving wx stub scan result")
-                                webView.evaluateJavascript(js, null)
-                            }
-
-                            is ScanRequest.EmBridge -> {
-                                val js = "window.__cfEmScanResolve(${JSONObject.quote(request.callbackId)}, ${JSONObject.quote(rawResult)});"
-                                Log.i("WebAppScreen", "Resolving em stub scan result")
-                                webView.evaluateJavascript(js, null)
-                            }
-
-                            is ScanRequest.JsAgent -> {
-                                val callback = request.callbackName.ifBlank { "scanCallback" }
-                                val js = """
-                                    (function() {
-                                        var cb = window[${JSONObject.quote(callback)}];
-                                        if (typeof cb === 'function') {
-                                            try {
-                                                cb({ code: 200, data: { qrCodeUTF: ${JSONObject.quote(rawResult)} } });
-                                            } catch (e) {}
-                                        }
-                                    })();
-                                """.trimIndent()
-                                Log.i("WebAppScreen", "Resolving JsAgent scan result: $callback")
-                                webView.evaluateJavascript(js, null)
-                            }
-
-                            is ScanRequest.AndroidFunc -> {
-                                val callback = request.callbackName.ifBlank { "scanCallback" }
-                                val js = """
-                                    (function() {
-                                        var cb = window[${JSONObject.quote(callback)}];
-                                        if (typeof cb === 'function') {
-                                            try { cb(${JSONObject.quote(rawResult)}); } catch (e) {}
-                                        } else if (typeof window.scanCallback === 'function') {
-                                            try { window.scanCallback(${JSONObject.quote(rawResult)}); } catch (e2) {}
-                                        }
-                                    })();
-                                """.trimIndent()
-                                Log.i("WebAppScreen", "Resolving AndroidFunc scan result: $callback")
-                                webView.evaluateJavascript(js, null)
-                            }
-                        }
-                    }
-                },
-                hint = stringResource(R.string.webapp_scan_hint)
-            )
+                    },
+                    hint = stringResource(R.string.webapp_scan_hint)
+                )
+            }
         }
     }
 }
+
 
 /**
  * 判断当前 URL 是否处于应用定义的「主页/首页」路由。
