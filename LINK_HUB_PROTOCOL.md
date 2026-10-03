@@ -17,7 +17,8 @@
 入口三条，最终都进入 App 的节点确认页：
 
 1. **NFC 触碰**：标签写 `NDEF URI 记录`；App 在后台由 `NDEF_DISCOVERED` 过滤器接住，在前台由 `enableForegroundDispatch` 接住（不要求 `assetlinks.json`）。
-2. **外部链接（VIEW）**：已声明 hub host 的 `autoVerify` 过滤器（`/url/`、`/u/`），与 U净 host 分成两个 filter（域名验证按 host 逐个进行，互不牵连）；该 host 的 `.well-known/assetlinks.json` 含 `com.shiro.classflow` 与 `com.shiro.classflow.dev`，真机 `pm get-app-links` 显示 `wbu.pennote.cn: verified`，浏览器/聊天软件里点链接可直接进 App。dev 与 prod 同时安装时，系统按惯例可能弹一次选择器。
+2. **外部链接（VIEW）**：已声明 hub host 的 `autoVerify` 过滤器（`/url/`、`/u/`），与 U净 host 分成两个 filter（域名验证按 host 逐个进行，互不牵连）；该 host 的 `.well-known/assetlinks.json` 含 `com.shiro.classflow` 与 `com.shiro.classflow.dev`，真机 `pm get-app-links` 显示该 host 为 `verified`：**直接导航**到该链接（系统浏览器地址栏、聊天软件点链接、扫码）能进 App。dev 与 prod 同时安装时，系统按惯例可能弹一次选择器。
+   ⚠️ 但落地页上的按钮**不能只靠 App Links**：落地页与深链同在 hub 域下，Chrome 不会把**同域**导航交给系统（详见 §6.1），所以落地页在用户点击时改用 `intent://` 显式唤起。
 3. **App 内扫一扫**：相机或相册选图解码后走同一套路由。
 
 ## 2. URL 形态与严格匹配
@@ -45,10 +46,17 @@
 
 ## 3. 线格式 A：服务端 JSON 信封
 
+**两个地址，各管一头**（这条分工很关键，能避免「App 拿到落地页 HTML」这类坑）：
+
+| 地址 | 谁用 | 要求 |
+|---|---|---|
+| `https://<hub>/url/{code}`（`/u/{code}`） | **浏览器 / 扫码 / NFC 标签**：写进二维码与标签的就是它 | 必须能显示「打开 App / 下载 App」的落地页；通常直接由静态页接管 |
+| `GET https://<hub>/api/v1/nodes/{code}` | **App 读取节点内容** | 必须落到服务端程序，返回 JSON 信封 |
+
 App 请求：
 
 ```http
-GET /url/{code} HTTP/1.1
+GET /api/v1/nodes/{code} HTTP/1.1
 Host: <hub>
 Accept: application/json
 User-Agent: ClassFlow/<versionName> (<platform>)
@@ -80,8 +88,14 @@ User-Agent: ClassFlow/<versionName> (<platform>)
 | `expiresAt` | 否 | Unix 秒；过期后只提示已失效 |
 | `payload` | 否 | 动作自定义字段（缺省 `{}`） |
 
+为什么 App 不直接读 `/url/{code}`：浏览器侧那个地址经常被站点用**静态落地页**接走（为了给没装 App 的人提示下载），
+静态页做不了 `Accept` 内容协商，App 就永远只能拿到 HTML。放在 `/api/` 下（写入接口本来就必须落到服务端程序）
+最稳：**浏览器侧怎么改都不会影响 App**。
+
 行为约定：
 
+- 若部署上仍让 `/url/{code}` 落到服务端程序，服务端**可以**额外按 `Accept` 协商（JSON 给 App、HTML 给浏览器），
+  这属于兼容能力，App 不依赖它；
 - 未知字段一律忽略（前后兼容）；
 - `404` / `410` → 「链接无效」/「已失效」；`5xx`、超时、断网 → 可重试的失败态；
 - 重定向只允许停留在同一 host（禁止跳到第三方或内网地址）；
@@ -141,9 +155,50 @@ NDEF 占用 = TLV(3B) + 记录头(4B) + URI 前缀码(1B，`0x04` 已把 `https:
 | 类型已冻结但本版本未实现（`proxy`、`layout_plugin`） | 「该类型需要更新 App 后才能使用」 |
 | 类型未知（服务端新造的类型） | 「无法识别的分享类型：xxx」+ 复制链接 |
 | 已过期 / `minAppVersion` 过高 | 对应提示，不落地 |
-| 解析失败（网络/服务端） | 失败态（Stage B 提供重试） |
+| 解析失败（网络/服务端 5xx、超时） | 「网络异常」+ 重试 |
+| 读接口返回 HTML / 非 JSON（`/api/` 未落到服务端程序） | 「该分享内容暂时打不开」+ 重试 + 用浏览器打开 |
 
 任何情况下都**不会自动落地**：必须由用户在确认卡片上点「应用」。
+
+### 为什么 HTML 响应不塞进内置 WebView
+
+这类页面（例如站点原有的「打开 ClassFlow」跳转页）通常自己会 `location.href = 'intent://...#Intent;...;end'`。
+WebView 不认识 `intent://`，只会渲染出「网页无法打开 / `net::ERR_UNKNOWN_URL_SCHEME`」——
+在 App 里表现为一张莫名其妙的错误页（真机复现过）。所以：**服务端必须给 App 返回 JSON**；
+拿到 HTML 时只提示 + 重试，并把「用浏览器打开」留给系统浏览器（那里 `intent://` 与 App Links 行为才正常）。
+
+另外 `WebViewScreen` 已拦截非 http(s) 跳转：解析 `intent://` 内层 http(s) 地址，
+命中校园深链规范（`/w/`、`/wm/`、`/hd/`、`/url/`、`/u/`）就走原生页面，其余交给系统，
+因此任何页面在 App 内置 WebView 里都不会再出现那张 `ERR_UNKNOWN_URL_SCHEME` 错误页。
+
+### 6.1 浏览器里点按钮怎么进 App（同域 App Links 不生效）
+
+真机实测（Chrome 151 / Android 16；`autoVerify` 已验证、系统里该域的「打开支持的链接」也已启用）：
+**从 `<hub>` 上的页面点一条 `<hub>` 上的 https 深链，Chrome 不会交给系统**，只当成一次普通同域导航
+把落地页重新加载一遍 —— 用户看到的就是「点了没反应，页面自己刷新了」。
+（落地页与深链同域是这里既定的部署形态；同样两条链接放在**跨域**页面里点则正常。）
+`am start -a android.intent.action.VIEW -d 'https://<hub>/u/xxx'` 这种直接导航不受影响，
+所以 NFC / 扫码 / 聊天软件里点链接都正常，只有「落地页上的按钮」需要特殊处理。
+
+于是落地页（`pages/`，纯静态、无 PHP）在 Android 上把按钮的 `href` 换成显式唤醒：
+
+```
+intent://<host><path>[#载荷]#Intent;scheme=https;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;S.browser_fallback_url=<编码后的 https 深链>;end
+```
+
+实测要点（都踩过）：
+
+| 要点 | 说明 |
+|---|---|
+| 必须由**用户手势**触发 | 页面加载时自动 `location.href = 'intent://…'` 会被 Chrome 判成 `ERR_UNKNOWN_URL_SCHEME`；放进 `<a href>`（点击）就正常 |
+| 载荷写在 `#` 后面 | `Intent.parseUri` 以**最后一个** `#` 分隔 intent 规格，所以 `intent://<hub>/u/#Emhp#Intent;…;end` 送到 App 的数据就是 `https://<hub>/u/#Emhp` |
+| 别把 `#` 编码成 `%23` | `%23` 不会还原成 fragment，App 拿到的载荷会丢（实测 App 只收到 `…/u/%23Emhp`） |
+| 没装 App 时 | `S.browser_fallback_url` 让浏览器退回普通 https 落地页，下载入口在那儿 |
+| 微信 / QQ 内置浏览器 | App Links 与 `intent://` 都被拦，只能提示「右上角 → 在浏览器打开」 |
+| 桌面浏览器 | 保持普通 https 深链（`intent://` 无意义） |
+
+> App 侧无需为这套机制做任何事：`intent://` 送过来的就是一条普通的 `ACTION_VIEW` + `https` data，
+> 与 App Links 到达时的 Intent 完全一致（真机 `dumpsys activity` 核对过 `dat=`）。
 
 ## 7. 安全约束
 
@@ -170,8 +225,8 @@ NDEF 占用 = TLV(3B) + 记录头(4B) + URI 前缀码(1B，`0x04` 已把 `https:
 | 节点确认页 + handler 注册表 | ✅ 已实现（内置 `open`、`text`） |
 | 服务端 JSON 解析（线格式 A，App 侧） | ✅ 已完成：`LinkHubClient` 取信封、按 origin 请求、404/410/网络异常分类与重试、HTML 兜底交内置 WebView |
 | hub host 的 VIEW / `autoVerify` 过滤器 | ✅ 已注册并验证通过（assetlinks.json 含 prod/dev 包名，真机 `pm get-app-links` = verified） |
-| 服务端示例（`server/linkhub.php`，Python 版等价） | ✅ 已实现：`GET /url/{code}`、`GET /u/{code}`、`POST/GET/PUT/DELETE /api/v1/nodes[/{code}]`、`GET /api/v1/health`；`/api/` 带 CORS；写接口 `Authorization: Bearer <TOKEN>` |
-| 生成器页面（`server/linkhub-demo.html`） | ✅ 已实现：本地算内嵌载荷 + 调服务端换短码 + 本地渲染二维码 + 内置自检 |
+| 服务端实现 | ✅ 已在私有环境落地（`GET /api/v1/nodes/{code}` 给 App 读；`/url/{code}` 由落地页接管；`POST/PUT/DELETE /api/v1/nodes[/{code}]` 提供创建、改内容、撤销） |
+| URL 生成器（本地小工具，不入库） | ✅ 已实现：本地算内嵌载荷 + 本地渲染二维码 + 与 App 字节自检 |
 | 分享侧（App 内上传换 code、写 NFC 标签） | ⏳ 未开始（服务端写入 API 与生成器页面已可用） |
 | `proxy` / `layout_plugin` 功能本体 | ⏳ 未开始（字段契约已冻结，见第 3、4 节） |
 | 载荷签名 / 加密 | ⏳ 未开始 |

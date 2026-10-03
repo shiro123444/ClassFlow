@@ -11,10 +11,8 @@ import org.junit.Test
  */
 class LinkHubResponseClassifierTest {
 
-    private val url = "https://hub.example.com/url/ab12cd"
-
     private fun classify(status: Int, contentType: String?, body: String) =
-        LinkHubResponseClassifier.classify(status, contentType, body, url)
+        LinkHubResponseClassifier.classify(status, contentType, body)
 
     @Test
     fun parsesJsonEnvelope() {
@@ -63,15 +61,15 @@ class LinkHubResponseClassifierTest {
     }
 
     @Test
-    fun fallsBackToBrowserForHtmlResponse() {
-        val result = classify(200, "text/html; charset=utf-8", "<!doctype html><h1>打开 ClassFlow</h1>")
-        assertEquals(LinkHubFetchResult.BrowserFallback(url), result)
+    fun reportsNotJsonForHtmlResponse() {
+        // `/url/` 被跳转页接走时返回 HTML：必须识别为 NotJson，
+        // 由 UI 提示 + 重试，绝不能拿去开内置 WebView（那里的 intent:// 会变成 ERR_UNKNOWN_URL_SCHEME）
+        assertEquals(LinkHubFetchResult.NotJson, classify(200, "text/html; charset=utf-8", "<!doctype html><h1>打开 ClassFlow</h1>"))
     }
 
     @Test
-    fun fallsBackToBrowserWhenContentTypeMissing() {
-        // 老服务端可能不带 Content-Type：交给 WebView 兜底，而不是判定失败
-        assertEquals(LinkHubFetchResult.BrowserFallback(url), classify(200, null, "hello"))
+    fun reportsNotJsonWhenContentTypeMissing() {
+        assertEquals(LinkHubFetchResult.NotJson, classify(200, null, "hello"))
     }
 
     @Test

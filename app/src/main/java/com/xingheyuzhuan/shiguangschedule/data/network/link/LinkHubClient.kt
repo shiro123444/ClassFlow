@@ -23,10 +23,13 @@ sealed interface LinkHubFetchResult {
     data class Ok(val envelope: LinkHubEnvelope) : LinkHubFetchResult
 
     /**
-     * 服务端没按 JSON 返回（老部署 / 未启用 JSON 协商）：把原始链接交给内置 WebView 兜底，
-     * 与浏览器访问行为一致，避免 App 直接判定失败。
+     * 服务端没按 JSON 返回（`/url/` 被别的页面接走了、或部署还没更新）。
+     *
+     * 注意：**不要**拿这个响应去开内置 WebView —— 那种页面往往自己会跳 `intent://`，
+     * WebView 不认识该 scheme，只会渲染出「网页无法打开 / ERR_UNKNOWN_URL_SCHEME」。
+     * 由 UI 提示 + 重试，并提供「用浏览器打开」的逃生口即可。
      */
-    data class BrowserFallback(val url: String) : LinkHubFetchResult
+    data object NotJson : LinkHubFetchResult
 
     /** 节点不存在（404）。 */
     data object NotFound : LinkHubFetchResult
@@ -56,13 +59,7 @@ object LinkHubResponseClassifier {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun classify(
-        status: Int,
-        contentType: String?,
-        body: String,
-        /** 兜底打开的地址（原始短码链接）。 */
-        fallbackUrl: String
-    ): LinkHubFetchResult {
+    fun classify(status: Int, contentType: String?, body: String): LinkHubFetchResult {
         when (status) {
             404 -> return LinkHubFetchResult.NotFound
             410 -> return LinkHubFetchResult.Expired
@@ -70,7 +67,7 @@ object LinkHubResponseClassifier {
         if (status !in 200..299) return LinkHubFetchResult.ServerError(status)
 
         val looksJson = contentType?.contains("json", ignoreCase = true) == true
-        if (!looksJson) return LinkHubFetchResult.BrowserFallback(fallbackUrl)
+        if (!looksJson) return LinkHubFetchResult.NotJson
 
         val envelope = runCatching { json.decodeFromString<LinkHubEnvelope>(body) }.getOrNull()
             ?: return LinkHubFetchResult.Malformed
@@ -99,7 +96,9 @@ class LinkHubClient @Inject constructor() {
         .build()
 
     suspend fun fetch(code: String, origin: String? = null): LinkHubFetchResult = withContext(Dispatchers.IO) {
-        val url = LinkHubUrl.buildCodeUrl(code = code, origin = origin)
+        // 走 /api/ 读接口，而不是分享链接本身：`/url/{code}` 通常被浏览器侧的落地页接管，
+        // 做不了 Accept 协商，App 会拿到 HTML（详见 buildApiUrl 的注释）
+        val url = LinkHubUrl.buildApiUrl(code = code, origin = origin)
         val request = Request.Builder()
             .url(url)
             .header("Accept", "application/json")
@@ -113,8 +112,7 @@ class LinkHubClient @Inject constructor() {
                 LinkHubResponseClassifier.classify(
                     status = response.code,
                     contentType = contentType,
-                    body = body,
-                    fallbackUrl = url
+                    body = body
                 )
             }
         }.getOrElse { LinkHubFetchResult.NetworkError }

@@ -40,13 +40,9 @@ app/release.jks
 /release_notes_*.txt
 /CHANGELOG.md
 
-# 官网与本地调试页（本机维护、手动部署，不入库）
-/website/
-/scripts/classflow_landing.html
-# 深链 / NFC 调试页（含本机配置的私有域名，不入库）
-/scripts/deeplink_test.html
-
-# 通用链接节点示例服务端：节点数据落盘文件不提交
-/server/data/
-/server/linkhub-data.json
-/server/linkhub-data.php
+# 线上网页与短链服务端全都在 web/（本机维护、手动部署，暂不入库；含私有域名与节点数据）
+#   site/   官网静态站（独立域名，纯静态）
+#   pages/  「打开 App / 下载」落地页（纯静态，部署在 hub 站点的 /pages/index.php）
+#   api/    通用链接节点服务端 linkhub.php（部署在 hub 站点的 /api/linkhub.php）
+#   tools/  本机用 URL 生成器 / 深链调试页（不部署）
+/web/

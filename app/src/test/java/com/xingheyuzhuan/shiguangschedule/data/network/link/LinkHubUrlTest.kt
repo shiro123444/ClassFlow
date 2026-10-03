@@ -121,6 +121,23 @@ class LinkHubUrlTest {
     }
 
     @Test
+    fun buildsApiUrlForReadingNodes() {
+        // 读接口与分享链接是两个不同的地址：前者必须落到服务端程序，后者是浏览器侧的落地页
+        assertEquals("https://$host/api/v1/nodes/ab12cd", LinkHubUrl.buildApiUrl("ab12cd"))
+        assertEquals("https://$host/api/v1/nodes/ab12cd", LinkHubUrl.buildApiUrl("ab12cd", origin = "https://$host"))
+        assertEquals(
+            "http://127.0.0.1:8090/api/v1/nodes/ab12cd",
+            LinkHubUrl.buildApiUrl("ab12cd", origin = "http://127.0.0.1:8090/")
+        )
+    }
+
+    @Test
+    fun apiUrlIsNotMatchedByTheShareParser() {
+        // /api/ 下的地址不是分享链接，不应被节点解析器接管
+        assertNull(LinkHubUrl.parse("https://$host/api/v1/nodes/ab12cd"))
+    }
+
+    @Test
     fun buildUrlsRoundTripThroughParser() {
         val codeNode = LinkHubUrl.parse(LinkHubUrl.buildCodeUrl("xy12"))
         assertEquals("xy12", codeNode?.code)

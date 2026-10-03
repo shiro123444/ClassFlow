@@ -1,6 +1,8 @@
 package com.xingheyuzhuan.shiguangschedule.ui.schoolselection.web
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.net.http.SslError
 import android.util.Log
@@ -93,6 +95,7 @@ import com.xingheyuzhuan.shiguangschedule.Destination
 import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.BuildConfig
 import com.xingheyuzhuan.shiguangschedule.R
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.CampusLinkRouter
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.repository.AppSettingsRepository
@@ -283,7 +286,8 @@ fun WebViewScreen(
             webViewClient = object : WebViewClient() {
                 @Deprecated("Deprecated in Java")
                 override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                    return false
+                    if (url == null) return false
+                    return handleNonHttpNavigation(context, navBridge, url)
                 }
 
                 @SuppressLint("WebViewClientOnReceivedSslError")
@@ -1144,4 +1148,71 @@ private fun CampusNetworkProbeOverlay(
         }
     }
 }
+/**
+ * 拦截 WebView 里的**非 http(s)** 跳转。
+ *
+ * 为什么需要：网页常用 `intent://host/path#Intent;scheme=https;package=...;S.browser_fallback_url=...;end`
+ * 来唤起 App，但 WebView 自己不认识 `intent://`，会直接把「网页无法打开 /
+ * net::ERR_UNKNOWN_URL_SCHEME」渲染出来（App 里就会出现一张莫名其妙的错误页）。
+ *
+ * 处理策略：
+ * 1. `intent://` → 解析出内层 http(s) 地址：
+ *    a. 命中应用内深链规范（饮水机 / 洗衣机 / 通用节点…）→ 直接走原生页面（replace 掉当前 WebView）；
+ *    b. 否则交给系统（浏览器 / App Links）；
+ * 2. 其它自定义 scheme（`alipays://`、`weixin://`、`tel:`…）→ 交给系统。
+ *
+ * 返回 true 表示已消费，WebView 不再处理；http(s) 等常规 scheme 返回 false 交回 WebView。
+ */
+private fun handleNonHttpNavigation(context: Context, navBridge: NavBridge, rawUrl: String): Boolean {
+    val uri = runCatching { Uri.parse(rawUrl) }.getOrNull() ?: return false
+    val scheme = uri.scheme?.lowercase().orEmpty()
+    if (scheme.isEmpty() || scheme in WEBVIEW_NATIVE_SCHEMES) return false
 
+    if (scheme == "intent") {
+        val intent = runCatching { Intent.parseUri(rawUrl, Intent.URI_INTENT_SCHEME) }.getOrNull()
+        val innerUrl = listOfNotNull(
+            // Chrome 约定：S.browser_fallback_url=...
+            intent?.getStringExtra("browser_fallback_url"),
+            // 部分站点直接写 scheme=https;package=...，此时 data 就是内层地址
+            intent?.dataString,
+        ).firstOrNull { it.startsWith("http://") || it.startsWith("https://") }
+
+        if (innerUrl != null) {
+            val destination = CampusLinkRouter.parse(innerUrl)
+            if (destination != null) {
+                Log.d("WebViewScreen", "intent:// 命中应用内深链，转原生页面: $innerUrl")
+                navBridge.replace(destination)
+                return true
+            }
+            Log.d("WebViewScreen", "intent:// 交给系统打开: $innerUrl")
+            return launchExternally(context, Uri.parse(innerUrl))
+        }
+
+        if (intent != null && runCatching {
+                context.startActivity(Intent(intent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.isSuccess
+        ) {
+            return true
+        }
+        Log.w("WebViewScreen", "无法处理的 intent:// 跳转: $rawUrl")
+        return true
+    }
+
+    Log.d("WebViewScreen", "非 http(s) scheme 交给系统: $scheme")
+    return launchExternally(context, uri)
+}
+
+/** 交给系统处理该 URI；无法处理时提示用户（而不是让 WebView 渲染错误页）。 */
+private fun launchExternally(context: Context, uri: Uri): Boolean {
+    val intent = Intent(Intent.ACTION_VIEW, uri).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+    val launched = runCatching { context.startActivity(intent) }.isSuccess
+    if (!launched) {
+        Toast.makeText(context, context.getString(R.string.toast_web_scheme_unhandled), Toast.LENGTH_SHORT).show()
+    }
+    return true
+}
+
+/** WebView 自己能处理的 scheme（其余一律拦截后交给系统）。 */
+private val WEBVIEW_NATIVE_SCHEMES = setOf(
+    "http", "https", "about", "data", "file", "javascript", "blob", "content"
+)

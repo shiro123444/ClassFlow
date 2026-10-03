@@ -928,6 +928,9 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="link_hub_error_expired">This shared content has expired</string>
     <string name="link_hub_error_app_version">Update the app to use this content</string>
     <string name="link_hub_error_network">Network error, could not fetch this shared content</string>
+    <string name="link_hub_error_not_json">This shared content cannot be opened right now, please try again later</string>
+    <string name="link_hub_open_in_browser">Open in browser</string>
+    <string name="toast_web_scheme_unhandled">No app can open this link</string>
     <string name="link_hub_retry">Retry</string>
     <string name="link_hub_applied_text">Text copied to clipboard</string>
     <string name="link_hub_applied_open">Opening link…</string>

@@ -3,6 +3,8 @@ package com.xingheyuzhuan.shiguangschedule.ui.link
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
@@ -144,7 +146,9 @@ fun LinkHubScreen(
                 is LinkHubUiState.Failed -> FailedBlock(
                     messageRes = current.messageRes,
                     retryable = current.retryable,
+                    openInBrowserUrl = current.openInBrowserUrl,
                     onRetry = viewModel::retry,
+                    onOpenInBrowser = { url -> openInExternalBrowser(context, url) },
                     onBack = { navBridge.popBackStack() }
                 )
 
@@ -163,6 +167,24 @@ private fun rebuildLink(code: String?, inline: String?, origin: String?): String
     !inline.isNullOrEmpty() -> LinkHubUrl.buildInlineUrl(payload = inline, code = code)
     !code.isNullOrEmpty() -> LinkHubUrl.buildCodeUrl(code = code, origin = origin)
     else -> ""
+}
+
+/**
+ * 用系统浏览器打开地址。
+ *
+ * 用于「服务端没按 JSON 返回」时的逃生口：这种页面通常自己会跳 `intent://` 唤起 App，
+ * 那是浏览器（有用户手势、认 App Links）的活，塞进内置 WebView 只会得到
+ * 「网页无法打开 / ERR_UNKNOWN_URL_SCHEME」。
+ */
+private fun openInExternalBrowser(context: Context, url: String) {
+    if (url.isBlank()) return
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    val opened = runCatching { context.startActivity(intent) }.isSuccess
+    if (!opened) {
+        Toast.makeText(context, context.getString(R.string.link_hub_error_network), Toast.LENGTH_SHORT).show()
+    }
 }
 
 private fun copyToClipboard(context: Context, text: String) {
@@ -364,7 +386,9 @@ private fun UnsupportedBlock(
 private fun FailedBlock(
     @StringRes messageRes: Int,
     retryable: Boolean,
+    openInBrowserUrl: String?,
     onRetry: () -> Unit,
+    onOpenInBrowser: (String) -> Unit,
     onBack: () -> Unit
 ) {
     LinkHubCard {
@@ -393,6 +417,14 @@ private fun FailedBlock(
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(stringResource(R.string.link_hub_retry))
+                }
+            }
+            if (openInBrowserUrl != null) {
+                OutlinedButton(
+                    onClick = { onOpenInBrowser(openInBrowserUrl) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(stringResource(R.string.link_hub_open_in_browser))
                 }
             }
             OutlinedButton(

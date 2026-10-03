@@ -89,10 +89,28 @@ object LinkHubUrl {
         return if (defaultPort) "$scheme://$host" else "$scheme://$host:$port"
     }
 
-    /** 该短码在指定来源下的请求地址（来源缺失时回落到默认服务端）。 */
+    /**
+     * 分享链接（写进二维码 / NFC 标签、发给别人的地址）：`https://<hub>/url/{code}`。
+     *
+     * 注意：这是**浏览器侧**的地址，部署上通常直接由静态落地页接管（用来提示「打开 App / 下载」）。
+     * App 自己要读节点内容时请用 [buildApiUrl] —— 别依赖浏览器侧的路由。
+     */
     fun buildCodeUrl(code: String, origin: String? = null, shortAlias: Boolean = false): String {
         val base = origin?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: serverBase()
         return "$base${if (shortAlias) "/u/" else "/url/"}$code"
+    }
+
+    /**
+     * App 读取节点的接口地址：`https://<hub>/api/v1/nodes/{code}`。
+     *
+     * 为什么不用分享链接本身：`/url/{code}` 在浏览器里必须能显示落地页（提示打开 App / 下载），
+     * 于是它经常被站点直接用静态页接管 —— 那个页面做不了 `Accept` 内容协商，
+     * App 拿到的就永远是 HTML。`/api/` 前缀是写入接口已经在用的、必须落到服务端程序上的路径，
+     * 因此读接口也放在这里最稳：**浏览器侧的改动再也不会影响 App**。
+     */
+    fun buildApiUrl(code: String, origin: String? = null): String {
+        val base = origin?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: serverBase()
+        return "$base/api/v1/nodes/$code"
     }
 
     /** host 严格匹配：正式规则（https + hub 域名 + 443），或 debug 构建下的本地联调地址。 */

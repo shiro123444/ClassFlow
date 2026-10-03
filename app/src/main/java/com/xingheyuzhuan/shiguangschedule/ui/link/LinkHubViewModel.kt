@@ -16,6 +16,7 @@ import com.xingheyuzhuan.shiguangschedule.data.network.link.LinkHubClient
 import com.xingheyuzhuan.shiguangschedule.data.network.link.LinkHubCompactCodec
 import com.xingheyuzhuan.shiguangschedule.data.network.link.LinkHubFetchResult
 import com.xingheyuzhuan.shiguangschedule.data.network.link.LinkHubInlineResult
+import com.xingheyuzhuan.shiguangschedule.data.network.link.LinkHubUrl
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -59,8 +60,15 @@ sealed interface LinkHubUiState {
     /** 类型未注册：不明类型或「已约定但本版本未实现」。 */
     data class Unsupported(val type: String, val reserved: Boolean) : LinkHubUiState
 
-    /** 失败；[retryable] 为 true 时页面提供「重试」。 */
-    data class Failed(@StringRes val messageRes: Int, val retryable: Boolean = false) : LinkHubUiState
+    /**
+     * 失败；[retryable] 为 true 时页面提供「重试」，
+     * [openInBrowserUrl] 非空时额外提供「用浏览器打开」（服务端没返回 JSON 时的逃生口）。
+     */
+    data class Failed(
+        @StringRes val messageRes: Int,
+        val retryable: Boolean = false,
+        val openInBrowserUrl: String? = null
+    ) : LinkHubUiState
 
     data object Applying : LinkHubUiState
 
@@ -164,11 +172,12 @@ class LinkHubViewModel @Inject constructor(
                 is LinkHubFetchResult.Ok ->
                     show(LinkHubNode(envelope = result.envelope, origin = LinkHubOrigin.SERVER))
 
-                is LinkHubFetchResult.BrowserFallback -> {
-                    // 与浏览器访问行为一致：交给内置 WebView，不显示「不支持」
-                    _state.value = LinkHubUiState.Applied(R.string.link_hub_applied_open)
-                    _openWebView.tryEmit(result.url)
-                }
+                LinkHubFetchResult.NotJson -> _state.value = LinkHubUiState.Failed(
+                    messageRes = R.string.link_hub_error_not_json,
+                    retryable = true,
+                    // 逃生口：交给系统浏览器（那里的 intent:// / App Links 行为才正常）
+                    openInBrowserUrl = LinkHubUrl.buildCodeUrl(code = code, origin = origin)
+                )
 
                 LinkHubFetchResult.NotFound -> fail(LinkHubFailure.INVALID_LINK)
                 LinkHubFetchResult.Expired -> fail(LinkHubFailure.EXPIRED)
