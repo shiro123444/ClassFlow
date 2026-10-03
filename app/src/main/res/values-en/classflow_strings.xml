@@ -110,10 +110,10 @@
     <string name="toast_channel_switched">Switched to %1$s</string>
     <string name="format_current_version">Current Version  %1$s</string>
     <string name="open_source_intro">ClassFlow is an open-source Android timetable app dedicated to providing a lightweight and elegant course management experience.</string>
-    <string name="open_source_license_gpl">Released under the GPL-3.0 open source license.</string>
+    <string name="open_source_license_apache">Released under the Apache License 2.0.</string>
     <string name="title_source_repo">Source Repository</string>
     <string name="title_project_license">Project License</string>
-    <string name="desc_project_license_gpl">Free to use, modify, and distribute, provided derivative works use the same license.</string>
+    <string name="desc_project_license_apache">Free to use, modify, and distribute, provided copyright and license notices are retained and modifications are clearly stated.</string>
     <string name="title_third_party_licenses">Third-party Licenses</string>
     <string name="desc_third_party_core">AndroidX, Compose, Retrofit, and core frameworks</string>
     <string name="desc_third_party_utils">OkHttp, Coil, JGit, and utility libraries</string>

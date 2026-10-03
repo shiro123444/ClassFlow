@@ -110,7 +110,7 @@ fun OpenSourceLicensesScreen(navBridge: NavBridge) {
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = stringResource(R.string.open_source_license_gpl),
+                        text = stringResource(R.string.open_source_license_apache),
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurface
@@ -166,13 +166,13 @@ fun OpenSourceLicensesScreen(navBridge: NavBridge) {
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "GNU General Public License v3.0",
+                        text = "Apache License 2.0",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = stringResource(R.string.desc_project_license_gpl),
+                        text = stringResource(R.string.desc_project_license_apache),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

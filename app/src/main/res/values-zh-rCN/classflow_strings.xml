@@ -108,10 +108,10 @@
     <string name="toast_channel_switched">已切换为%1$s</string>
     <string name="format_current_version">当前版本  %1$s</string>
     <string name="open_source_intro">ClassFlow 是一个开源的 Android 课表应用，致力于为高校学生提供轻量、优雅的课程管理体验。</string>
-    <string name="open_source_license_gpl">项目基于 GPL-3.0 协议开源发布。</string>
+    <string name="open_source_license_apache">项目基于 Apache-2.0 协议开源发布。</string>
     <string name="title_source_repo">源码仓库</string>
     <string name="title_project_license">项目许可证</string>
-    <string name="desc_project_license_gpl">允许自由使用、修改和分发，但分发的衍生作品必须使用相同的开源协议。</string>
+    <string name="desc_project_license_apache">允许自由使用、修改和分发；分发时需保留版权与许可声明，并以显著方式说明修改内容。</string>
     <string name="title_third_party_licenses">第三方依赖许可证</string>
     <string name="desc_third_party_core">AndroidX、Compose、Retrofit 等核心框架</string>
     <string name="desc_third_party_utils">OkHttp、Coil、JGit 等工具库与组件</string>
