@@ -32,6 +32,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
 import javax.inject.Inject
+import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
 
 enum class FreeClassroomQueryMode {
     SECTION, // 按节次
@@ -185,7 +186,7 @@ class FreeClassroomViewModel @Inject constructor(
                         it.copy(
                             isLoading = false,
                             needLogin = isSessionExpired,
-                            errorMessage = err.message ?: context.getString(R.string.err_query_free_classroom_failed)
+                            errorMessage = accessFailureText(context, err) ?: context.getString(R.string.err_query_free_classroom_failed)
                         )
                     }
                 }
@@ -497,7 +498,7 @@ class FreeClassroomViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isProbing = false,
-                            probeError = err.message ?: context.getString(R.string.err_probe_schedule_failed),
+                            probeError = accessFailureText(context, err) ?: context.getString(R.string.err_probe_schedule_failed),
                             probeProgress = null
                         )
                     }

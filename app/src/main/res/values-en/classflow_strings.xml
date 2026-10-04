@@ -338,7 +338,7 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="desc_vpn_switch_subtitle">Enable if not connected to campus network</string>
     <string name="status_connecting_verifying">Connecting and verifying...</string>
     <string name="error_input_credentials_incomplete">Please enter student ID and password</string>
-    <string name="error_login_unsuccessful">Login failed. Please check credentials or VPN toggle</string>
+    <string name="error_login_unsuccessful">Login did not complete. Please try again</string>
     <string name="error_session_expired">Academic session expired. Please log in again</string>
     <string name="error_login_generic_retry">Login error. Please try again</string>
     <string name="action_confirm_login">Log In</string>
@@ -949,4 +949,17 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
         <item>English</item>
     </string-array>
 
+    <!-- Access-failure texts rendered from AccessFailure; the data layer holds no user-facing literals -->
+    <string name="fail_session_expired">Your login has expired. Please log in again to continue</string>
+    <string name="fail_webvpn_session_expired">Your WebVPN login has expired. Please log in again to continue</string>
+    <string name="fail_unified_auth_session_expired">Your unified authentication login has expired. Please log in again to continue</string>
+    <string name="fail_credential_rejected">Incorrect student ID or password. Please try again</string>
+    <string name="fail_webvpn_credential_rejected">Incorrect WebVPN password or verification code. Please try again</string>
+    <string name="fail_sms_code_rejected">Incorrect verification code. Please try again</string>
+    <string name="fail_captcha_rejected">Incorrect image captcha. Please try again</string>
+    <string name="fail_not_on_campus">Not on the campus network, so a direct connection is unavailable</string>
+    <string name="fail_network_unreachable">Network connection failed. Please check your network and retry</string>
+    <string name="fail_webvpn_unreachable">Cannot reach WebVPN. Please check your network and retry</string>
+    <string name="fail_unified_auth_unreachable">Cannot reach unified authentication. Please check your network and retry</string>
+    <string name="fail_unexpected">The operation did not succeed. The school system may have changed; please retry later</string>
 </resources>

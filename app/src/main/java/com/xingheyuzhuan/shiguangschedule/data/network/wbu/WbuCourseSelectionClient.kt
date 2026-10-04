@@ -46,10 +46,7 @@ class WbuCourseSelectionClient(private val context: Context) : CourseSelectionDa
         }
     }
 
-    private fun sessionExpired(): WbuSessionExpiredException = WbuSessionExpiredException(
-        messageResId = R.string.error_session_expired,
-        message = context.getString(R.string.error_session_expired)
-    )
+    private fun sessionExpired(): WbuSessionExpiredException = WbuSessionExpiredException(AccessLayer.Service)
 
     private fun executeRaw(request: Request): String {
         val manualClient = client.newBuilder().followRedirects(false).build()

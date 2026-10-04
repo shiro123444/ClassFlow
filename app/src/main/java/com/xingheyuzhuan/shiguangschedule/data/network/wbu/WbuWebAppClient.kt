@@ -62,7 +62,7 @@ class WbuWebAppClient(
         val hasTgc = transport.cookieStore.any { it.name == "CASTGC" && it.value.isNotBlank() }
         if (!hasTgc) {
             Log.w("WbuWebAppClient", "No CASTGC found in cookie store for WebApp: ${def.id}")
-            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_unified_auth))
+            throw WbuSessionExpiredException(AccessLayer.UnifiedAuth)
         }
 
         val noRedirectClient = client.newBuilder().followRedirects(false).build()
@@ -85,7 +85,7 @@ class WbuWebAppClient(
                     val loc = resp.header("Location").orEmpty()
                     Log.d("WbuWebAppClient", "SSO init resp: ${resp.code}, Location: $loc")
                     if (loc.contains("/por/login") || loc.contains("/por/login_psw") || loc.contains("/portal/")) {
-                        throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
+                        throw WbuSessionExpiredException(AccessLayer.WebVpnPortal)
                     }
                 }
             }.getOrThrow()
@@ -109,10 +109,10 @@ class WbuWebAppClient(
 
         if (casLocation.isNullOrBlank() || !casLocation.contains("ticket=")) {
             if (casLocation.orEmpty().contains("/por/") || casLocation.orEmpty().contains("webvpn")) {
-                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
+                throw WbuSessionExpiredException(AccessLayer.WebVpnPortal)
             }
             Log.w("WbuWebAppClient", "CAS failed to grant ST ticket. Location: $casLocation")
-            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_unified_auth))
+            throw WbuSessionExpiredException(AccessLayer.UnifiedAuth)
         }
 
         // 3. 将 CAS 回跳的目标重写为当前通道宿主（WebVPN 下重写为代理宿主）
@@ -143,17 +143,17 @@ class WbuWebAppClient(
 
         if (finalLocation.contains("/por/") || finalLocation.contains("webvpn.wbu.edu.cn/por")) {
             Log.w("WbuWebAppClient", "SSO callback redirected to WebVPN portal: $finalLocation")
-            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
+            throw WbuSessionExpiredException(AccessLayer.WebVpnPortal)
         }
 
         // 5. 从重定向 URL 解析提取 token
         val token = extractTokenFromUrl(finalLocation)
         if (token.isNullOrBlank()) {
             if (finalLocation.contains("login")) {
-                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_unified_auth))
+                throw WbuSessionExpiredException(AccessLayer.UnifiedAuth)
             }
             Log.e("WbuWebAppClient", "Failed to extract token from Location: $finalLocation")
-            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_sso_token))
+            throw WbuSessionExpiredException(AccessLayer.UnifiedAuth)
         }
 
         transport.persistCookieStore()

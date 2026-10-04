@@ -338,7 +338,7 @@
     <string name="desc_vpn_switch_subtitle">若未連校園網請開啟</string>
     <string name="status_connecting_verifying">正在連接並驗證...</string>
     <string name="error_input_credentials_incomplete">請輸入完整的學號與密碼</string>
-    <string name="error_login_unsuccessful">登入未成功，請檢查帳號密碼或校外VPN開關</string>
+    <string name="error_login_unsuccessful">未能完成登入，請重試</string>
     <string name="error_session_expired">教務登入已過期，請重新登入</string>
     <string name="error_login_generic_retry">登入異常，請重試</string>
     <string name="action_confirm_login">確認登入</string>
@@ -949,4 +949,17 @@
         <item>English</item>
     </string-array>
 
+    <!-- 訪問失敗文案（由 AccessFailure 渲染，資料層不持有任何使用者可見文案） -->
+    <string name="fail_session_expired">登入狀態已過期，重新登入即可繼續</string>
+    <string name="fail_webvpn_session_expired">WebVPN 登入狀態已過期，重新登入即可繼續</string>
+    <string name="fail_unified_auth_session_expired">統一身份認證登入狀態已過期，重新登入即可繼續</string>
+    <string name="fail_credential_rejected">學號或密碼不正確，請重新輸入</string>
+    <string name="fail_webvpn_credential_rejected">WebVPN 密碼或驗證碼不正確，請重新輸入</string>
+    <string name="fail_sms_code_rejected">驗證碼不正確，請重新輸入</string>
+    <string name="fail_captcha_rejected">圖形驗證碼不正確，請重新輸入</string>
+    <string name="fail_not_on_campus">目前不在校園網，無法直連學校系統</string>
+    <string name="fail_network_unreachable">網路連線失敗，請檢查網路後重試</string>
+    <string name="fail_webvpn_unreachable">連不上 WebVPN，請檢查網路後重試</string>
+    <string name="fail_unified_auth_unreachable">連不上統一身份認證，請檢查網路後重試</string>
+    <string name="fail_unexpected">操作未成功，可能是學校系統有變動，請稍後重試</string>
 </resources>

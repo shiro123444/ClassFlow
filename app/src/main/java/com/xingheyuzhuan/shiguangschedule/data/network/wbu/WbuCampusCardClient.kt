@@ -209,7 +209,7 @@ class WbuCampusCardClient(
 
         val hasTgc = transport.cookieStore.any { it.name == "CASTGC" && it.value.isNotBlank() }
         if (!hasTgc) {
-            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_unified_auth))
+            throw WbuSessionExpiredException(AccessLayer.UnifiedAuth)
         }
 
         val noRedirectClient = client.newBuilder().followRedirects(false).build()
@@ -261,7 +261,7 @@ class WbuCampusCardClient(
             }
 
             if (body.contains("pwdFromId") || body.contains("pwdEncryptSalt") || body.contains("authserver/login")) {
-                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_unified_auth))
+                throw WbuSessionExpiredException(AccessLayer.UnifiedAuth)
             }
 
             throw IOException(context.getString(R.string.format_error_campus_card_sso_ticket, currentUrl, code))

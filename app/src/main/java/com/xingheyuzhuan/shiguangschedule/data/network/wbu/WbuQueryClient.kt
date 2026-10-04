@@ -39,7 +39,6 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import okhttp3.Response
 import org.json.JSONArray
@@ -48,16 +47,19 @@ import org.jsoup.Jsoup
 import java.io.IOException
 import java.net.URLEncoder
 
-/** WebVPN 门户（Sangfor）根域名：门禁失效时，代理网关会把所有子域请求接管到这里。 */
-private const val WEBVPN_GATEWAY_HOST = "webvpn.wbu.edu.cn"
 
 /**
- * 教务系统会话已过期或未认证异常
+ * 会话已失效（未登录 / 登录态过期）。
+ *
+ * **不携带任何用户可见文案**：异常只说「在哪一层失效」，文案统一由 UI 层从 `strings.xml` 渲染
+ * （见 `ui/components/WbuFailureText.kt`）。过去这里硬编码 `message = "教务会话已失效，请重新登录"`
+ * 一类的字面量，既无法翻译，也让数据层与 UI 文案绑死。
  */
 class WbuSessionExpiredException(
-    val messageResId: Int = com.xingheyuzhuan.shiguangschedule.R.string.error_session_expired,
-    override val message: String = "教务会话已失效，请重新登录"
-) : Exception(message)
+    /** 失效发生在哪一层：决定上层文案与「下一步该做什么」（门户 / 统一认证 / 业务系统）。 */
+    val layer: AccessLayer = AccessLayer.Service,
+    cause: Throwable? = null
+) : Exception(null, cause)
 
 /**
  * 武汉商学院教务查询服务客户端（成绩查询、空教室查询、单教室课表探测）
@@ -248,18 +250,12 @@ class WbuQueryClient(
             val manualClient = client.newBuilder().followRedirects(false).build()
             val resp = manualClient.newCall(req).execute()
             if (resp.code in 300..399) {
-                throw WbuSessionExpiredException(
-                    messageResId = com.xingheyuzhuan.shiguangschedule.R.string.error_session_expired,
-                    message = context.getString(com.xingheyuzhuan.shiguangschedule.R.string.error_session_expired)
-                )
+                throw WbuSessionExpiredException(AccessLayer.Service)
             }
 
             val raw = resp.body?.string().orEmpty()
             if (transport.looksLikeHtml(raw) || raw.contains("登录")) {
-                throw WbuSessionExpiredException(
-                    messageResId = com.xingheyuzhuan.shiguangschedule.R.string.error_session_expired,
-                    message = context.getString(com.xingheyuzhuan.shiguangschedule.R.string.error_session_expired)
-                )
+                throw WbuSessionExpiredException(AccessLayer.Service)
             }
 
             val json = JSONObject(raw)
@@ -415,18 +411,12 @@ class WbuQueryClient(
             val manualClient = client.newBuilder().followRedirects(false).build()
             val resp = manualClient.newCall(req).execute()
             if (resp.code in 300..399) {
-                throw WbuSessionExpiredException(
-                    messageResId = com.xingheyuzhuan.shiguangschedule.R.string.error_session_expired,
-                    message = context.getString(com.xingheyuzhuan.shiguangschedule.R.string.error_session_expired)
-                )
+                throw WbuSessionExpiredException(AccessLayer.Service)
             }
 
             val raw = resp.body?.string().orEmpty()
             if (transport.looksLikeHtml(raw) || raw.contains("登录")) {
-                throw WbuSessionExpiredException(
-                    messageResId = com.xingheyuzhuan.shiguangschedule.R.string.error_session_expired,
-                    message = context.getString(com.xingheyuzhuan.shiguangschedule.R.string.error_session_expired)
-                )
+                throw WbuSessionExpiredException(AccessLayer.Service)
             }
 
             val json = JSONObject(raw)
@@ -582,35 +572,31 @@ class WbuQueryClient(
                 val manualClient = client.newBuilder().followRedirects(false).build()
                 return manualClient.newCall(req).execute().use { resp ->
                     if (resp.code in 300..399) {
-                        throw WbuSessionExpiredException(
-                            messageResId = com.xingheyuzhuan.shiguangschedule.R.string.error_session_expired,
-                            message = context.getString(com.xingheyuzhuan.shiguangschedule.R.string.error_session_expired)
-                        )
+                        throw WbuSessionExpiredException(AccessLayer.Service)
                     }
                     val body = resp.body?.string().orEmpty()
                     if (transport.looksLikeHtml(body) || body.contains("登录")) {
-                        throw WbuSessionExpiredException(
-                            messageResId = com.xingheyuzhuan.shiguangschedule.R.string.error_session_expired,
-                            message = context.getString(com.xingheyuzhuan.shiguangschedule.R.string.error_session_expired)
-                        )
+                        throw WbuSessionExpiredException(AccessLayer.Service)
                     }
                     val json = JSONObject(body)
                     if (json.optInt("ret", -1) == -1) {
-                        throw WbuSessionExpiredException(
-                            messageResId = com.xingheyuzhuan.shiguangschedule.R.string.error_session_expired,
-                            message = json.optString("msg", context.getString(com.xingheyuzhuan.shiguangschedule.R.string.error_session_expired))
-                        )
+                        throw WbuSessionExpiredException(AccessLayer.Service)
                     }
                     json
                 }
             }
 
-            kotlinx.coroutines.coroutineScope {
-                val studentDeferred = async { executeGetJson("/admin/xsd/xskp/xskp?fasz=2") }
-                val statsDeferred = async { executeGetJson("/admin/xsd/xskp/xyqk?fasz=2") }
-                val progressDeferred = async { executeGetJson("/admin/xsd/xskp/xywcd?fasz=2") }
-                val natureDeferred = async { executeGetJson("/admin/xsd/xskp/xyjc?fasz=2") }
-                val semesterDeferred = async { executeGetJson("/admin/xsd/xskp/xyjc?fasz=3") }
+            // supervisorScope：并发子任务必须各自独立失败。用 coroutineScope 时，只要有一个子任务抛异常，
+            // 其它子任务会被取消，最终冒泡出来的可能是 CancellationException —— 上层就再也看不出
+            // 「其实是登录态过期」，只能给一句含糊的「操作没成功」。
+            kotlinx.coroutines.supervisorScope {
+                // 每个子任务各自兜住结果：supervisorScope 下未处理的子任务异常会直接抛给全局
+                // 异常处理器，所以统一先 runCatching，稍后按顺序抛出第一个真实失败。
+                val studentDeferred = async { runCatching { executeGetJson("/admin/xsd/xskp/xskp?fasz=2") } }
+                val statsDeferred = async { runCatching { executeGetJson("/admin/xsd/xskp/xyqk?fasz=2") } }
+                val progressDeferred = async { runCatching { executeGetJson("/admin/xsd/xskp/xywcd?fasz=2") } }
+                val natureDeferred = async { runCatching { executeGetJson("/admin/xsd/xskp/xyjc?fasz=2") } }
+                val semesterDeferred = async { runCatching { executeGetJson("/admin/xsd/xskp/xyjc?fasz=3") } }
                 // 并发拉取培养方案全库，用于补全全部课程（含未修）的官方考核方式 (ksxs)
                 val pyfaDeferred = async {
                     runCatching {
@@ -663,11 +649,20 @@ class WbuQueryClient(
                     }.getOrNull()
                 }
 
-                val studentJson = studentDeferred.await()
-                val statsJson = statsDeferred.await()
-                val progressJson = progressDeferred.await()
-                val natureJson = natureDeferred.await()
-                val semesterJson = semesterDeferred.await()
+                val studentResult = studentDeferred.await()
+                val statsResult = statsDeferred.await()
+                val progressResult = progressDeferred.await()
+                val natureResult = natureDeferred.await()
+                val semesterResult = semesterDeferred.await()
+                // 会话失效等真实失败必须原样抛出，不能被并发取消掩盖成一句「操作没成功」
+                listOf(studentResult, statsResult, progressResult, natureResult, semesterResult)
+                    .firstOrNull { it.isFailure }?.exceptionOrNull()?.let { throw it }
+
+                val studentJson = studentResult.getOrThrow()
+                val statsJson = statsResult.getOrThrow()
+                val progressJson = progressResult.getOrThrow()
+                val natureJson = natureResult.getOrThrow()
+                val semesterJson = semesterResult.getOrThrow()
                 val gradesJson = gradesDeferred.await()
                 val pyfaJson = pyfaDeferred.await()
 
@@ -993,35 +988,22 @@ class WbuQueryClient(
      * WebVPN 门禁（TWFID）失效时，代理网关会把 OPAC 请求接管并重定向到门户登录页，
      * 跟随重定向后得到的是 **HTTP 200 + 门户 HTML**：既没有 `login` 关键字也没有数据表格。
      * 旧逻辑只判断 Location 是否含 `login`，于是门户页被当成读者页面解析，界面显示成
-     * 「当前暂无在借图书」这种误导性的空数据。以下三个工具用于把「门禁接管」与「真的没有数据」区分开。
+     * 「当前暂无在借图书」这种误导性的空数据。判据统一收敛在 [WbuFailureDetector]。
      */
-    private fun isWebVpnGatewayHost(host: String): Boolean =
-        host.equals(WEBVPN_GATEWAY_HOST, ignoreCase = true)
-
-    /** 判断某个完整 URL 是否指向 WebVPN 门户本身（代理子域如 `opac-xxx.webvpn.wbu.edu.cn` 不算）。 */
-    private fun isWebVpnGatewayUrl(url: String?): Boolean =
-        !url.isNullOrBlank() && isWebVpnGatewayHost(url.toHttpUrlOrNull()?.host.orEmpty())
 
     /**
      * 校验图书馆响应确实来自 OPAC 读者页面：非 200、存在重定向、或最终落在 WebVPN 门户上，
      * 都视为会话已失效并抛出 [WbuSessionExpiredException]，交由上层引导重新登录。
      */
     private fun Response.requireOpacPage() {
-        val location = header("Location").orEmpty()
-        if (code != 200 || location.isNotBlank()) {
-            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_library))
+        val location = header("Location")
+        if (code != 200 || !location.isNullOrBlank()) {
+            throw WbuSessionExpiredException(AccessLayer.Service)
         }
-        if (isWebVpnGatewayHost(request.url.host)) {
-            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
+        if (WbuFailureDetector.isGatewayHost(request.url.host)) {
+            throw WbuSessionExpiredException(AccessLayer.WebVpnPortal)
         }
     }
-
-    /**
-     * 响应体兜底识别：完全解析不出表格时，若页面带有 WebVPN 门户特征，说明是被门禁接管而非「无数据」。
-     * 仅在本来要返回空列表的分支调用，避免误伤正常的空数据页面。
-     */
-    private fun String.looksLikeWebVpnPortal(): Boolean =
-        contains("redirect_uri=", ignoreCase = true) || contains("login_psw.csp", ignoreCase = true)
 
     /**
      * 确保持有有效的 OPAC 会话 (PHPSESSID)
@@ -1041,7 +1023,7 @@ class WbuQueryClient(
                 manualClient.newCall(testReq).execute().use { resp ->
                     resp.code == 200 &&
                         resp.header("Location").orEmpty().isBlank() &&
-                        !isWebVpnGatewayHost(resp.request.url.host)
+                        !WbuFailureDetector.isGatewayHost(resp.request.url.host)
                 }
             }.getOrDefault(false)
 
@@ -1052,7 +1034,7 @@ class WbuQueryClient(
         val tgcCookie = transport.cookieStore.find { it.name == "CASTGC" && !it.value.isBlank() }
         if (tgcCookie == null) {
             Log.w("WbuQueryClient", "No CASTGC found in cookie store for OPAC authentication")
-            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_unified_auth))
+            throw WbuSessionExpiredException(AccessLayer.UnifiedAuth)
         }
 
         // 1. 请求 CAS 获取重定向到 OPAC 的 ST ticket
@@ -1075,7 +1057,7 @@ class WbuQueryClient(
 
         if (location.isNullOrBlank() || !location.contains("ticket=")) {
             Log.w("WbuQueryClient", "CAS failed to grant ST ticket for OPAC; redirect location=$location")
-            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_ticket))
+            throw WbuSessionExpiredException(AccessLayer.UnifiedAuth)
         }
 
         // 2. 将 CAS 回跳的目标地址映射到当前网络通道（WebVPN 下重写为代理子域以穿透校外网关）
@@ -1106,9 +1088,9 @@ class WbuQueryClient(
             // WebVPN 门禁失效时，代理网关会把 ST 核销请求拦到门户登录页（不再下发新的 PHPSESSID）。
             // 此时若沿用 Cookie 库里残留的旧 PHPSESSID，后续查询只会拿到门户 HTML，
             // 最终被解析成「0 本在借」，因此这里直接判定门禁失效。
-            if (isWebVpnGatewayHost(resp.request.url.host) || isWebVpnGatewayUrl(nextLocation)) {
+            if (WbuFailureDetector.isGatewayHost(resp.request.url.host) || WbuFailureDetector.isGatewayUrl(nextLocation)) {
                 Log.w("WbuQueryClient", "OPAC ticket exchange intercepted by WebVPN gateway: $nextLocation")
-                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
+                throw WbuSessionExpiredException(AccessLayer.WebVpnPortal)
             }
         }
 
@@ -1144,9 +1126,9 @@ class WbuQueryClient(
 
             if (hopCode in 300..399 && !hopLoc.isNullOrBlank()) {
                 currentHopUrl = transport.resolveAbsoluteUrl(opacBaseUrl, hopLoc)
-                if (isWebVpnGatewayUrl(currentHopUrl)) {
+                if (WbuFailureDetector.isGatewayUrl(currentHopUrl)) {
                     Log.w("WbuQueryClient", "OPAC landing hop intercepted by WebVPN gateway: $currentHopUrl")
-                    throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
+                    throw WbuSessionExpiredException(AccessLayer.WebVpnPortal)
                 }
             } else {
                 break
@@ -1233,8 +1215,8 @@ class WbuQueryClient(
 
         val doc = Jsoup.parse(html)
         val table = doc.selectFirst("table") ?: run {
-            if (html.looksLikeWebVpnPortal()) {
-                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
+            if (WbuFailureDetector.looksLikeWebVpnPortal(html)) {
+                throw WbuSessionExpiredException(AccessLayer.WebVpnPortal)
             }
             return@withContext emptyList()
         }
@@ -1334,8 +1316,8 @@ class WbuQueryClient(
 
         val doc = Jsoup.parse(html)
         val table = doc.selectFirst("table") ?: run {
-            if (html.looksLikeWebVpnPortal()) {
-                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
+            if (WbuFailureDetector.looksLikeWebVpnPortal(html)) {
+                throw WbuSessionExpiredException(AccessLayer.WebVpnPortal)
             }
             return@withContext emptyList()
         }
@@ -1481,19 +1463,30 @@ class WbuQueryClient(
      * 聚合查询图书馆仪表盘全部数据（读者概况 + 当前在借 + 借阅历史）
      */
     suspend fun queryLibraryDashboard(): LibraryDashboardData = withContext(Dispatchers.IO) {
-        kotlinx.coroutines.coroutineScope {
-            val profileDeferred = async { queryReaderProfile() }
-            val currentDeferred = async { queryCurrentBorrows() }
-            val historyDeferred = async { queryBorrowHistory(all = true) }
+        // 先统一确保一次 OPAC 会话：
+        // ① 会话失效 / 门禁被接管时，真实异常在这一步就抛出，不会被并发子协程的取消掩盖成
+        //    CancellationException（那会让上层只剩一句含糊的「操作没成功」）；
+        // ② 也避免三个并发查询各换一张 CAS 票据。
+        ensureOpacSession()
 
-            val profile = profileDeferred.await()
-            val current = currentDeferred.await()
-            val history = historyDeferred.await()
+        // 每个子任务各自兜住结果，最后按顺序抛出第一个真实失败
+        kotlinx.coroutines.supervisorScope {
+            val profileDeferred = async { runCatching { queryReaderProfile() } }
+            val currentDeferred = async { runCatching { queryCurrentBorrows() } }
+            val historyDeferred = async { runCatching { queryBorrowHistory(all = true) } }
+
+            val profileResult = profileDeferred.await()
+            val currentResult = currentDeferred.await()
+            val historyResult = historyDeferred.await()
+
+            profileResult.exceptionOrNull()?.let { throw it }
+            currentResult.exceptionOrNull()?.let { throw it }
+            historyResult.exceptionOrNull()?.let { throw it }
 
             LibraryDashboardData(
-                profile = profile,
-                currentBorrows = current,
-                historyBorrows = history
+                profile = profileResult.getOrThrow(),
+                currentBorrows = currentResult.getOrThrow(),
+                historyBorrows = historyResult.getOrThrow()
             )
         }
     }

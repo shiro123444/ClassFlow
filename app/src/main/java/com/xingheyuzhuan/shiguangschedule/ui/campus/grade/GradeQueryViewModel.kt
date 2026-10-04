@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
 
 data class GradeUiState(
     val isLoading: Boolean = false,
@@ -99,7 +100,7 @@ class GradeQueryViewModel @Inject constructor(
                         it.copy(
                             isLoading = false,
                             needLogin = isSessionExpired,
-                            errorMessage = err.message ?: context.getString(R.string.err_get_grades_failed)
+                            errorMessage = accessFailureText(context, err) ?: context.getString(R.string.err_get_grades_failed)
                         )
                     }
                 }

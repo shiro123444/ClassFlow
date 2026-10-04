@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
 
 enum class LibraryTab {
     CURRENT_BORROW,
@@ -107,7 +108,8 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                     it.copy(
                         isLoading = false,
                         isRefreshing = false,
-                        errorMessage = e.message ?: getApplication<Application>().getString(R.string.err_load_library_failed),
+                        errorMessage = accessFailureText(getApplication(), e)
+                            ?: getApplication<Application>().getString(R.string.err_load_library_failed),
                         isSessionExpired = isExpired
                     )
                 }
@@ -144,7 +146,10 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isRenewing = false, renewingBarcode = null) }
-                _toastEvent.emit(e.message ?: getApplication<Application>().getString(R.string.err_renew_failed))
+                _toastEvent.emit(
+                    accessFailureText(getApplication(), e)
+                        ?: getApplication<Application>().getString(R.string.err_renew_failed)
+                )
             }
         }
     }
@@ -198,7 +203,12 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 _uiState.update { it.copy(isLoadingBookDetail = false, selectedBookDetail = detail) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoadingBookDetail = false) }
-                _toastEvent.emit(getApplication<Application>().getString(R.string.format_err_book_detail, e.message ?: ""))
+                _toastEvent.emit(
+                    getApplication<Application>().getString(
+                        R.string.format_err_book_detail,
+                        accessFailureText(getApplication(), e) ?: ""
+                    )
+                )
             }
         }
     }

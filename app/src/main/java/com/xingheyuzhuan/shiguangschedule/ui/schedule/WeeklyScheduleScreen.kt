@@ -115,6 +115,7 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
+import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
 
 /**
  * 无限时间轴的中值锚点。
@@ -1000,7 +1001,8 @@ fun WeeklyScheduleScreen(
                         performCourseImportPipeline(engine, sid)
                     } catch (e: Exception) {
                         Log.e("WbuSync", "同步发生错误", e)
-                        wbuError = appContext.getString(R.string.format_err_sync_error, e.message ?: "")
+                        wbuError = accessFailureText(appContext, e)
+                            ?: appContext.getString(R.string.format_err_sync_error, e.message ?: "")
                     } finally {
                         isWbuSyncing = false
                     }
@@ -1079,7 +1081,14 @@ fun WeeklyScheduleScreen(
                                 if (!tunnelOk) {
                                     isWbuSyncing = false
                                     wbuSyncStatus = ""
-                                    wbuError = appContext.getString(R.string.err_webvpn_connect_failed)
+                                    // 结构化原因优先：用户取消输入 → 空文案（不报错），
+                                    // 其余情况同理给出「连不上 WebVPN / WebVPN 登录状态已过期」这类可执行提示
+                                    val tunnelFailure = engine.lastFailure
+                                    wbuError = if (tunnelFailure == null) {
+                                        appContext.getString(R.string.err_webvpn_connect_failed)
+                                    } else {
+                                        accessFailureText(appContext, tunnelFailure).orEmpty()
+                                    }
                                     return@launch
                                 }
                             }
@@ -1090,7 +1099,8 @@ fun WeeklyScheduleScreen(
                             }
                         } catch (e: Exception) {
                             Log.e("WbuSync", "已有凭据同步错误", e)
-                            wbuError = appContext.getString(R.string.format_err_sync_error, e.message ?: "")
+                            wbuError = accessFailureText(appContext, e)
+                            ?: appContext.getString(R.string.format_err_sync_error, e.message ?: "")
                         } finally {
                             isWbuSyncing = false
                         }

@@ -149,11 +149,13 @@ sealed class DynamicCodeSendResult {
 }
 
 /**
- * 动态码登录结果。失败时 [message] 尽可能给出服务端真实文案。
+ * 动态码登录结果。失败时优先看 [failure]（结构化原因，UI 据此渲染文案），
+ * [message] 仅作为「没有结构化原因」时的服务端原话兜底。
  */
 data class DynamicCodeLoginResult(
     val success: Boolean,
-    val message: String = ""
+    val message: String = "",
+    val failure: AccessFailure? = null
 )
 
 /**
@@ -203,22 +205,33 @@ class WbuSyncEngine(
     var lastResolvedStudentId: String? = null
 
     /**
-     * 最近一次教务系统直连/镜像表单登录的失败原因（供 UI 判断）。
+     * 最近一次访问/登录失败的**结构化原因**（成功时为 null）。
+     *
+     * 这里不再用 `lastLocalLoginError: String?` / `lastLocalLoginNetworkError: Boolean` 这类散落字段：
+     * 它们依赖每个失败分支「记得」写原因，漏掉任何一处 `return false`，UI 就只剩一句看不懂的兜底
+     * 文案（典型事故：用户取消短信验证码，界面却提示「请检查账号密码或校外VPN开关」）。
+     * 现在所有失败分支统一经 [fail] 返回，原因由类型强制携带，文案由 UI 层从 strings.xml 渲染。
      */
     @Volatile
-    var lastLocalLoginFailure: LocalLoginFailure? = null
+    var lastFailure: AccessFailure? = null
 
-    /**
-     * 教务系统直连/镜像表单登录失败时，从服务端返回页提取的真实错误文案。成功时为 null。
-     */
-    @Volatile
-    var lastLocalLoginError: String? = null
+    /** 统一失败出口：记录结构化原因并返回 false。 */
+    private fun fail(failure: AccessFailure): Boolean {
+        lastFailure = failure
+        return false
+    }
 
-    /**
-     * 教务系统直连/镜像登录是否因**网络异常**而失败。
-     */
-    @Volatile
-    var lastLocalLoginNetworkError: Boolean = false
+    /** CAS/IDS 登录失败 → 结构化原因（滑块验证码单独标记，供 UI 切到验证通道）。 */
+    private fun casFailure(result: CasPasswordLoginResult, layer: AccessLayer): AccessFailure =
+        when (result.failure) {
+            LocalLoginFailure.CAPTCHA -> AccessFailure.CredentialRejected(layer, CredentialKind.Captcha)
+            LocalLoginFailure.CREDENTIALS ->
+                AccessFailure.CredentialRejected(layer, CredentialKind.Unknown, result.message)
+        }
+
+    /** WebVPN 门户密码登录被拒 → 结构化原因。 */
+    private fun portalFailure(message: String?): AccessFailure =
+        AccessFailure.CredentialRejected(AccessLayer.WebVpnPortal, CredentialKind.Password, message)
 
     /**
      * WebVPN TLS 证书校验异常回调（转发到共享 transport）。
@@ -277,7 +290,7 @@ class WbuSyncEngine(
         captchaProvider: SliderCaptchaProvider? = null,
         authMode: WbuAuthMode = WbuAuthMode.UNIFIED_CAS
     ): Boolean = withContext(Dispatchers.IO) {
-        lastLocalLoginNetworkError = false
+        lastFailure = null
         // 每次启动全新登录前，清理旧的历史会话凭据（保留手动 TWFID），确保必须重新认证一次且不受残留干扰
         transport.startNewLoginSession()
         try {
@@ -297,8 +310,7 @@ class WbuSyncEngine(
             return@withContext success
         } catch (e: Exception) {
             Log.e("WbuSyncEngine", "Login failed", e)
-            lastLocalLoginNetworkError = true
-            false
+            fail(WbuFailureDetector.fromThrowable(e, if (useVpn) AccessLayer.WebVpnPortal else AccessLayer.CampusDirect))
         }
     }
 
@@ -348,7 +360,7 @@ class WbuSyncEngine(
         smsCodeProvider: (suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?)?,
         captchaProvider: SliderCaptchaProvider?
     ): Boolean = withContext(Dispatchers.IO) {
-        lastLocalLoginNetworkError = false
+        lastFailure = null
         try {
             // 只重置统一认证会话：既有教务/图书馆会话不受影响
             transport.startNewUnifiedAuthLoginSession()
@@ -374,11 +386,7 @@ class WbuSyncEngine(
                 clearAuthCookies = true,
                 consumeTicket = false
             )
-            if (!result.success) {
-                lastLocalLoginFailure = result.failure
-                lastLocalLoginError = result.message
-                return@withContext false
-            }
+            if (!result.success) return@withContext fail(casFailure(result, AccessLayer.UnifiedAuth))
 
             val castgcReady = cookieStore.any { it.name == "CASTGC" && !it.value.isBlank() }
             if (castgcReady) {
@@ -387,13 +395,12 @@ class WbuSyncEngine(
                     .apply()
                 transport.persistCookieStore()
             } else {
-                lastLocalLoginError = "登录成功但统一认证会话未就绪"
+                lastFailure = AccessFailure.Unexpected(AccessLayer.UnifiedAuth, "CASTGC missing after login")
             }
             castgcReady
         } catch (e: Exception) {
             Log.e("WbuSyncEngine", "$flowTag 仅登录统一认证失败", e)
-            lastLocalLoginNetworkError = true
-            false
+            fail(WbuFailureDetector.fromThrowable(e, AccessLayer.UnifiedAuth))
         }
     }
 
@@ -449,8 +456,7 @@ class WbuSyncEngine(
         // 2. 无有效 TWFID，直接弹窗请求密码
         val vpnPassword = vpnPasswordProvider()
         if (vpnPassword.isNullOrBlank()) {
-            lastLocalLoginError = "已取消 WebVPN 密码输入"
-            return@withContext false
+            return@withContext fail(AccessFailure.Cancelled)
         }
 
         val effectiveSid = studentId.ifBlank { lastResolvedStudentId ?: getSavedStudentId(context) }
@@ -458,22 +464,23 @@ class WbuSyncEngine(
         when (portalStep) {
             is PortalLoginStep.Error -> {
                 Log.w("WbuSyncEngine", "WebVPN portal login failed: ${portalStep.message}")
-                lastLocalLoginError = "WebVPN 登录失败: ${portalStep.message}"
+                lastFailure = portalFailure(portalStep.message)
                 false
             }
             is PortalLoginStep.SmsRequired -> {
                 if (smsCodeProvider == null) {
-                    lastLocalLoginError = "WebVPN 需要短信验证码"
-                    return@withContext false
+                    return@withContext fail(
+                        AccessFailure.Unexpected(AccessLayer.WebVpnPortal, "sms provider missing")
+                    )
                 }
                 val code = smsCodeProvider(portalStep.maskedPhone, portalStep.isStillValid, portalStep.sendInterval, portalStep.promptText)
                 if (code.isNullOrBlank()) {
-                    lastLocalLoginError = "已取消 WebVPN 短信验证码输入"
-                    return@withContext false
+                    return@withContext fail(AccessFailure.Cancelled)
                 }
                 if (!portal.portalSubmitSms(code)) {
-                    lastLocalLoginError = "WebVPN 短信验证码错误"
-                    return@withContext false
+                    return@withContext fail(
+                        AccessFailure.CredentialRejected(AccessLayer.WebVpnPortal, CredentialKind.SmsCode)
+                    )
                 }
                 persistCurrentTwfid()
                 true
@@ -497,8 +504,7 @@ class WbuSyncEngine(
         smsCodeProvider: suspend (maskedPhone: String, isStillValid: Boolean, sendInterval: Int, promptText: String) -> String?,
         captchaProvider: SliderCaptchaProvider? = null
     ): Boolean = withContext(Dispatchers.IO) {
-        lastLocalLoginNetworkError = false
-        lastLocalLoginError = null
+        lastFailure = null
 
         val existingTwfid = transport.currentTwfid().trim().ifEmpty {
             cookieStore.firstOrNull { it.name == "TWFID" && it.value.isNotBlank() }?.value.orEmpty()
@@ -523,7 +529,7 @@ class WbuSyncEngine(
         val portalStep = portal.portalPasswordLogin(portalUsername, password, portalCaptchaProvider)
         val authenticated = when (portalStep) {
             is PortalLoginStep.Error -> {
-                lastLocalLoginError = "WebVPN 登录失败: ${portalStep.message}"
+                lastFailure = portalFailure(portalStep.message)
                 false
             }
             is PortalLoginStep.PortalAuthenticated -> true
@@ -536,11 +542,14 @@ class WbuSyncEngine(
                 )
                 when {
                     code.isNullOrBlank() -> {
-                        lastLocalLoginError = "已取消 WebVPN 短信验证码输入"
+                        lastFailure = AccessFailure.Cancelled
                         false
                     }
                     !portal.portalSubmitSms(code) -> {
-                        lastLocalLoginError = "WebVPN 短信验证码错误"
+                        lastFailure = AccessFailure.CredentialRejected(
+                            AccessLayer.WebVpnPortal,
+                            CredentialKind.SmsCode
+                        )
                         false
                     }
                     else -> true
@@ -589,9 +598,7 @@ class WbuSyncEngine(
         )
         if (!casResult.success) {
             Log.w("WbuSyncEngine", "$flowTag CASTGC 换票失败: ${casResult.message}")
-            lastLocalLoginFailure = casResult.failure
-            lastLocalLoginError = casResult.message
-            return@withContext false
+            return@withContext fail(casFailure(casResult, AccessLayer.UnifiedAuth))
         }
         bootstrapJwxtSession(casResult.landingHtml)
     }
@@ -663,12 +670,19 @@ class WbuSyncEngine(
                 if (vpnPasswordProvider != null) {
                     val vpnReady = ensureVpnTunnelReady(studentId, vpnPasswordProvider, smsCodeProvider)
                     if (!vpnReady) {
-                        return@withContext DynamicCodeLoginResult(false, lastLocalLoginError ?: "WebVPN 门禁连接失败")
+                        return@withContext DynamicCodeLoginResult(
+                            success = false,
+                            failure = lastFailure ?: AccessFailure.Unexpected(AccessLayer.WebVpnPortal, "gateway")
+                        )
                     }
                 }
                 // WebVPN 网关打通后，凭新鲜的 CASTGC 请求 jwxt service 换票并建立教务会话
                 val exchangeOk = exchangeCastgcForJwxtSession("$flowTag-EXCHANGE")
-                DynamicCodeLoginResult(exchangeOk, if (exchangeOk) "" else (lastLocalLoginError ?: "换取教务会话失败"))
+                DynamicCodeLoginResult(
+                    success = exchangeOk,
+                    message = if (exchangeOk) "" else "换取教务会话失败",
+                    failure = if (exchangeOk) null else lastFailure
+                )
             } else {
                 val boot = bootstrapJwxtSession(result.landingHtml)
                 DynamicCodeLoginResult(boot, if (boot) "" else "登录成功但教务系统会话未就绪")
@@ -827,16 +841,21 @@ class WbuSyncEngine(
         when (portalStep) {
             is PortalLoginStep.Error -> {
                 Log.w("WbuSyncEngine", "VPN login error: ${portalStep.message}")
-                lastLocalLoginError = "WebVPN登录失败: ${portalStep.message}"
-                return false
+                return fail(portalFailure(portalStep.message))
             }
             is PortalLoginStep.SmsRequired -> {
                 statusCallback?.invoke(VpnFullLoginStatus.SMS_REQUIRED)
-                val code = smsCodeProvider(portalStep.maskedPhone, portalStep.isStillValid, portalStep.sendInterval, portalStep.promptText) ?: return false
+                val code = smsCodeProvider(
+                    portalStep.maskedPhone,
+                    portalStep.isStillValid,
+                    portalStep.sendInterval,
+                    portalStep.promptText
+                ) ?: return fail(AccessFailure.Cancelled)
                 if (!portal.portalSubmitSms(code)) {
                     Log.w("WbuSyncEngine", "SMS code verification failed")
-                    lastLocalLoginError = "WebVPN 短信验证码错误"
-                    return false
+                    return fail(
+                        AccessFailure.CredentialRejected(AccessLayer.WebVpnPortal, CredentialKind.SmsCode)
+                    )
                 }
                 statusCallback?.invoke(VpnFullLoginStatus.SMS_VERIFIED)
             }
@@ -894,8 +913,7 @@ class WbuSyncEngine(
             }
         } else {
             Log.w("WbuSyncEngine", "Pre-IDS authentication failed: ${casResult.message}")
-            lastLocalLoginFailure = casResult.failure
-            lastLocalLoginError = casResult.message
+            lastFailure = casFailure(casResult, AccessLayer.UnifiedAuth)
             return null
         }
     }
@@ -1019,17 +1037,12 @@ class WbuSyncEngine(
         captchaProvider: SliderCaptchaProvider? = null
     ): Boolean {
         clearJwxtSessionCookies()
-        lastLocalLoginFailure = null
-        lastLocalLoginError = null
+        lastFailure = null
 
         // 如果 cookieStore 中已有有效 CASTGC，无需清空已有的认证凭据，直接利用 SSO 换票
         val hasTgc = cookieStore.any { it.name == "CASTGC" && !it.value.isBlank() }
         val result = cas.casPasswordLogin(studentId, password, idsLoginUrl, flowTag, captchaProvider, clearAuthCookies = !hasTgc)
-        if (!result.success) {
-            lastLocalLoginFailure = result.failure
-            lastLocalLoginError = result.message
-            return false
-        }
+        if (!result.success) return fail(casFailure(result, AccessLayer.UnifiedAuth))
         return bootstrapJwxtSession(result.landingHtml)
     }
 
@@ -1040,9 +1053,7 @@ class WbuSyncEngine(
         password: String
     ): Boolean {
         clearJwxtSessionCookies()
-        lastLocalLoginFailure = null
-        lastLocalLoginError = null
-        lastLocalLoginNetworkError = false
+        lastFailure = null
         try {
             val loginPageReq = Request.Builder()
                 .url("$baseUrl/admin/login")
@@ -1078,11 +1089,14 @@ class WbuSyncEngine(
                 if (!success) {
                     Log.d("WbuSyncEngine", "Legacy login response URL=$finalUrl")
                     Log.d("WbuSyncEngine", "Legacy login response body snippet=${postRespString.take(500)}")
-                    lastLocalLoginFailure = if (finalUrl.contains("jcaptchaError")) {
-                        LocalLoginFailure.CAPTCHA
+                    lastFailure = if (finalUrl.contains("jcaptchaError")) {
+                        AccessFailure.CredentialRejected(AccessLayer.CampusDirect, CredentialKind.Captcha)
                     } else {
-                        lastLocalLoginError = extractLoginErrorMessage(postRespString)
-                        LocalLoginFailure.CREDENTIALS
+                        AccessFailure.CredentialRejected(
+                            AccessLayer.CampusDirect,
+                            CredentialKind.Unknown,
+                            extractLoginErrorMessage(postRespString)
+                        )
                     }
                     return false
                 }
@@ -1092,8 +1106,7 @@ class WbuSyncEngine(
             }
         } catch (e: Exception) {
             Log.w("WbuSyncEngine", "Legacy login network error", e)
-            lastLocalLoginNetworkError = true
-            return false
+            return fail(WbuFailureDetector.fromThrowable(e, AccessLayer.CampusDirect))
         }
     }
 

@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
 
 /**
  * 视图类型：按学期推进 vs 按课程性质分类
@@ -153,7 +154,8 @@ class AcademicProgressViewModel @Inject constructor(
                     it.copy(
                         isLoading = false,
                         isRefreshing = false,
-                            errorMessage = err.message ?: getApplication<Application>().getString(R.string.err_load_academic_progress_failed),
+                            errorMessage = accessFailureText(getApplication(), err)
+                                ?: getApplication<Application>().getString(R.string.err_load_academic_progress_failed),
                         needLogin = isExpired
                     )
                 }

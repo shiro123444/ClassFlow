@@ -44,10 +44,11 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.CredentialKind
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AuthForm
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.DynamicCodeSendResult
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.IdsCasClient
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.LocalLoginFailure
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.QrStatus
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaData
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaResult
@@ -71,6 +72,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
 
 /**
  * 校园服务（成绩、空教室、学业进程）通用登录 Sheet。
@@ -798,30 +800,27 @@ fun WbuCampusAuthSheet(
                         onLoginSuccess()
                         if (dismissOnSuccess) onDismiss()
                     } else {
-                        val realErr = engine.lastLocalLoginError?.takeIf { it.isNotBlank() }
-                        if (engine.lastLocalLoginFailure == LocalLoginFailure.CAPTCHA && onCaptchaFallback != null) {
+                        // 失败原因完全由引擎的结构化结果给出：这里只做「原因 → 文案」渲染，
+                        // 不再用 UI 自己的开关状态（useVpn）去反推原因 —— 开关开着不等于门禁有效。
+                        val failure = engine.lastFailure
+                        if (failure is AccessFailure.CredentialRejected &&
+                            failure.kind == CredentialKind.Captcha &&
+                            onCaptchaFallback != null
+                        ) {
                             onCaptchaFallback.invoke(sid, pwd, useVpn)
                             onDismiss()
                         } else {
-                            errorMessage = when {
-                                engine.lastLocalLoginNetworkError && useVpn ->
-                                    context.getString(R.string.err_webvpn_connect_failed)
-
-                                // 仅登录统一认证的直连不依赖校园网，不能提示「请确认已连接校园网」
-                                engine.lastLocalLoginNetworkError && unifiedAuthOnly ->
-                                    context.getString(R.string.err_unified_auth_direct_failed)
-
-                                engine.lastLocalLoginNetworkError ->
-                                    context.getString(R.string.err_campus_direct_failed)
-
-                                realErr != null -> realErr
-                                else -> context.getString(R.string.error_login_unsuccessful)
+                            errorMessage = when (failure) {
+                                null -> context.getString(R.string.error_login_unsuccessful)
+                                // 用户主动取消（如关掉验证码弹窗）时 accessFailureText 返回 null → 不报错
+                                else -> accessFailureText(context, failure).orEmpty()
                             }
                         }
                     }
                 } catch (e: Exception) {
                     isLoading = false
-                    errorMessage = e.message ?: context.getString(R.string.error_login_generic_retry)
+                    errorMessage = accessFailureText(context, e)
+                        ?: context.getString(R.string.error_login_generic_retry)
                 }
             }
         },
@@ -872,11 +871,13 @@ fun WbuCampusAuthSheet(
                         onLoginSuccess()
                         if (dismissOnSuccess) onDismiss()
                     } else {
-                        errorMessage = res.message.ifBlank { context.getString(R.string.err_otp_login_failed_short) }
+                        errorMessage = res.failure?.let { accessFailureText(context, it) }
+                            ?: res.message.ifBlank { context.getString(R.string.err_otp_login_failed_short) }
                     }
                 } catch (e: Exception) {
                     isLoading = false
-                    errorMessage = e.message ?: context.getString(R.string.err_dynamic_code_login_failed_short)
+                    errorMessage = accessFailureText(context, e)
+                        ?: context.getString(R.string.err_dynamic_code_login_failed_short)
                 }
             }
         },

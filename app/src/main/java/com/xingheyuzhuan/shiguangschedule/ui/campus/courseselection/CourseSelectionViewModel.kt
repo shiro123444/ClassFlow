@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
 
 /**
  * 教学班可执行操作
@@ -506,8 +507,8 @@ class CourseSelectionViewModel @Inject constructor(
             it.copy(
                 isLoading = false,
                 isRefreshing = false,
-                errorMessage = err.message ?: fallback,
-                opMessage = if (expired) null else (err.message ?: fallback),
+                errorMessage = accessFailureText(getApplication(), err) ?: fallback,
+                opMessage = if (expired) null else (accessFailureText(getApplication(), err) ?: fallback),
                 needLogin = expired
             )
         }
