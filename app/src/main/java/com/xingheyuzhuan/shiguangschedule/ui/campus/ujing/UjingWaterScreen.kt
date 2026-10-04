@@ -57,6 +57,7 @@ import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import com.xingheyuzhuan.shiguangschedule.ui.components.UjingBrandLoading
+import com.xingheyuzhuan.shiguangschedule.ui.components.WbuAuthPromptDialogs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,6 +71,7 @@ fun UjingWaterScreen(
     // 两段品牌动画先后出现反而割裂，只保留 U净 这一段。
     Box(modifier = Modifier.fillMaxSize()) {
         val uiState by viewModel.uiState.collectAsState()
+        val authPrompt by viewModel.authPrompt.collectAsState()
         var lastHandledScanId by rememberSaveable(cd) { mutableStateOf(-1L) }
 
         LaunchedEffect(cd, scanId) {
@@ -177,6 +179,13 @@ fun UjingWaterScreen(
                         tipsScenario = WbuAuthTipsScenario.IDENTITY
                     )
                 }
+
+                // 静默登录缺 WebVPN 密码 / 短信验证码时，先就地补一次，补不上才回落到上面的 Sheet
+                WbuAuthPromptDialogs(
+                    request = authPrompt,
+                    onSubmit = viewModel::submitAuthPrompt,
+                    onResendSmsCode = viewModel::resendVpnSmsCode
+                )
             }
         }
     }

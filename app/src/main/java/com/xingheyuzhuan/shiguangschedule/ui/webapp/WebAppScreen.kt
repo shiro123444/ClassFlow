@@ -106,6 +106,7 @@ import com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
+import com.xingheyuzhuan.shiguangschedule.ui.components.WbuAuthPromptDialogs
 import com.xingheyuzhuan.shiguangschedule.ui.campus.qrscan.QrScannerOverlay
 import com.xingheyuzhuan.shiguangschedule.ui.components.UjingBrandLoading
 import com.xingheyuzhuan.shiguangschedule.ui.components.WbuLoadingPlaceholder
@@ -338,6 +339,7 @@ fun WebAppScreen(
         val context = LocalContext.current
         val coroutineScope = rememberCoroutineScope()
         val uiState by viewModel.uiState.collectAsState()
+        val authPrompt by viewModel.authPrompt.collectAsState()
 
         var showAuthSheet by remember { mutableStateOf(false) }
         var sslErrorState by remember { mutableStateOf<Pair<SslErrorHandler, SslError>?>(null) }
@@ -468,6 +470,13 @@ fun WebAppScreen(
                 onNavigateToAccount = { navBridge.navigate(Destination.CredentialManagement) }
             )
         }
+
+        // 静默登录缺 WebVPN 密码 / 短信验证码时，先就地补一次，补不上才回落到上面的 Sheet
+        WbuAuthPromptDialogs(
+            request = authPrompt,
+            onSubmit = viewModel::submitAuthPrompt,
+            onResendSmsCode = viewModel::resendVpnSmsCode
+        )
 
         // 拦截返回键：主页退出或历史回退
         BackHandler {

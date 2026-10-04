@@ -85,6 +85,11 @@
                 <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/w/" />
                 <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/wm/" />
                 <data android:scheme="https" android:host="${ujingNfcHost}" android:pathPrefix="/hd/" />
+                <!-- hub host 同时也是设备直达站点（同一份落地页、同一套 /w/ /wm/ /hd/ 伪静态），
+                     设备码 / 下载页（/w/download）在这两个 host 上都应能进 App -->
+                <data android:scheme="https" android:host="${linkHubHost}" android:pathPrefix="/w/" />
+                <data android:scheme="https" android:host="${linkHubHost}" android:pathPrefix="/wm/" />
+                <data android:scheme="https" android:host="${linkHubHost}" android:pathPrefix="/hd/" />
                 <!-- 通用链接节点（服务端短码 / 内嵌载荷），域名来自 CLASSFLOW_LINK_HUB_HOST -->
                 <data android:scheme="https" android:host="${linkHubHost}" android:pathPrefix="/url/" />
                 <data android:scheme="https" android:host="${linkHubHost}" android:pathPrefix="/u/" />
@@ -101,7 +106,7 @@
             </intent-filter>
 
             <!--
-              通用链接节点 DeepLink 直达入口 (VIEW: /url/、短别名 /u/)。
+              通用链接节点与 hub 站设备直达入口 (VIEW: /url/、短别名 /u/，以及 hub 站同时提供的 /w/ /wm/ /hd/)。
               单独一个 filter：域名验证是按 host 逐个进行的，与 U净 host 分开写，
               某个 host 的 assetlinks.json 出问题不会牵连另一个。
               该 host 的 .well-known/assetlinks.json 已包含 com.shiro.classflow 与 .dev 两个包名。
@@ -116,6 +121,17 @@
                 <data android:scheme="https" />
                 <data android:host="${linkHubHost}" />
                 <data android:pathPrefix="/u/" />
+                <!-- hub 站的设备/下载命名空间：落地页上「打开 ClassFlow」按钮发的 intent://
+                     也要能命中，否则浏览器只能退回落地页（表现为「点了没反应」） -->
+                <data android:scheme="https" />
+                <data android:host="${linkHubHost}" />
+                <data android:pathPrefix="/w/" />
+                <data android:scheme="https" />
+                <data android:host="${linkHubHost}" />
+                <data android:pathPrefix="/wm/" />
+                <data android:scheme="https" />
+                <data android:host="${linkHubHost}" />
+                <data android:pathPrefix="/hd/" />
             </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"

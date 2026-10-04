@@ -17,7 +17,7 @@
 入口三条，最终都进入 App 的节点确认页：
 
 1. **NFC 触碰**：标签写 `NDEF URI 记录`；App 在后台由 `NDEF_DISCOVERED` 过滤器接住，在前台由 `enableForegroundDispatch` 接住（不要求 `assetlinks.json`）。
-2. **外部链接（VIEW）**：已声明 hub host 的 `autoVerify` 过滤器（`/url/`、`/u/`），与 U净 host 分成两个 filter（域名验证按 host 逐个进行，互不牵连）；该 host 的 `.well-known/assetlinks.json` 含 `com.shiro.classflow` 与 `com.shiro.classflow.dev`，真机 `pm get-app-links` 显示该 host 为 `verified`：**直接导航**到该链接（系统浏览器地址栏、聊天软件点链接、扫码）能进 App。dev 与 prod 同时安装时，系统按惯例可能弹一次选择器。
+2. **外部链接（VIEW）**：hub host 的 `autoVerify` 过滤器注册 `/url/`、`/u/`（通用节点）与 `/w/`、`/wm/`、`/hd/`（hub 站同时也是设备直达站点，下载页 `/w/download` 就在这儿）；U净 host 单独一个 filter 注册 `/w/`、`/wm/`、`/hd/`（域名验证按 host 逐个进行，互不牵连）。两个 host 的 `.well-known/assetlinks.json` 都含 `com.shiro.classflow` 与 `com.shiro.classflow.dev`，真机 `pm get-app-links` 显示均为 `verified`：**直接导航**到这些链接（系统浏览器地址栏、聊天软件点链接、扫码）能进 App。dev 与 prod 同时安装时，系统按惯例可能弹一次选择器。
    ⚠️ 但落地页上的按钮**不能只靠 App Links**：落地页与深链同在 hub 域下，Chrome 不会把**同域**导航交给系统（详见 §6.1），所以落地页在用户点击时改用 `intent://` 显式唤起。
 3. **App 内扫一扫**：相机或相册选图解码后走同一套路由。
 
@@ -191,14 +191,15 @@ intent://<host><path>[#载荷]#Intent;scheme=https;action=android.intent.action.
 | 要点 | 说明 |
 |---|---|
 | 必须由**用户手势**触发 | 页面加载时自动 `location.href = 'intent://…'` 会被 Chrome 判成 `ERR_UNKNOWN_URL_SCHEME`；放进 `<a href>`（点击）就正常 |
+| 仍要被 intent-filter 命中 | `intent://` 只是「显式唤起」，系统依旧按 `ACTION_VIEW` + https data 解析：路径没在清单里注册（例如 `/w/`、`/wm/`、`/hd/` 一度只注册在 U净 host）就会解析失败，浏览器只能退回 `browser_fallback_url` —— 表现同样是「点了没反应」。hub host 现已把 `/url/`、`/u/`、`/w/`、`/wm/`、`/hd/` 一起注册（`/plugin/` 没有 App 路由，落地页对它不给深链） |
 | 载荷写在 `#` 后面 | `Intent.parseUri` 以**最后一个** `#` 分隔 intent 规格，所以 `intent://<hub>/u/#Emhp#Intent;…;end` 送到 App 的数据就是 `https://<hub>/u/#Emhp` |
 | 别把 `#` 编码成 `%23` | `%23` 不会还原成 fragment，App 拿到的载荷会丢（实测 App 只收到 `…/u/%23Emhp`） |
 | 没装 App 时 | `S.browser_fallback_url` 让浏览器退回普通 https 落地页，下载入口在那儿 |
 | 微信 / QQ 内置浏览器 | App Links 与 `intent://` 都被拦，只能提示「右上角 → 在浏览器打开」 |
 | 桌面浏览器 | 保持普通 https 深链（`intent://` 无意义） |
 
-> App 侧无需为这套机制做任何事：`intent://` 送过来的就是一条普通的 `ACTION_VIEW` + `https` data，
-> 与 App Links 到达时的 Intent 完全一致（真机 `dumpsys activity` 核对过 `dat=`）。
+> App 侧要做的只是**把路径注册齐**：`intent://` 送过来的就是一条普通的 `ACTION_VIEW` + `https` data，
+> 与 App Links 到达时的 Intent 完全一致（真机 `dumpsys activity` 核对过 `dat=`），路由逻辑不必区分两者。
 
 ## 7. 安全约束
 
@@ -224,7 +225,8 @@ intent://<host><path>[#载荷]#Intent;scheme=https;action=android.intent.action.
 | NFC / 扫一扫 / 一卡通链接路由进 `Destination.LinkHub` | ✅ 已实现 |
 | 节点确认页 + handler 注册表 | ✅ 已实现（内置 `open`、`text`） |
 | 服务端 JSON 解析（线格式 A，App 侧） | ✅ 已完成：`LinkHubClient` 取信封、按 origin 请求、404/410/网络异常分类与重试、HTML 兜底交内置 WebView |
-| hub host 的 VIEW / `autoVerify` 过滤器 | ✅ 已注册并验证通过（assetlinks.json 含 prod/dev 包名，真机 `pm get-app-links` = verified） |
+| hub host 的 VIEW / `autoVerify` 过滤器 | ✅ 已注册并验证通过：`/url/`、`/u/` + 设备命名空间 `/w/`、`/wm/`、`/hd/`（下载页 `/w/download` 就靠它进 App）；assetlinks.json 含 prod/dev 包名，真机 `pm get-app-links` = verified |
+| 落地页按钮 → App（`intent://`，`web/` 不入库） | ✅ 已实现并在真机（Chrome 151 / Android 16）验证：`/u/{code}` → 节点确认卡片、`/u/#载荷` → 内嵌确认卡片、`/w/download` → 下载入场动画 |
 | 服务端实现 | ✅ 已在私有环境落地（`GET /api/v1/nodes/{code}` 给 App 读；`/url/{code}` 由落地页接管；`POST/PUT/DELETE /api/v1/nodes[/{code}]` 提供创建、改内容、撤销） |
 | URL 生成器（本地小工具，不入库） | ✅ 已实现：本地算内嵌载荷 + 本地渲染二维码 + 与 App 字节自检 |
 | 分享侧（App 内上传换 code、写 NFC 标签） | ⏳ 未开始（服务端写入 API 与生成器页面已可用） |
