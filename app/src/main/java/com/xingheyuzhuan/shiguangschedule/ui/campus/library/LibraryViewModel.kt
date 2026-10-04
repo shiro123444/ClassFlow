@@ -22,6 +22,11 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.needsRelogin
+import com.xingheyuzhuan.shiguangschedule.ui.components.CampusAccessResult
+import com.xingheyuzhuan.shiguangschedule.ui.components.campusAccess
+import com.xingheyuzhuan.shiguangschedule.ui.components.shouldOfferWebVpnOnce
 import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
 
 enum class LibraryTab {
@@ -37,6 +42,8 @@ data class LibraryUiState(
     val searchQuery: String = "",
     val errorMessage: String? = null,
     val isSessionExpired: Boolean = false,
+    /** 是否给用户一个「改用 WebVPN」按钮（单次生效，不翻转全局开关）。 */
+    val offerWebVpnOnce: Boolean = false,
     val isRenewing: Boolean = false,
     val renewingBarcode: String? = null,
     val selectedBookDetail: BookDetail? = null,
@@ -51,11 +58,25 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     private val _toastEvent = MutableSharedFlow<String>()
     val toastEvent: SharedFlow<String> = _toastEvent.asSharedFlow()
 
-    private val queryClient: WbuQueryClient
-        get() {
-            val useVpn = WbuSyncEngine.getSavedUseVpn(getApplication()) ?: false
-            return WbuQueryClient(getApplication(), useVpn = useVpn)
-        }
+    /**
+     * 单次改用 WebVPN：只对下一次加载生效，**不写全局开关**（用户点一次按钮走一次）。
+     */
+    private var useWebVpnOnce = false
+
+    /** 最近一次实际使用的通道：点过「改用 WebVPN」后，续借/详情等后续请求要沿用同一条通道。 */
+    private var lastUseVpn: Boolean? = null
+
+    private fun queryClient(): WbuQueryClient =
+        WbuQueryClient(
+            getApplication(),
+            useVpn = lastUseVpn ?: (WbuSyncEngine.getSavedUseVpn(getApplication()) ?: false)
+        )
+
+    /** 「改用 WebVPN」按钮：本次访问改走校外通道。 */
+    fun retryWithWebVpnOnce() {
+        useWebVpnOnce = true
+        loadLibraryData(isRefresh = true)
+    }
 
     init {
         loadLibraryData()
@@ -70,48 +91,60 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun loadLibraryData(isRefresh: Boolean = false) {
-        // 本地连读者会话凭据都没有时不再空跑一次请求，直接进入登录引导
-        if (!WbuAuthTransport.hasLocalSession(getApplication(), CredentialService.LIBRARY)) {
-            _uiState.update {
-                it.copy(
-                    isLoading = false,
-                    isRefreshing = false,
-                    errorMessage = null,
-                    isSessionExpired = true
-                )
-            }
-            return
-        }
+        val once = useWebVpnOnce
+        useWebVpnOnce = false
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
                     isLoading = !isRefresh,
                     isRefreshing = isRefresh,
                     errorMessage = null,
-                    isSessionExpired = false
+                    isSessionExpired = false,
+                    offerWebVpnOnce = false
                 )
             }
-            try {
-                val data = queryClient.queryLibraryDashboard()
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        isRefreshing = false,
-                        dashboardData = data,
-                        errorMessage = null,
-                        isSessionExpired = false
-                    )
+
+            // 统一流水线：本地无凭据 / 登录态失效时先静默重建（缺输入就地弹小窗），
+            // 只有真的需要用户介入才回落到登录 Sheet；网络不通则给内联重试 + 改用 WebVPN。
+            val result = campusAccess(
+                context = getApplication(),
+                service = CredentialService.LIBRARY,
+                flowTag = "LIBRARY",
+                useWebVpnOnce = once
+            ) { useVpn ->
+                WbuQueryClient(getApplication(), useVpn = useVpn).queryLibraryDashboard()
+            }
+
+            when (result) {
+                is CampusAccessResult.Ok -> {
+                    lastUseVpn = result.useVpn
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            isRefreshing = false,
+                            dashboardData = result.value,
+                            errorMessage = null,
+                            isSessionExpired = false,
+                            offerWebVpnOnce = false
+                        )
+                    }
                 }
-            } catch (e: Exception) {
-                val isExpired = e is WbuSessionExpiredException
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        isRefreshing = false,
-                        errorMessage = accessFailureText(getApplication(), e)
-                            ?: getApplication<Application>().getString(R.string.err_load_library_failed),
-                        isSessionExpired = isExpired
-                    )
+
+                is CampusAccessResult.Failed -> {
+                    lastUseVpn = result.useVpn
+                    val failureText = accessFailureText(getApplication(), result.failure)
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            isRefreshing = false,
+                            // 用户主动取消小窗时不显示任何错误文案（accessFailureText 返回 null）
+                            errorMessage = failureText,
+                            // 取消 = 「补输入没补上」，回落到完整登录 Sheet；而不是报错
+                            isSessionExpired = result.failure.needsRelogin ||
+                                result.failure is AccessFailure.Cancelled,
+                            offerWebVpnOnce = result.failure.shouldOfferWebVpnOnce(result.useVpn)
+                        )
+                    }
                 }
             }
         }
@@ -128,11 +161,11 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _uiState.update { it.copy(isRenewing = true, renewingBarcode = book.barcode) }
             try {
-                val result = queryClient.renewBook(book.barcode, book.renewCheck)
+                val result = queryClient().renewBook(book.barcode, book.renewCheck)
                 _toastEvent.emit(result.message)
                 if (result.success) {
                     // 重新静默刷新当前在借数据
-                    val updatedBorrows = queryClient.queryCurrentBorrows()
+                    val updatedBorrows = queryClient().queryCurrentBorrows()
                     _uiState.update { current ->
                         val newDashboard = current.dashboardData?.copy(currentBorrows = updatedBorrows)
                         current.copy(
@@ -170,7 +203,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             var failCount = 0
             for (book in eligibleList) {
                 try {
-                    val result = queryClient.renewBook(book.barcode, book.renewCheck)
+                    val result = queryClient().renewBook(book.barcode, book.renewCheck)
                     if (result.success) successCount++ else failCount++
                 } catch (e: Exception) {
                     failCount++
@@ -179,7 +212,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
             // 刷新在借列表
             runCatching {
-                val updatedBorrows = queryClient.queryCurrentBorrows()
+                val updatedBorrows = queryClient().queryCurrentBorrows()
                 _uiState.update { current ->
                     val newDashboard = current.dashboardData?.copy(currentBorrows = updatedBorrows)
                     current.copy(dashboardData = newDashboard)
@@ -199,7 +232,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingBookDetail = true, selectedBookDetail = null) }
             try {
-                val detail = queryClient.queryBookDetail(marcNo)
+                val detail = queryClient().queryBookDetail(marcNo)
                 _uiState.update { it.copy(isLoadingBookDetail = false, selectedBookDetail = detail) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoadingBookDetail = false) }

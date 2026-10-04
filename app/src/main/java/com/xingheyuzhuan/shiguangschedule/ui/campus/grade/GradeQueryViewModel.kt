@@ -19,11 +19,19 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.needsRelogin
+import com.xingheyuzhuan.shiguangschedule.ui.components.CampusAccessResult
+import com.xingheyuzhuan.shiguangschedule.ui.components.campusAccess
+import com.xingheyuzhuan.shiguangschedule.ui.components.shouldOfferWebVpnOnce
 
 data class GradeUiState(
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
     val needLogin: Boolean = false,
+    /** 是否给用户一个「改用 WebVPN」按钮（单次生效，不翻转全局开关）。 */
+    val offerWebVpnOnce: Boolean = false,
     val semesterOptions: List<String> = emptyList(),
     val selectedSemester: String = "", // "" 表示全部学期
     val searchKeyword: String = "",
@@ -41,71 +49,98 @@ class GradeQueryViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(GradeUiState())
     val uiState: StateFlow<GradeUiState> = _uiState.asStateFlow()
 
-    private val queryClient get() = WbuQueryClient(context)
+    /** 单次改用 WebVPN：只对下一次访问生效，**不写全局开关**。 */
+    private var useWebVpnOnce = false
+
+    /** 最近一次实际使用的通道：用户点过「改用 WebVPN」后，后续请求沿用同一条通道。 */
+    private var lastUseVpn: Boolean? = null
+
+    private val queryClient
+        get() = WbuQueryClient(
+            context,
+            useVpn = lastUseVpn ?: (WbuSyncEngine.getSavedUseVpn(context) ?: false)
+        )
 
     init {
         loadGrades()
     }
 
     fun loadGrades() {
-        // 本地无教务凭据时直接进入登录引导，不空跑请求
-        if (!WbuAuthTransport.hasLocalSession(context, CredentialService.JIAOWU)) {
-            _uiState.update { it.copy(isLoading = false, needLogin = true, errorMessage = null) }
-            return
-        }
+        val once = useWebVpnOnce
+        useWebVpnOnce = false
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null, needLogin = false) }
-
-            // 1. 获取学期列表（如尚未加载）
-            if (_uiState.value.semesterOptions.isEmpty()) {
-                val semesters = queryClient.fetchSemesterList()
-                if (semesters.isNotEmpty()) {
-                    _uiState.update { it.copy(semesterOptions = semesters) }
-                }
+            _uiState.update {
+                it.copy(isLoading = true, errorMessage = null, needLogin = false, offerWebVpnOnce = false)
             }
 
-            // 2. 查询成绩
-            val currentSemester = _uiState.value.selectedSemester
-            val startXnxq = if (currentSemester.isNotBlank()) currentSemester else "2018-2019-1"
-            val endXnxq = if (currentSemester.isNotBlank()) currentSemester else "2032-2033-2"
+            // 统一流水线：本地无凭据 / 登录态失效时先静默重建（缺输入就地弹小窗），
+            // 只有真的需要用户介入才回落到登录 Sheet；网络不通则给内联重试 + 改用 WebVPN。
+            val access = campusAccess(
+                context = context,
+                service = CredentialService.JIAOWU,
+                flowTag = "GRADE",
+                useWebVpnOnce = once
+            ) { useVpn ->
+                val client = WbuQueryClient(context, useVpn = useVpn)
 
-            val result = queryClient.queryGrades(
-                startXnxq = startXnxq,
-                endXnxq = endXnxq,
-                pageSize = 300
-            )
+                // 1. 获取学期列表（如尚未加载）
+                if (_uiState.value.semesterOptions.isEmpty()) {
+                    val semesters = client.fetchSemesterList()
+                    if (semesters.isNotEmpty()) {
+                        _uiState.update { it.copy(semesterOptions = semesters) }
+                    }
+                }
 
-            result.fold(
-                onSuccess = { queryResult ->
+                // 2. 查询成绩
+                val currentSemester = _uiState.value.selectedSemester
+                val startXnxq = if (currentSemester.isNotBlank()) currentSemester else "2018-2019-1"
+                val endXnxq = if (currentSemester.isNotBlank()) currentSemester else "2032-2033-2"
+                client.queryGrades(startXnxq = startXnxq, endXnxq = endXnxq, pageSize = 300).getOrThrow()
+            }
+
+            when (access) {
+                is CampusAccessResult.Ok -> {
+                    lastUseVpn = access.useVpn
+                    val queryResult = access.value
                     // 若此前没拿到学期列表，可以从成绩项中动态聚合历史学期
                     val semesters = if (_uiState.value.semesterOptions.isEmpty()) {
                         queryResult.courses.map { it.xnxq }.distinct().filter { it.isNotBlank() }
                     } else {
                         _uiState.value.semesterOptions
                     }
-
                     _uiState.update { state ->
                         state.copy(
                             isLoading = false,
                             allGrades = queryResult.courses,
                             semesterOptions = semesters,
-                            errorMessage = null
+                            errorMessage = null,
+                            needLogin = false,
+                            offerWebVpnOnce = false
                         )
                     }
                     applyFilters()
-                },
-                onFailure = { err ->
-                    val isSessionExpired = err is WbuSessionExpiredException
+                }
+
+                is CampusAccessResult.Failed -> {
+                    lastUseVpn = access.useVpn
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            needLogin = isSessionExpired,
-                            errorMessage = accessFailureText(context, err) ?: context.getString(R.string.err_get_grades_failed)
+                            needLogin = access.failure.needsRelogin ||
+                                access.failure is AccessFailure.Cancelled,
+                            errorMessage = accessFailureText(context, access.failure),
+                            offerWebVpnOnce = access.failure.shouldOfferWebVpnOnce(access.useVpn)
                         )
                     }
                 }
-            )
+            }
         }
+    }
+
+    /** 「改用 WebVPN」按钮：本次访问改走校外通道（单次生效，不翻转全局开关）。 */
+    fun retryWithWebVpnOnce() {
+        useWebVpnOnce = true
+        loadGrades()
     }
 
     fun setSemester(semester: String) {

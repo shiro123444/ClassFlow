@@ -305,6 +305,17 @@ fun GradeQueryScreen(
                                     fontSize = 14.sp,
                                     modifier = Modifier.clickable { showLoginDialog = true }
                                 )
+                                // 直连不通时给一条「改用 WebVPN」的出路，只对本次生效（不翻转全局开关）
+                                if (uiState.offerWebVpnOnce) {
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = stringResource(R.string.action_use_webvpn_once),
+                                        color = MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        modifier = Modifier.clickable { viewModel.retryWithWebVpnOnce() }
+                                    )
+                                }
                             }
                         }
                     }

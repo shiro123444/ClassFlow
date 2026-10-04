@@ -199,7 +199,7 @@ Overwriting will replace all current courses.</string>
     <string name="msg_new_semester_found">New schedule for [%1$s] is available. Import and create it now?</string>
     <string name="action_import_and_create_now">Import Now</string>
     <string name="title_connect_webvpn">Connect to WebVPN</string>
-    <string name="desc_connect_webvpn">Off-campus access requires WebVPN. Please enter your CAS/WebVPN password to connect:</string>
+    <string name="desc_connect_webvpn">Off-campus access to campus services goes through WebVPN. Please enter your CAS / WebVPN password to connect:</string>
     <string name="label_webvpn_password">CAS / WebVPN Password</string>
     <string name="a11y_hide_password">Hide password</string>
     <string name="a11y_show_password">Show password</string>
@@ -962,4 +962,6 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="fail_webvpn_unreachable">Cannot reach WebVPN. Please check your network and retry</string>
     <string name="fail_unified_auth_unreachable">Cannot reach unified authentication. Please check your network and retry</string>
     <string name="fail_unexpected">The operation did not succeed. The school system may have changed; please retry later</string>
+    <string name="desc_enter_unified_auth_password">No unified-authentication password is saved on this device. Enter it to continue</string>
+    <string name="action_use_webvpn_once">Use WebVPN for this try</string>
 </resources>

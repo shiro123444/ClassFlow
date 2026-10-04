@@ -26,6 +26,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.needsRelogin
+import com.xingheyuzhuan.shiguangschedule.ui.components.silentUnifiedAuthLogin
 
 /**
  * 教学班可执行操作
@@ -164,24 +167,30 @@ class CourseSelectionViewModel @Inject constructor(
      * 加载选课页初始化数据（批次 + 学生信息）
      */
     fun loadInit(isRefresh: Boolean = false) {
-        // 本地无教务凭据时直接进入登录引导，不空跑请求（Mock 模式无需凭据）
-        if (!_uiState.value.mockEnabled &&
-            !WbuAuthTransport.hasLocalSession(getApplication(), CredentialService.JIAOWU, useVpn = false)
-        ) {
-            _uiState.update {
-                it.copy(
-                    isLoading = false,
-                    isRefreshing = false,
-                    errorMessage = null,
-                    needLogin = true
-                )
-            }
-            return
-        }
         viewModelScope.launch {
             _uiState.update {
-                it.copy(isLoading = !isRefresh, isRefreshing = isRefresh, errorMessage = null)
+                it.copy(isLoading = !isRefresh, isRefreshing = isRefresh, errorMessage = null, needLogin = false)
             }
+
+            // 本地无教务凭据时先**静默重建**一次（缺密码就地弹小窗），补不上才引导登录 ——
+            // 选课只支持校园网直连，所以这里不走 WebVPN 通道。
+            if (!_uiState.value.mockEnabled &&
+                !WbuAuthTransport.hasLocalSession(getApplication(), CredentialService.JIAOWU, useVpn = false)
+            ) {
+                val failure = silentUnifiedAuthLogin(getApplication(), "COURSE_SELECTION", viaWebVpn = false)
+                if (failure != null) {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            isRefreshing = false,
+                            needLogin = failure.needsRelogin || failure is AccessFailure.Cancelled,
+                            errorMessage = accessFailureText(getApplication(), failure)
+                        )
+                    }
+                    return@launch
+                }
+            }
+
             dataSource.queryInit()
                 .onSuccess { init ->
                     val batches = init.batches

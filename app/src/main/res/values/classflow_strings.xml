@@ -213,7 +213,7 @@
     <string name="msg_new_semester_found">教务系统当前已有新学期【%1$s】的课表。是否立即导入并新建该学期课表？</string>
     <string name="action_import_and_create_now">立即导入新建</string>
     <string name="title_connect_webvpn">连接 WebVPN</string>
-    <string name="desc_connect_webvpn">校外访问教务系统需先通过 WebVPN 门禁。请输入您的【统一认证/WebVPN 密码】以连接网络：</string>
+    <string name="desc_connect_webvpn">校外访问校内服务需先通过 WebVPN 门禁。请输入您的【统一认证 / WebVPN 密码】以连接网络：</string>
     <string name="label_webvpn_password">统一认证 (WebVPN) 密码</string>
     <string name="a11y_hide_password">隐藏密码</string>
     <string name="a11y_show_password">显示密码</string>
@@ -959,4 +959,6 @@
     <string name="fail_webvpn_unreachable">连不上 WebVPN，请检查网络后重试</string>
     <string name="fail_unified_auth_unreachable">连不上统一身份认证，请检查网络后重试</string>
     <string name="fail_unexpected">操作没成功，可能是学校系统有变动，请稍后重试</string>
+    <string name="desc_enter_unified_auth_password">本机没有保存统一认证密码，输入后继续</string>
+    <string name="action_use_webvpn_once">改用 WebVPN</string>
 </resources>

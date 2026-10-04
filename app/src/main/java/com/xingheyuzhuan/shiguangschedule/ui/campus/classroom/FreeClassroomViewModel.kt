@@ -33,6 +33,12 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
 import javax.inject.Inject
 import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.needsRelogin
+import com.xingheyuzhuan.shiguangschedule.ui.components.CampusAccessResult
+import com.xingheyuzhuan.shiguangschedule.ui.components.campusAccess
+import com.xingheyuzhuan.shiguangschedule.ui.components.shouldOfferWebVpnOnce
 
 enum class FreeClassroomQueryMode {
     SECTION, // 按节次
@@ -43,6 +49,8 @@ data class FreeClassroomUiState(
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
     val needLogin: Boolean = false,
+    /** 是否给用户一个「改用 WebVPN」按钮（单次生效，不翻转全局开关）。 */
+    val offerWebVpnOnce: Boolean = false,
     val campusList: List<CampusOption> = emptyList(),
     val selectedCampusId: String = CAMPUS_HGH_UUID,
     val buildingList: List<BuildingOption> = DEFAULT_BUILDINGS_HGH,
@@ -107,7 +115,17 @@ class FreeClassroomViewModel @Inject constructor(
     )
     val uiState: StateFlow<FreeClassroomUiState> = _uiState.asStateFlow()
 
-    private val queryClient get() = WbuQueryClient(context)
+    /** 单次改用 WebVPN：只对下一次访问生效，**不写全局开关**。 */
+    private var useWebVpnOnce = false
+
+    /** 最近一次实际使用的通道：用户点过「改用 WebVPN」后，后续请求沿用同一条通道。 */
+    private var lastUseVpn: Boolean? = null
+
+    private val queryClient
+        get() = WbuQueryClient(
+            context,
+            useVpn = lastUseVpn ?: (WbuSyncEngine.getSavedUseVpn(context) ?: false)
+        )
 
     init {
         initData()
@@ -142,56 +160,70 @@ class FreeClassroomViewModel @Inject constructor(
     }
 
     fun loadFreeClassrooms() {
-        // 本地无教务凭据时直接进入登录引导，不空跑请求
-        if (!WbuAuthTransport.hasLocalSession(context, CredentialService.JIAOWU)) {
-            _uiState.update { it.copy(isLoading = false, needLogin = true, errorMessage = null) }
-            return
-        }
+        val once = useWebVpnOnce
+        useWebVpnOnce = false
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null, needLogin = false) }
+            _uiState.update {
+                it.copy(isLoading = true, errorMessage = null, needLogin = false, offerWebVpnOnce = false)
+            }
 
             val state = _uiState.value
-            val weeksStr = state.selectedWeeks.sorted().joinToString(",")
-            val daysStr = state.selectedDays.sorted().joinToString(",")
-            val sectionsStr = state.selectedSections.sorted().joinToString(",")
+            val access = campusAccess(
+                context = context,
+                service = CredentialService.JIAOWU,
+                flowTag = "FREE_CLASSROOM",
+                useWebVpnOnce = once
+            ) { useVpn ->
+                WbuQueryClient(context, useVpn = useVpn).queryFreeClassrooms(
+                    campusId = state.selectedCampusId,
+                    buildingCode = state.selectedBuildingCode,
+                    roomType = state.selectedRoomType,
+                    roomName = state.searchRoomName,
+                    week = if (state.selectedWeeks.size == 1) state.selectedWeeks.first() else null,
+                    dayOfWeek = state.selectedDays.sorted().joinToString(","),
+                    sections = state.selectedSections.sorted().joinToString(","),
+                    queryType = if (state.queryMode == FreeClassroomQueryMode.SECTION) "1" else "2",
+                    beginTime = state.beginTime,
+                    endTime = state.endTime,
+                    pageSize = 100
+                ).getOrThrow()
+            }
 
-            val result = queryClient.queryFreeClassrooms(
-                campusId = state.selectedCampusId,
-                buildingCode = state.selectedBuildingCode,
-                roomType = state.selectedRoomType,
-                roomName = state.searchRoomName,
-                week = if (state.selectedWeeks.size == 1) state.selectedWeeks.first() else null,
-                dayOfWeek = daysStr,
-                sections = sectionsStr,
-                queryType = if (state.queryMode == FreeClassroomQueryMode.SECTION) "1" else "2",
-                beginTime = state.beginTime,
-                endTime = state.endTime,
-                pageSize = 100
-            )
-
-            result.fold(
-                onSuccess = { res ->
+            when (access) {
+                is CampusAccessResult.Ok -> {
+                    lastUseVpn = access.useVpn
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            classrooms = res.classrooms,
-                            totalCount = res.total,
-                            errorMessage = null
-                        )
-                    }
-                },
-                onFailure = { err ->
-                    val isSessionExpired = err is WbuSessionExpiredException
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            needLogin = isSessionExpired,
-                            errorMessage = accessFailureText(context, err) ?: context.getString(R.string.err_query_free_classroom_failed)
+                            classrooms = access.value.classrooms,
+                            totalCount = access.value.total,
+                            errorMessage = null,
+                            needLogin = false,
+                            offerWebVpnOnce = false
                         )
                     }
                 }
-            )
+
+                is CampusAccessResult.Failed -> {
+                    lastUseVpn = access.useVpn
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            needLogin = access.failure.needsRelogin ||
+                                access.failure is AccessFailure.Cancelled,
+                            errorMessage = accessFailureText(context, access.failure),
+                            offerWebVpnOnce = access.failure.shouldOfferWebVpnOnce(access.useVpn)
+                        )
+                    }
+                }
+            }
         }
+    }
+
+    /** 「改用 WebVPN」按钮：本次访问改走校外通道（单次生效，不翻转全局开关）。 */
+    fun retryWithWebVpnOnce() {
+        useWebVpnOnce = true
+        loadFreeClassrooms()
     }
 
     /**

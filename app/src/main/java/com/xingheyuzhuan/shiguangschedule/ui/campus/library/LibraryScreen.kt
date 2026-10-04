@@ -240,6 +240,13 @@ fun LibraryScreen(
                                         stringResource(R.string.action_retry)
                                 )
                             }
+                            // 直连不通时给一条「改用 WebVPN」的出路，且只对本次生效（不翻转全局开关）
+                            if (uiState.offerWebVpnOnce) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedButton(onClick = { viewModel.retryWithWebVpnOnce() }) {
+                                    Text(stringResource(R.string.action_use_webvpn_once))
+                                }
+                            }
                         }
                     }
                 }

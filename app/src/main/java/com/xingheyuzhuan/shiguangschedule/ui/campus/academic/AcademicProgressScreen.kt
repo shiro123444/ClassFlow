@@ -338,6 +338,12 @@ fun AcademicProgressScreen(
                                     IconButton(onClick = { viewModel.loadAcademicProgress(isRefresh = true) }) {
                                         Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.a11y_refresh))
                                     }
+                                    // 直连不通时给一条「改用 WebVPN」的出路，只对本次生效（不翻转全局开关）
+                                    if (uiState.offerWebVpnOnce) {
+                                        TextButton(onClick = { viewModel.retryWithWebVpnOnce() }) {
+                                            Text(stringResource(R.string.action_use_webvpn_once))
+                                        }
+                                    }
                                 }
                             }
                         }

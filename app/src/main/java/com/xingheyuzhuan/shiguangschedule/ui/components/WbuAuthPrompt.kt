@@ -38,6 +38,15 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 
@@ -52,6 +61,12 @@ sealed interface WbuAuthPromptRequest {
 
     /** WebVPN 门禁需要密码，本地没有保存。 */
     data object VpnPassword : WbuAuthPromptRequest
+
+    /**
+     * 静默登录需要统一认证（学号）密码，但本机没有保存。
+     * 此时先弹小窗就地补输入，用户取消才回落到登录 Sheet。
+     */
+    data object UnifiedAuthPassword : WbuAuthPromptRequest
 
     /** WebVPN 门户短信二次验证码。 */
     data class SmsCode(
@@ -76,6 +91,7 @@ fun WbuAuthPromptDialogs(
     when (request) {
         null -> Unit
         WbuAuthPromptRequest.VpnPassword -> VpnPasswordPromptDialog(onSubmit = onSubmit)
+        WbuAuthPromptRequest.UnifiedAuthPassword -> UnifiedAuthPasswordPromptDialog(onSubmit = onSubmit)
         is WbuAuthPromptRequest.SmsCode -> VpnSmsCodeDialog(
             maskedPhone = request.maskedPhone,
             isStillValid = request.isStillValid,
@@ -239,5 +255,155 @@ fun VpnPasswordPromptDialog(onSubmit: (String?) -> Unit) {
                 Text(stringResource(R.string.action_cancel))
             }
         }
+    )
+}
+
+/**
+ * 统一认证密码询问弹窗（静默登录缺保存密码时用）。
+ *
+ * [onSubmit] 收到 null 表示用户取消。
+ */
+@Composable
+fun UnifiedAuthPasswordPromptDialog(onSubmit: (String?) -> Unit) {
+    val context = LocalContext.current
+    var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    var rememberPassword by remember {
+        mutableStateOf(WbuAuthTransport.isRememberPasswordEnabled(context, CredentialService.UNIFIED_AUTH))
+    }
+
+    AlertDialog(
+        onDismissRequest = { onSubmit(null) },
+        title = { Text(stringResource(R.string.title_login_unified_auth)) },
+        text = {
+            Column {
+                Text(
+                    text = stringResource(R.string.desc_enter_unified_auth_password),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text(stringResource(R.string.label_password_input)) },
+                    singleLine = true,
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(end = 6.dp)
+                        ) {
+                            IconButton(
+                                onClick = { passwordVisible = !passwordVisible },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    contentDescription = if (passwordVisible) {
+                                        stringResource(R.string.a11y_hide_password)
+                                    } else {
+                                        stringResource(R.string.a11y_show_password)
+                                    },
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { rememberPassword = !rememberPassword }
+                                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.label_remember_password),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Checkbox(
+                                    checked = rememberPassword,
+                                    onCheckedChange = { rememberPassword = it },
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .scale(0.85f)
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val value = password.trim()
+                    if (rememberPassword && value.isNotBlank()) {
+                        WbuAuthTransport.setRememberPasswordEnabled(context, CredentialService.UNIFIED_AUTH, true)
+                        WbuAuthTransport.savePassword(context, CredentialService.UNIFIED_AUTH, value)
+                    }
+                    onSubmit(value.ifBlank { null })
+                }
+            ) {
+                Text(stringResource(R.string.action_confirm_login))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { onSubmit(null) }) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        }
+    )
+}
+
+/**
+ * 全局「静默登录就地补输入」通道。
+ *
+ * 静默登录可能发生在任何页面，而补输入弹窗本身是**模态**的，所以统一在进程级托管：
+ * 业务侧只 [ask] 挂起等待，UI 侧由 App 根部的 [WbuAuthPromptHost] 负责渲染。
+ * 这样每个页面都不必各自复制一套弹窗状态机。
+ */
+object WbuAuthPromptBus {
+
+    private val _request = MutableStateFlow<WbuAuthPromptRequest?>(null)
+
+    /** 当前待补输入的请求，null 表示没有。 */
+    val request: StateFlow<WbuAuthPromptRequest?> = _request.asStateFlow()
+
+    private var pending: CompletableDeferred<String?>? = null
+
+    /** 短信重发钩子：由发起方在调用前注入。 */
+    var onResendSmsCode: (suspend () -> Unit)? = null
+
+    /** 挂起等待用户输入；返回 null 表示用户取消。 */
+    suspend fun ask(request: WbuAuthPromptRequest): String? {
+        val deferred = CompletableDeferred<String?>()
+        pending = deferred
+        _request.value = request
+        return try {
+            deferred.await()
+        } finally {
+            pending = null
+            _request.value = null
+        }
+    }
+
+    /** UI 提交结果（取消传 null）。 */
+    fun submit(value: String?) {
+        pending?.complete(value)
+    }
+}
+
+/** App 根部渲染一次即可，负责把 [WbuAuthPromptBus] 的请求渲染成弹窗。 */
+@Composable
+fun WbuAuthPromptHost() {
+    val request by WbuAuthPromptBus.request.collectAsState()
+    val scope = rememberCoroutineScope()
+    WbuAuthPromptDialogs(
+        request = request,
+        onSubmit = { WbuAuthPromptBus.submit(it) },
+        onResendSmsCode = { scope.launch { WbuAuthPromptBus.onResendSmsCode?.invoke() } }
     )
 }

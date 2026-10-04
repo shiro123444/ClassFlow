@@ -171,6 +171,7 @@ import com.xingheyuzhuan.shiguangschedule.ui.settings.update.UpdateRepoScreen
 import com.xingheyuzhuan.shiguangschedule.ui.theme.ClassFlowTheme
 import com.xingheyuzhuan.shiguangschedule.ui.today.TodayScheduleScreen
 import javax.inject.Inject
+import com.xingheyuzhuan.shiguangschedule.ui.components.WbuAuthPromptHost
 
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
@@ -272,6 +273,9 @@ class MainActivity : AppCompatActivity() {
                             appSettingsRepository = appSettingsRepository
                         )
                     }
+                    // 静默登录缺输入（统一认证密码 / WebVPN 密码 / 短信验证码）时的全局小窗
+                    WbuAuthPromptHost()
+
                     // 官网下载页 / 吹风机入口：全屏品牌过场动画（普通启动不触发）
                     if (showWelcome) {
                         BrandEntryOverlay(

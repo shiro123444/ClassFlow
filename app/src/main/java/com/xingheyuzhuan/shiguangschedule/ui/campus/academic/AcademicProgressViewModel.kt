@@ -20,6 +20,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.needsRelogin
+import com.xingheyuzhuan.shiguangschedule.ui.components.CampusAccessResult
+import com.xingheyuzhuan.shiguangschedule.ui.components.campusAccess
+import com.xingheyuzhuan.shiguangschedule.ui.components.shouldOfferWebVpnOnce
 
 /**
  * 视图类型：按学期推进 vs 按课程性质分类
@@ -43,6 +49,8 @@ data class AcademicProgressUiState(
     val filterExamMode: String = "", // "" (全部), "考试", "考查"
     val expandedGroupIds: Set<String> = emptySet(),
     val needLogin: Boolean = false,
+    /** 是否给用户一个「改用 WebVPN」按钮（单次生效，不翻转全局开关）。 */
+    val offerWebVpnOnce: Boolean = false,
     val selectedCourse: AcademicCourse? = null
 ) {
     /**
@@ -98,7 +106,17 @@ class AcademicProgressViewModel @Inject constructor(
     application: Application
 ) : AndroidViewModel(application) {
 
-    private val queryClient get() = WbuQueryClient(getApplication())
+    /** 单次改用 WebVPN：只对下一次访问生效，**不写全局开关**。 */
+    private var useWebVpnOnce = false
+
+    /** 最近一次实际使用的通道：用户点过「改用 WebVPN」后，后续请求沿用同一条通道。 */
+    private var lastUseVpn: Boolean? = null
+
+    private val queryClient
+        get() = WbuQueryClient(
+            getApplication(),
+            useVpn = lastUseVpn ?: (WbuSyncEngine.getSavedUseVpn(getApplication()) ?: false)
+        )
 
     private val _uiState = MutableStateFlow(AcademicProgressUiState())
     val uiState: StateFlow<AcademicProgressUiState> = _uiState.asStateFlow()
@@ -111,56 +129,69 @@ class AcademicProgressViewModel @Inject constructor(
      * 加载或刷新学业完成度与课程进程
      */
     fun loadAcademicProgress(isRefresh: Boolean = false) {
-        // 本地无教务凭据时直接进入登录引导，不空跑请求
-        if (!WbuAuthTransport.hasLocalSession(getApplication(), CredentialService.JIAOWU)) {
-            _uiState.update {
-                it.copy(
-                    isLoading = false,
-                    isRefreshing = false,
-                    errorMessage = null,
-                    needLogin = true
-                )
-            }
-            return
-        }
+        val once = useWebVpnOnce
+        useWebVpnOnce = false
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
                     isLoading = !isRefresh,
                     isRefreshing = isRefresh,
-                    errorMessage = null
+                    errorMessage = null,
+                    needLogin = false,
+                    offerWebVpnOnce = false
                 )
             }
 
-            val result = queryClient.queryAcademicProgress()
-            result.onSuccess { progressData ->
-                // 默认将全部组节点展开
-                val allGroupIds = (progressData.semesterGroups.map { it.nodeId } +
-                        progressData.natureGroups.map { it.nodeId }).toSet()
+            val access = campusAccess(
+                context = getApplication(),
+                service = CredentialService.JIAOWU,
+                flowTag = "ACADEMIC",
+                useWebVpnOnce = once
+            ) { useVpn ->
+                WbuQueryClient(getApplication(), useVpn = useVpn).queryAcademicProgress().getOrThrow()
+            }
 
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        isRefreshing = false,
-                        data = progressData,
-                        expandedGroupIds = if (it.expandedGroupIds.isEmpty()) allGroupIds else it.expandedGroupIds,
-                        errorMessage = null,
-                        needLogin = false
-                    )
+            when (access) {
+                is CampusAccessResult.Ok -> {
+                    lastUseVpn = access.useVpn
+                    val progressData = access.value
+                    // 默认将全部组节点展开
+                    val allGroupIds = (progressData.semesterGroups.map { it.nodeId } +
+                            progressData.natureGroups.map { it.nodeId }).toSet()
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            isRefreshing = false,
+                            data = progressData,
+                            expandedGroupIds = if (it.expandedGroupIds.isEmpty()) allGroupIds else it.expandedGroupIds,
+                            errorMessage = null,
+                            needLogin = false,
+                            offerWebVpnOnce = false
+                        )
+                    }
                 }
-            }.onFailure { err ->
-                val isExpired = err is WbuSessionExpiredException
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        isRefreshing = false,
-                            errorMessage = accessFailureText(getApplication(), err)
-                                ?: getApplication<Application>().getString(R.string.err_load_academic_progress_failed),
-                        needLogin = isExpired
-                    )
+
+                is CampusAccessResult.Failed -> {
+                    lastUseVpn = access.useVpn
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            isRefreshing = false,
+                            errorMessage = accessFailureText(getApplication(), access.failure),
+                            needLogin = access.failure.needsRelogin ||
+                                access.failure is AccessFailure.Cancelled,
+                            offerWebVpnOnce = access.failure.shouldOfferWebVpnOnce(access.useVpn)
+                        )
+                    }
                 }
             }
         }
+    }
+
+    /** 「改用 WebVPN」按钮：本次访问改走校外通道（单次生效，不翻转全局开关）。 */
+    fun retryWithWebVpnOnce() {
+        useWebVpnOnce = true
+        loadAcademicProgress(isRefresh = true)
     }
 
     fun setViewMode(mode: AcademicViewMode) {
