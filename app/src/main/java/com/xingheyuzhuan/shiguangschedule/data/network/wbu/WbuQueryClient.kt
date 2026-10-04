@@ -39,12 +39,17 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
+import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.io.IOException
 import java.net.URLEncoder
+
+/** WebVPN 门户（Sangfor）根域名：门禁失效时，代理网关会把所有子域请求接管到这里。 */
+private const val WEBVPN_GATEWAY_HOST = "webvpn.wbu.edu.cn"
 
 /**
  * 教务系统会话已过期或未认证异常
@@ -985,6 +990,40 @@ class WbuQueryClient(
     private val opacBaseUrl: String get() = transport.opacBase()
 
     /**
+     * WebVPN 门禁（TWFID）失效时，代理网关会把 OPAC 请求接管并重定向到门户登录页，
+     * 跟随重定向后得到的是 **HTTP 200 + 门户 HTML**：既没有 `login` 关键字也没有数据表格。
+     * 旧逻辑只判断 Location 是否含 `login`，于是门户页被当成读者页面解析，界面显示成
+     * 「当前暂无在借图书」这种误导性的空数据。以下三个工具用于把「门禁接管」与「真的没有数据」区分开。
+     */
+    private fun isWebVpnGatewayHost(host: String): Boolean =
+        host.equals(WEBVPN_GATEWAY_HOST, ignoreCase = true)
+
+    /** 判断某个完整 URL 是否指向 WebVPN 门户本身（代理子域如 `opac-xxx.webvpn.wbu.edu.cn` 不算）。 */
+    private fun isWebVpnGatewayUrl(url: String?): Boolean =
+        !url.isNullOrBlank() && isWebVpnGatewayHost(url.toHttpUrlOrNull()?.host.orEmpty())
+
+    /**
+     * 校验图书馆响应确实来自 OPAC 读者页面：非 200、存在重定向、或最终落在 WebVPN 门户上，
+     * 都视为会话已失效并抛出 [WbuSessionExpiredException]，交由上层引导重新登录。
+     */
+    private fun Response.requireOpacPage() {
+        val location = header("Location").orEmpty()
+        if (code != 200 || location.isNotBlank()) {
+            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_library))
+        }
+        if (isWebVpnGatewayHost(request.url.host)) {
+            throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
+        }
+    }
+
+    /**
+     * 响应体兜底识别：完全解析不出表格时，若页面带有 WebVPN 门户特征，说明是被门禁接管而非「无数据」。
+     * 仅在本来要返回空列表的分支调用，避免误伤正常的空数据页面。
+     */
+    private fun String.looksLikeWebVpnPortal(): Boolean =
+        contains("redirect_uri=", ignoreCase = true) || contains("login_psw.csp", ignoreCase = true)
+
+    /**
      * 确保持有有效的 OPAC 会话 (PHPSESSID)
      * 若未持有或已失效，通过 CASTGC 向 CAS 换票；若无有效 CASTGC 则抛出 WbuSessionExpiredException
      */
@@ -1000,7 +1039,9 @@ class WbuQueryClient(
             val manualClient = client.newBuilder().followRedirects(false).build()
             val valid = runCatching {
                 manualClient.newCall(testReq).execute().use { resp ->
-                    resp.code == 200 && !resp.header("Location").orEmpty().contains("login")
+                    resp.code == 200 &&
+                        resp.header("Location").orEmpty().isBlank() &&
+                        !isWebVpnGatewayHost(resp.request.url.host)
                 }
             }.getOrDefault(false)
 
@@ -1062,6 +1103,13 @@ class WbuQueryClient(
             nextLocation = resp.header("Location")
             val cookies = okhttp3.Cookie.parseAll(resp.request.url, resp.headers)
             phpSessId = cookies.find { it.name == "PHPSESSID" }?.value
+            // WebVPN 门禁失效时，代理网关会把 ST 核销请求拦到门户登录页（不再下发新的 PHPSESSID）。
+            // 此时若沿用 Cookie 库里残留的旧 PHPSESSID，后续查询只会拿到门户 HTML，
+            // 最终被解析成「0 本在借」，因此这里直接判定门禁失效。
+            if (isWebVpnGatewayHost(resp.request.url.host) || isWebVpnGatewayUrl(nextLocation)) {
+                Log.w("WbuQueryClient", "OPAC ticket exchange intercepted by WebVPN gateway: $nextLocation")
+                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
+            }
         }
 
         if (phpSessId.isNullOrBlank()) {
@@ -1096,6 +1144,10 @@ class WbuQueryClient(
 
             if (hopCode in 300..399 && !hopLoc.isNullOrBlank()) {
                 currentHopUrl = transport.resolveAbsoluteUrl(opacBaseUrl, hopLoc)
+                if (isWebVpnGatewayUrl(currentHopUrl)) {
+                    Log.w("WbuQueryClient", "OPAC landing hop intercepted by WebVPN gateway: $currentHopUrl")
+                    throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
+                }
             } else {
                 break
             }
@@ -1118,9 +1170,7 @@ class WbuQueryClient(
             .build()
 
         val infoHtml = client.newCall(infoReq).execute().use { resp ->
-            if (resp.header("Location").orEmpty().contains("login")) {
-                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_library))
-            }
+            resp.requireOpacPage()
             resp.body?.string().orEmpty()
         }
 
@@ -1143,6 +1193,7 @@ class WbuQueryClient(
             .build()
 
         val ruleHtml = client.newCall(ruleReq).execute().use { resp ->
+            resp.requireOpacPage()
             resp.body?.string().orEmpty()
         }
 
@@ -1176,14 +1227,17 @@ class WbuQueryClient(
             .build()
 
         val html = client.newCall(req).execute().use { resp ->
-            if (resp.header("Location").orEmpty().contains("login")) {
-                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_library))
-            }
+            resp.requireOpacPage()
             resp.body?.string().orEmpty()
         }
 
         val doc = Jsoup.parse(html)
-        val table = doc.selectFirst("table") ?: return@withContext emptyList()
+        val table = doc.selectFirst("table") ?: run {
+            if (html.looksLikeWebVpnPortal()) {
+                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
+            }
+            return@withContext emptyList()
+        }
         val rows = table.select("tr")
         if (rows.size <= 1) return@withContext emptyList()
 
@@ -1274,14 +1328,17 @@ class WbuQueryClient(
             .build()
 
         val html = client.newCall(req).execute().use { resp ->
-            if (resp.header("Location").orEmpty().contains("login")) {
-                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_library))
-            }
+            resp.requireOpacPage()
             resp.body?.string().orEmpty()
         }
 
         val doc = Jsoup.parse(html)
-        val table = doc.selectFirst("table") ?: return@withContext emptyList()
+        val table = doc.selectFirst("table") ?: run {
+            if (html.looksLikeWebVpnPortal()) {
+                throw WbuSessionExpiredException(message = context.getString(R.string.error_session_expired_webvpn))
+            }
+            return@withContext emptyList()
+        }
         val rows = table.select("tr")
         if (rows.size <= 1) return@withContext emptyList()
 
@@ -1337,6 +1394,7 @@ class WbuQueryClient(
             .build()
 
         val html = client.newCall(req).execute().use { resp ->
+            resp.requireOpacPage()
             resp.body?.string().orEmpty()
         }
 
@@ -1361,6 +1419,7 @@ class WbuQueryClient(
             .build()
 
         val html = client.newCall(req).execute().use { resp ->
+            resp.requireOpacPage()
             resp.body?.string().orEmpty()
         }
 
