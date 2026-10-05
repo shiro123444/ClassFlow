@@ -32,6 +32,18 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="alipays" />
         </intent>
+        <!--
+          WakeUp 课程表：导出 .wakeup_schedule 后「在 WakeUp 中打开」按「显式包名直开」实现，
+          而 Android 11+ 的包可见性过滤会让未在此声明的包在 resolveActivity 上恒为 null，
+          旧实现因此在所有设备上都掉进系统选择器。这里声明官方包名与 Pro/衍生版包名；
+          再声明 octet-stream 的 VIEW 处理者，使包名不固定的共存/修改版也能被查询到。
+        -->
+        <package android:name="com.suda.yzune.wakeupschedule" />
+        <package android:name="com.suda.yzune.wakeupschedule.pro" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/octet-stream" />
+        </intent>
     </queries>
 
     <application

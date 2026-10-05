@@ -300,31 +300,47 @@ object WakeupExportTool {
     }
 
     /**
-     * 调用系统打开方式打开 .wakeup_schedule 文件，优先调用 WakeUp 课程表
+     * 用指定包名直开 WakeUp 课程表打开 .wakeup_schedule 文件：
+     * 官方包名 → Pro/衍生版包名 → 已安装的同前缀共存版 → 系统「打开方式」选择器，逐级兜底。
+     *
+     * 不再用 [android.content.pm.PackageManager.resolveActivity] 做前置判断：
+     * Android 11+（API 30+，本应用 targetSdk 已远高于此）的包可见性过滤会把未在
+     * `<queries>` 中声明的包一律过滤掉，`setPackage` 后 `resolveActivity()` 恒为 null，
+     * 结果就是「永远只弹选择器」。这里改为直接 startActivity 并捕获失败
+     * （与支付宝 U净 的调起方式一致），包可见性只影响查询、不影响启动。
      */
     fun openWithWakeup(context: Context, uri: Uri, fileName: String) {
         val pm = context.packageManager
-        val wakeupPackage = "com.suda.yzune.wakeupschedule"
-
-        val targetIntent = Intent(Intent.ACTION_VIEW).apply {
+        val viewIntent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "*/*")
-            setPackage(wakeupPackage)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
 
-        if (targetIntent.resolveActivity(pm) != null) {
-            context.startActivity(targetIntent)
-        } else {
-            val generalIntent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "*/*")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            val chooser = Intent.createChooser(generalIntent, context.getString(R.string.export_choose_open_with)).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(chooser)
+        val candidates = buildList {
+            add(WAKEUP_PACKAGE_NAME)
+            add("$WAKEUP_PACKAGE_NAME.pro")
+            // 共存版 / 修改版包名不固定（如 ...coexist），从已安装的 .wakeup_schedule 处理者里挑同前缀的
+            addAll(
+                runCatching {
+                    pm.queryIntentActivities(viewIntent, 0)
+                        .map { it.activityInfo.packageName }
+                        .filter { it.startsWith(WAKEUP_PACKAGE_NAME) }
+                }.getOrDefault(emptyList())
+            )
+        }.distinct()
+
+        for (packageName in candidates) {
+            val directIntent = Intent(viewIntent).setPackage(packageName)
+            // 未安装 / 该包没有能处理此文件的 Activity 时抛 ActivityNotFoundException，直接试下一个
+            if (runCatching { context.startActivity(directIntent) }.isSuccess) return
         }
+
+        val chooser = Intent.createChooser(viewIntent, context.getString(R.string.export_choose_open_with)).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { context.startActivity(chooser) }
     }
+
+    private const val WAKEUP_PACKAGE_NAME = "com.suda.yzune.wakeupschedule"
 }
