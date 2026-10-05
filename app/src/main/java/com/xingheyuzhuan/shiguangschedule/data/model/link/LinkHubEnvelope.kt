@@ -41,6 +41,14 @@ object LinkHubType {
     /** 布局插件（字段契约已冻结，功能本体待实现）。 */
     const val LAYOUT_PLUGIN = "layout_plugin"
 
+    /**
+     * 校园洗浴控水设备（马影河 1 栋「智能控水」/ 2-3 栋 lifeService）。
+     *
+     * 服务端节点解析成功后**免确认直跳**洗浴流程（见 `LINK_HUB_PROTOCOL.md` 第 3 节），
+     * payload 字段契约见 [com.xingheyuzhuan.shiguangschedule.data.link.CampusShowerHandler]。
+     */
+    const val CAMPUS_SHOWER = "campus_shower"
+
     /** 已冻结契约、但当前版本尚未实现的动作类型（UI 提示更新 App 而非「未知类型」）。 */
     val RESERVED = setOf(PROXY, LAYOUT_PLUGIN)
 }

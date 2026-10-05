@@ -839,6 +839,77 @@ private fun isThirdPartyEntryRoute(currentUrl: String, def: WebAppDefinition?): 
     return hash.isBlank() || hash == "/" || entryRoutes.any { hash == it || hash.startsWith("$it/") }
 }
 
+/** 独立控水（马影河 1 栋「智能控水」）host。 */
+private const val YKT_XYYY_HOST = "yktxyyy.wbu.edu.cn"
+
+/** 当前 URL 是否处于智能控水页面。 */
+private fun isYktXyyyUrl(url: String?): Boolean {
+    if (url.isNullOrBlank()) return false
+    return runCatching { Uri.parse(url).host.equals(YKT_XYYY_HOST, ignoreCase = true) }
+        .getOrDefault(false)
+}
+
+/**
+ * 智能控水（yktxyyy）深链自动执行脚本。
+ *
+ * 全局扫码分流已由服务端 `CheckKsPos` 正证过机号，进入 H5 后不应再要求用户点一次「扫一扫」：
+ * 1. 轮询 Vue 组件树，找到带 `useWater` 且 `account` 就绪的主组件，
+ *    按页面规则 `Number(raw.substr(8, 5))` 直接调 `useWater(posno, 'K')`，绕开页面自带的调试 alert；
+ * 2. 兜底调用页面挂在 `window.scanCallback` 上的入口（临时屏蔽其调试 alert）；
+ * 3. `__cfShowerAutoUsed` 保证同一页面上下文只执行一次。
+ */
+private fun buildYktShowerAutoUseJs(raw: String): String = """
+(function() {
+  if (window.__cfShowerAutoUsed) return;
+  var raw = ${JSONObject.quote(raw)};
+  var posno = Number(String(raw).substr(8, 5));
+  if (!isFinite(posno) || posno <= 0) return;
+  function find(vm) {
+    if (!vm) return null;
+    if (typeof vm.useWater === 'function') return vm;
+    var kids = vm.${'$'}children || [];
+    for (var i = 0; i < kids.length; i++) {
+      var r = find(kids[i]);
+      if (r) return r;
+    }
+    return null;
+  }
+  var tries = 0;
+  (function tick() {
+    if (window.__cfShowerAutoUsed) return;
+    var root = document.querySelector('#app');
+    var vm = root && root.__vue__;
+    var target = vm ? find(vm) : null;
+    if (target) {
+      if (typeof target.account === 'string' && target.account.length > 0) {
+        window.__cfShowerAutoUsed = true;
+        try {
+          target.useWater(String(posno), 'K');
+        } catch (e) {
+          window.__cfShowerAutoUsed = false;
+        }
+        return;
+      }
+      if (tries++ < 60) { setTimeout(tick, 300); return; }
+    }
+    if (typeof window.scanCallback === 'function') {
+      window.__cfShowerAutoUsed = true;
+      var oldAlert = window.alert;
+      window.alert = function() {};
+      try {
+        window.scanCallback(raw);
+      } catch (e) {
+        window.__cfShowerAutoUsed = false;
+      } finally {
+        window.alert = oldAlert;
+      }
+      return;
+    }
+    if (tries++ < 60) setTimeout(tick, 300);
+  })();
+})();
+""".trimIndent()
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun FullScreenWebContent(
@@ -1164,6 +1235,10 @@ private fun FullScreenWebContent(
                                 })();
                             """.trimIndent()
                             view?.evaluateJavascript(autoJs, null)
+                        }
+                        // 智能控水（1 栋洗浴）：深链已带票据，页面就绪后自动进入设备页
+                        if (!pendingAutoScan.isNullOrBlank() && isYktXyyyUrl(url)) {
+                            view?.evaluateJavascript(buildYktShowerAutoUseJs(pendingAutoScan), null)
                         }
                     }
                 }

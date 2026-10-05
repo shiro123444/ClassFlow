@@ -195,8 +195,65 @@ class LinkHubCompactCodecTest {
 
     @Test
     fun reportsUnsupportedType() {
-        val raw = byteArrayOf(0x15, 0x00)
+        val raw = byteArrayOf(0x17, 0x00)
         assertTrue(LinkHubCompactCodec.decode(encoder.encodeToString(raw)) is LinkHubInlineResult.UnsupportedType)
+    }
+
+    @Test
+    fun roundTripsYktXyyyShowerNode() {
+        val encoded = LinkHubCompactCodec.encode(
+            LinkHubEnvelope(
+                type = LinkHubType.CAMPUS_SHOWER,
+                payload = buildJsonObject {
+                    put("system", "yktxyyy")
+                    put("posno", "10101")
+                }
+            )
+        )
+        assertEquals("FQAAJ3U", encoded)
+        val envelope = decodeOk(encoded!!)
+        assertEquals(LinkHubType.CAMPUS_SHOWER, envelope.type)
+        assertEquals("yktxyyy", envelope.payload.stringField("system"))
+        assertEquals("10101", envelope.payload.stringField("posno"))
+    }
+
+    @Test
+    fun roundTripsLifeServiceShowerNode() {
+        val encoded = LinkHubCompactCodec.encode(
+            LinkHubEnvelope(
+                type = LinkHubType.CAMPUS_SHOWER,
+                payload = buildJsonObject {
+                    put("system", "life_service")
+                    put("imei", "abc")
+                    put("port", "2")
+                }
+            )
+        )
+        assertEquals("FQEBAAAAAgNhYmM", encoded)
+        val envelope = decodeOk(encoded!!)
+        assertEquals(LinkHubType.CAMPUS_SHOWER, envelope.type)
+        assertEquals("life_service", envelope.payload.stringField("system"))
+        assertEquals("abc", envelope.payload.stringField("imei"))
+        assertEquals("2", envelope.payload.stringField("port"))
+    }
+
+    @Test
+    fun rejectsShowerWithIllegalPosno() {
+        assertNull(
+            LinkHubCompactCodec.encode(
+                LinkHubEnvelope(
+                    type = LinkHubType.CAMPUS_SHOWER,
+                    payload = buildJsonObject { put("system", "yktxyyy"); put("posno", "0") }
+                )
+            )
+        )
+    }
+
+    @Test
+    fun rejectsShowerWithTrailingGarbage() {
+        val valid = Base64.getUrlDecoder().decode("FQAAJ3U")
+        val garbage = valid + byteArrayOf(0x01)
+        assertTrue(LinkHubCompactCodec.decode(encoder.encodeToString(garbage)) is LinkHubInlineResult.Invalid)
     }
 
     @Test

@@ -15,11 +15,13 @@ import javax.inject.Singleton
 @Singleton
 class LinkHubHandlers @Inject constructor(
     openUrlHandler: OpenUrlHandler,
-    textHandler: TextHandler
+    textHandler: TextHandler,
+    campusShowerHandler: CampusShowerHandler
 ) {
 
     private val handlers: Map<String, LinkHubActionHandler> =
-        listOf(openUrlHandler, textHandler).associateBy { it.type }
+        listOf(openUrlHandler, textHandler, campusShowerHandler)
+            .associateBy { it.type }
 
     /** 按信封 `type` 查找处理器（大小写、首尾空格不敏感）。 */
     fun find(type: String): LinkHubActionHandler? = handlers[type.trim().lowercase()]

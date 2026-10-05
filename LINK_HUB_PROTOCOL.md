@@ -13,11 +13,12 @@
 | 布局插件分享 | 服务端短码（大配置） | 载荷只有清单地址，哈希/作者等元数据由服务端清单提供 |
 | 网络代理分享 | 内嵌（小配置）优先 | 口令不进服务端日志；塞不下时回退服务端短码 |
 | 任意网页 / 文本分享 | 内嵌 | 现成可用的最小闭环 |
+| **设备直达**（U净 饮水机 / 洗衣机 / 吹风机、洗浴控水器） | **不进本协议**，走 `<hub>` 的设备命名空间 | 链接内容即设备身份，见 §2.1 |
 
 入口三条，最终都进入 App 的节点确认页：
 
 1. **NFC 触碰**：标签写 `NDEF URI 记录`；App 在后台由 `NDEF_DISCOVERED` 过滤器接住，在前台由 `enableForegroundDispatch` 接住（不要求 `assetlinks.json`）。
-2. **外部链接（VIEW）**：hub host 的 `autoVerify` 过滤器注册 `/url/`、`/u/`（通用节点）与 `/w/`、`/wm/`、`/hd/`（hub 站同时也是设备直达站点，下载页 `/w/download` 就在这儿）；U净 host 单独一个 filter 注册 `/w/`、`/wm/`、`/hd/`（域名验证按 host 逐个进行，互不牵连）。两个 host 的 `.well-known/assetlinks.json` 都含 `com.shiro.classflow` 与 `com.shiro.classflow.dev`，真机 `pm get-app-links` 显示均为 `verified`：**直接导航**到这些链接（系统浏览器地址栏、聊天软件点链接、扫码）能进 App。dev 与 prod 同时安装时，系统按惯例可能弹一次选择器。
+2. **外部链接（VIEW）**：hub host 的 `autoVerify` 过滤器注册 `/url/`、`/u/`（通用节点）与 `/w/`、`/wm/`、`/hd/`、`/s/`（hub 站同时也是设备直达站点，下载页 `/w/download` 就在这儿）；U净 host 单独一个 filter 注册 `/w/`、`/wm/`、`/hd/`（域名验证按 host 逐个进行，互不牵连）。两个 host 的 `.well-known/assetlinks.json` 都含 `com.shiro.classflow` 与 `com.shiro.classflow.dev`，真机 `pm get-app-links` 显示均为 `verified`：**直接导航**到这些链接（系统浏览器地址栏、聊天软件点链接、扫码）能进 App。dev 与 prod 同时安装时，系统按惯例可能弹一次选择器。
    ⚠️ 但落地页上的按钮**不能只靠 App Links**：落地页与深链同在 hub 域下，Chrome 不会把**同域**导航交给系统（详见 §6.1），所以落地页在用户点击时改用 `intent://` 显式唤起。
 3. **App 内扫一扫**：相机或相册选图解码后走同一套路由。
 
@@ -43,6 +44,35 @@
 - 路径只允许 `/url`、`/url/{code}`、`/u`、`/u/{code}`，其中 `code` 为 `1~64` 位 `[A-Za-z0-9_-]`；
 - fragment 为空，或为紧凑载荷（**不允许包含 `=`**：`#k=v` 形式留给未来扩展）；
 - `code` 与内嵌载荷至少有一个存在。
+
+### 2.1 设备直达命名空间（不经过本协议的节点确认流程）
+
+设备类链接**内容即设备身份**，动作边界与「直接扫设备贴纸」完全等价，因此不需要节点确认、
+也不进服务端：App 解析出来就直接落到对应功能。域名同样不校验 —— 能进 App 的链接已经由
+`AndroidManifest.xml` 的 intent-filter 限定在站点域名上，这样站点换域名或本地联调都不用重写标签。
+
+```
+饮水机：      https://<域名>/w/{设备码}
+洗衣机：      https://<域名>/wm/{设备码}
+吹风机：      https://<域名>/hd/{设备码}
+洗浴 · 1栋：  https://<域名>/s/y/{机号}            # 智能控水（yktxyyy），机号为 1~5 位数字
+洗浴 · 2-3栋: https://<域名>/s/l/{设备号}          # lifeService（水表 51）
+              https://<域名>/s/l/{设备号}/{端口}    # 多路控水器，端口 1~8 位数字
+```
+
+`/s/` 的取值约定：
+
+| 段 | 规则 |
+|---|---|
+| 系统 | `y` = 1 栋智能控水（yktxyyy）；`l` = 2-3 栋 lifeService。**两个字母是系统标识的首字母缩写，只作路由用**，人可读的说明写在文档与生成器 UI 里 |
+| 设备号 | 按 URI 段编码（`encodeURIComponent`），因此设备号可以是整条厂商链接（如 `4gsk.shuibiao51.com?id=123` → `4gsk.shuibiao51.com%3Fid%3D123`） |
+| 端口 | 仅 `l` 可带，可省略 |
+| 保留段 | `download`（官网下载页）不作设备号处理 |
+
+> 为什么不把洗浴也塞进内嵌紧凑载荷（`/u/#载荷`）：base64 会把每个字节膨胀 1.33 倍，
+> 而洗浴只有「系统 + 设备号」两个字段 —— 1 栋 5 位机号打包成二进制后反而**比明文更长**，
+> 2-3 栋的设备号更是凭空多出 8 个字符。`/s/...` 既更短，也人可读：贴纸上的链接一眼能看懂，
+> 任何扫码工具都能直接解析，不必自带 base64 解码器。
 
 ## 3. 线格式 A：服务端 JSON 信封
 
@@ -101,6 +131,47 @@ User-Agent: ClassFlow/<versionName> (<platform>)
 - 重定向只允许停留在同一 host（禁止跳到第三方或内网地址）；
 - 同一 URL 在浏览器访问时应返回 H5 兜底页（用于未安装 App 的场景），JSON 与 HTML 通过 `Accept` 协商。
 
+### 3.1 动作类型 payload 契约
+
+#### `campus_shower`：校园洗浴控水设备（免确认）
+
+**首选的对外形态是 §2.1 的 `/s/y/{机号}`、`/s/l/{设备号}[/{端口}]`**：更短、人可读、离线可用。
+本类型是它的服务端形态 —— 短码可撤销、可改内容，适合「设备换位置/换编号后还能改」的场景。
+两种形态都**免确认直接落入一卡通洗浴流程**（见第 6 节），走的是同一个落地逻辑。
+`payload.system` 决定设备系统：
+
+| system | 必填 | 可选 | 说明 |
+|---|---|---|---|
+| `yktxyyy` | `posno`：1~5 位数字机号 | — | 马影河 1 栋「智能控水」；App 先调水控 `CheckKsPos` 正证，再取一次性 ticket 深链 |
+| `life_service` | `imei`：水表设备号（非空、无空白/`$`/`#`，≤256 字节） | `port`：1~8 位数字 | 马影河 2-3 栋 lifeService（水表 51），App 拼 `scanResult` 深链 |
+
+创建示例（写入 API）：
+
+```json
+{ "v": 1, "type": "campus_shower", "title": "马影河1栋 301",
+  "payload": { "system": "yktxyyy", "posno": "10101" } }
+```
+
+```json
+{ "v": 1, "type": "campus_shower", "title": "马影河2-3栋 淋浴",
+  "payload": { "system": "life_service", "imei": "1234567890", "port": "2" } }
+```
+
+约束：
+
+- 支持 CFN1 内嵌（第 4 节 `0x15`）与服务端短码两种形态：内嵌离线可用、无需服务器；短码可改内容 / 可撤销；
+- 两种形态均免确认直达（处理器声明 `autoApply` + `autoApplyInline`，与直接扫原设备二维码等价）；
+- 设备是否真实存在仍由各自后端裁决（1 栋 `CheckKsPos`、2-3 栋 lifeService），失败只提示、不误跳；
+- 浏览器侧仍显示「打开 ClassFlow / 下载」落地页或信息页，不做任何自动跳转。
+
+> **U净 设备（饮水机 / 洗衣机 / 吹风机）不走通用链接节点。** 它们的动作边界与「直接扫设备贴纸」完全等价，
+> 没必要再包一层可撤销的节点（`/u/` 链接也更长、标签占用更大），因此改用设备命名空间的直达链接
+> `/w/{cd}`、`/wm/{uuid}`、`/hd/{cd}`（见第 2.1 节与第 9 节），由 App 的深链路由直接落地。
+> 通用链接节点不再提供 `ujing_device` 类型，`0x16` 也不再分配。
+>
+> 洗浴同理，首选 `/s/y/...`、`/s/l/...`（第 2.1 节）；`campus_shower` 节点类型保留，
+> 只作为「需要可撤销 / 可改内容」时的服务端形态。
+
 ## 4. 线格式 B：内嵌紧凑二进制（CFN1）
 
 ```
@@ -115,7 +186,11 @@ fragment = base64url( CFN1 字节串 )     # 无 padding；fragment 不含 '='
 | `text` | `0x12` | UTF-8 原文（≤1024B） |
 | `proxy` | `0x13` | `kind(1B: 0=http,1=socks5)` + `port(u16 BE)` + `host(1B 长度前缀)` + `user(1B 长度前缀)` + `pass(1B 长度前缀)` |
 | `layout_plugin` | `0x14` | `flags(1B)` + 清单 URL（必须 https；哈希等元数据由服务端清单提供） |
+| `campus_shower` | `0x15` | `system(1B: 0=智能控水,1=lifeService)`；智能控水：`posno(u24 BE)`；lifeService：`flags(1B,bit0=有端口)` + 可选 `port(u32 BE)` + `imei(1B 长度前缀)`。**兼容形态**：对外生成洗浴链接请用 §2.1 的 `/s/...`，本类型只保证「已写好的内嵌载荷仍然能解码」 |
 | 逃生口 | `0x1F` | 其后为 UTF-8 JSON 信封（线格式 A 的 JSON），需要 `title`/有效期时就地升级 |
+
+> `campus_shower`（`0x15`）是洗浴的**内嵌兼容形态**（对外形态见 §2.1 的 `/s/...`）；
+> 它与服务端短码两种形态均免确认直达（设备动作与直接扫原设备二维码等价）。
 
 限制与守卫：
 
@@ -158,7 +233,11 @@ NDEF 占用 = TLV(3B) + 记录头(4B) + URI 前缀码(1B，`0x04` 已把 `https:
 | 解析失败（网络/服务端 5xx、超时） | 「网络异常」+ 重试 |
 | 读接口返回 HTML / 非 JSON（`/api/` 未落到服务端程序） | 「该分享内容暂时打不开」+ 重试 + 用浏览器打开 |
 
-任何情况下都**不会自动落地**：必须由用户在确认卡片上点「应用」。
+默认任何动作都必须由用户在确认卡片上点「应用」。例外（免确认类型解析成功即跳转，此时页面只显示品牌过渡动画，
+不显示「分享的内容」标题与确认卡片）：
+
+- **服务端短码节点**上声明 `autoApply` 的类型（如 `campus_shower`）免确认；
+- **内嵌载荷**默认仍需确认；仅当处理器同时声明 `autoApplyInline`（当前为 `campus_shower`，与直接扫原设备二维码等价）才免确认。
 
 ### 为什么 HTML 响应不塞进内置 WebView
 
@@ -223,12 +302,15 @@ intent://<host><path>[#载荷]#Intent;scheme=https;action=android.intent.action.
 | URL 解析 / 严格匹配（`/url/`、`/u/`） | ✅ 已实现 |
 | 内嵌 CFN1 编解码（open / text / proxy / plugin / JSON 逃生口） | ✅ 已实现（`open`、`text` 已接线） |
 | NFC / 扫一扫 / 一卡通链接路由进 `Destination.LinkHub` | ✅ 已实现 |
-| 节点确认页 + handler 注册表 | ✅ 已实现（内置 `open`、`text`） |
+| 节点确认页 + handler 注册表 | ✅ 已实现（内置 `open`、`text`、`campus_shower`） |
+| `/s/` 洗浴设备直达链接（第 2.1 节） | ✅ 已实现：`/s/y/{机号}`、`/s/l/{设备号}[/{端口}]` → 独立落地页，**无确认页、无标题栏**，与目标页首屏同款过渡且硬切（`isSeamlessHandoff`）；扫码与 NFC/VIEW 两条入口共用同一个解析器 |
+| `campus_shower` 校园洗浴（第 3.1 节） | ✅ 已实现：服务端短码与 `0x15` 内嵌均**免确认**直达一卡通洗浴（1 栋 `CheckKsPos` 正证、2-3 栋 lifeService） |
 | 服务端 JSON 解析（线格式 A，App 侧） | ✅ 已完成：`LinkHubClient` 取信封、按 origin 请求、404/410/网络异常分类与重试、HTML 兜底交内置 WebView |
 | hub host 的 VIEW / `autoVerify` 过滤器 | ✅ 已注册并验证通过：`/url/`、`/u/` + 设备命名空间 `/w/`、`/wm/`、`/hd/`（下载页 `/w/download` 就靠它进 App）；assetlinks.json 含 prod/dev 包名，真机 `pm get-app-links` = verified |
 | 落地页按钮 → App（`intent://`，`web/` 不入库） | ✅ 已实现并在真机（Chrome 151 / Android 16）验证：`/u/{code}` → 节点确认卡片、`/u/#载荷` → 内嵌确认卡片、`/w/download` → 下载入场动画 |
+| 免确认节点不闪确认页 | ✅ 已实现：页面外壳（标题栏 + 卡片）只在「需要用户读内容」时才出现；免确认节点从第一帧到跳转全程只有一层与目标页首屏同款的品牌过渡 |
 | 服务端实现 | ✅ 已在私有环境落地（`GET /api/v1/nodes/{code}` 给 App 读；`/url/{code}` 由落地页接管；`POST/PUT/DELETE /api/v1/nodes[/{code}]` 提供创建、改内容、撤销） |
-| URL 生成器（本地小工具，不入库） | ✅ 已实现：本地算内嵌载荷 + 本地渲染二维码 + 与 App 字节自检 |
+| URL 生成器（本地小工具，不入库） | ✅ 已实现：本地算内嵌载荷 + 本地渲染二维码 + 与 App 字节自检；U净 设备直接生成 `/w/` `/wm/` `/hd/` 直达链接（域名可改），不走节点 |
 | 分享侧（App 内上传换 code、写 NFC 标签） | ⏳ 未开始（服务端写入 API 与生成器页面已可用） |
 | `proxy` / `layout_plugin` 功能本体 | ⏳ 未开始（字段契约已冻结，见第 3、4 节） |
 | 载荷签名 / 加密 | ⏳ 未开始 |

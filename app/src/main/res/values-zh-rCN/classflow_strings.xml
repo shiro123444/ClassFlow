@@ -921,6 +921,7 @@
     <string name="link_hub_type_proxy">网络代理</string>
     <string name="link_hub_type_plugin">布局插件</string>
     <string name="link_hub_type_unknown">未知类型</string>
+    <string name="link_hub_type_campus_shower">校园洗浴</string>
     <string name="link_hub_unsupported_title">无法应用该分享内容</string>
     <string name="link_hub_unsupported_type">无法识别的分享类型：%1$s</string>
     <string name="link_hub_reserved_type">该类型需要更新 App 后才能使用</string>
@@ -928,6 +929,7 @@
     <string name="link_hub_error_expired">该分享内容已失效</string>
     <string name="link_hub_error_app_version">需要更新 App 后才能使用该内容</string>
     <string name="link_hub_error_network">网络异常，无法获取该分享内容</string>
+    <string name="link_hub_error_shower_invalid">未识别到该洗浴设备，请确认控水器编号是否正确</string>
     <string name="link_hub_error_not_json">该分享内容暂时打不开，请稍后再试</string>
     <string name="link_hub_open_in_browser">用浏览器打开</string>
     <string name="toast_web_scheme_unhandled">没有能打开该链接的应用</string>
@@ -936,6 +938,10 @@
     <string name="link_hub_applied_open">即将打开链接</string>
     <string name="link_hub_fact_target_host">目标地址</string>
     <string name="link_hub_fact_text_preview">内容预览</string>
+    <string name="link_hub_fact_shower_system">设备系统</string>
+    <string name="link_hub_fact_shower_device">设备号</string>
+    <string name="link_hub_shower_system_ykt">智能控水（马影河1栋）</string>
+    <string name="link_hub_shower_system_life">生活服务淋浴（马影河2-3栋）</string>
 
     <string-array name="language_tags">
         <item>zh-CN</item>

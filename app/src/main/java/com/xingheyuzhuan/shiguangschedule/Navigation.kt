@@ -113,6 +113,24 @@ sealed interface Destination : NavKey {
     data class CourseManagementDetail(
         val courseName: String
     ) : Destination
+
+    /**
+     * 洗浴设备直达链接（`/s/{系统}/{设备号}[/{端口}]`）的落地页。
+     *
+     * 与 [UjingWater]、[WebApp] 同级：链接里就是设备身份，落地即进洗浴流程。
+     * 独立成一个目的地（而不是复用 [LinkHub]）是因为洗浴的动作边界与「直接扫控水器二维码」
+     * 完全等价、恒免确认，复用节点页只会白搭一层「分享的内容」确认页外壳（还会闪一下）。
+     */
+    @Serializable
+    data class ShowerDirect(
+        /** `y`（1 栋智能控水）或 `l`（2-3 栋 lifeService），见 `CampusShowerLink`。 */
+        val system: String,
+        /** 1 栋为 5 位机号；2-3 栋为水表设备号 imei。 */
+        val code: String,
+        /** 多路控水器端口（仅 2-3 栋可带）。 */
+        val port: String? = null,
+        val scanId: Long = 0L
+    ) : Destination
 }
 
 /**
@@ -122,3 +140,18 @@ val Destination.isMainScreen: Boolean
     get() = this is Destination.CourseSchedule ||
             this is Destination.Settings ||
             this is Destination.TodaySchedule
+
+/**
+ * 作用：判定两个目的地之间是否为「无缝交接」，需要禁用转场动画。
+ *
+ * [Destination.ShowerDirect] / [Destination.LinkHub] 这两个「过渡页」与它们要跳转的
+ * [Destination.WebApp] 首屏都由同一个品牌过渡组件（`WbuLoadingPlaceholder`）铺满，两侧像素一致；
+ * 此时若照常播 300ms 滑动，反而会看到「过渡页滑走、新页滑入」两段动画连在一起。硬切才是真正的无缝。
+ *
+ * 说明：`LinkHub -> WebApp` 只可能来自免确认节点（`campus_shower` 是当前唯一会返回
+ * `OpenWebApp` 的处理器，且恒为免确认），需确认的节点不会走到这里。
+ */
+fun isSeamlessHandoff(from: Destination?, to: Destination?): Boolean =
+    (from is Destination.ShowerDirect && to is Destination.WebApp) ||
+            (from is Destination.WebApp && to is Destination.ShowerDirect) ||
+            (from is Destination.LinkHub && to is Destination.WebApp)

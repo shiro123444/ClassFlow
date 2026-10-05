@@ -46,7 +46,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -63,9 +65,15 @@ import com.xingheyuzhuan.shiguangschedule.data.model.link.LinkHubNode
 import com.xingheyuzhuan.shiguangschedule.data.model.link.LinkHubOrigin
 import com.xingheyuzhuan.shiguangschedule.data.model.link.LinkHubType
 import com.xingheyuzhuan.shiguangschedule.data.network.link.LinkHubUrl
+import com.xingheyuzhuan.shiguangschedule.ui.components.WbuLoadingPlaceholder
 
 /**
  * 通用链接节点读侧页面：展示节点内容与来源，用户确认后才落地。
+ *
+ * 页面外壳（标题栏「分享的内容」+ 卡片）**只在真正需要用户读内容时才出现**：
+ * 解析中、正在落地、以及处理器声明 `autoApply` / `autoApplyInline`（如 `campus_shower`）的免确认节点，
+ * 全程只有一层与目标页首屏同款的全屏品牌过渡 —— 因此免确认链接不会「先把确认页闪一下再跳走」。
+ * 一旦外壳出现过（进入确认卡片）就保持，避免用户点「应用」后状态回到 Applying 又缩回过渡态。
  *
  * 入口：NFC 触碰、外部链接（VIEW）、扫一扫；解析规则见 [LinkHubUrl] 与 `LINK_HUB_PROTOCOL.md`。
  */
@@ -83,6 +91,13 @@ fun LinkHubScreen(
     val copiedHint = stringResource(R.string.link_hub_copied)
     val rawLink = remember(code, inline, origin) { rebuildLink(code, inline, origin) }
 
+    // 是否需要页面外壳（标题栏 + 卡片）。免确认节点从第一帧到跳转全程为 false：
+    // 没有外壳就没有「确认页」，也就不存在「闪一道确认页」。
+    var shellShown by remember { mutableStateOf(false) }
+    LaunchedEffect(state) {
+        if (state !is LinkHubUiState.Resolving && state !is LinkHubUiState.Applying) shellShown = true
+    }
+
     LaunchedEffect(code, inline, origin) { viewModel.start(code, inline, origin) }
 
     // 应用成功后跳内置 WebView：本页是过渡页，直接替换栈顶
@@ -93,7 +108,26 @@ fun LinkHubScreen(
         }
     }
 
+    // 免确认类型（如 campus_shower）：解析成功即直接进入对应网页应用容器
+    LaunchedEffect(Unit) {
+        viewModel.openWebApp.collect { request ->
+            navBridge.replace(
+                Destination.WebApp(
+                    appId = request.appId,
+                    initialTargetUrl = request.initialUrl,
+                    pendingAutoScan = request.pendingAutoScan
+                )
+            )
+        }
+    }
+
     BackHandler { navBridge.popBackStack() }
+
+    // 过渡态：全屏品牌动画，与 Destination.WebApp 的首屏是同一个组件，硬切时像素一致
+    if (!shellShown) {
+        WbuLoadingPlaceholder()
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -202,19 +236,13 @@ private fun typeLabelRes(type: String): Int = when (type.trim().lowercase()) {
     else -> R.string.link_hub_type_unknown
 }
 
-@Composable
-private fun LinkHubCard(content: @Composable () -> Unit) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Column(modifier = Modifier.padding(20.dp)) { content() }
-    }
-}
-
+/**
+ * 卡片内的加载态。
+ *
+ * 只在**外壳已经出现**（即用户已经看到过确认卡片）之后的中间态使用：
+ * 此时页面是「标题栏 + 卡片」的形态，加载指示必须留在卡片里，
+ * 不能用会填满全屏的品牌过渡（它嵌在可滚动 Column 中，无限高度约束下测不出来）。
+ */
 @Composable
 private fun LoadingBlock(label: String) {
     Column(
@@ -226,6 +254,19 @@ private fun LoadingBlock(label: String) {
         CircularProgressIndicator(modifier = Modifier.size(44.dp))
         Spacer(modifier = Modifier.height(20.dp))
         Text(text = label, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun LinkHubCard(content: @Composable () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) { content() }
     }
 }
 

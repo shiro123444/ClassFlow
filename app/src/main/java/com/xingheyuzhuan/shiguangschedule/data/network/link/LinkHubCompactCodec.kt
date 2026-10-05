@@ -38,6 +38,7 @@ sealed interface LinkHubInlineResult {
  * - `0x12 text`  ：UTF-8 原文
  * - `0x13 proxy` ：kind(1B，0=http/1=socks5) + port(u16 BE) + host(1B 长度前缀) + user + pass
  * - `0x14 plugin`：flags(1B) + 清单 URL（仅清单地址，哈希等元数据由服务端清单提供）
+ * - `0x15 campus_shower`：system(1B，0=智能控水/1=lifeService) + 机号或 imei/port
  * - `0x1F`       ：逃生口 —— 其后为 UTF-8 JSON 信封（需要 title / 有效期时就地升级）
  *
  * 不使用 deflate：短文本下 zlib 头 + base64 的 33% 膨胀反而是负收益。
@@ -48,6 +49,7 @@ object LinkHubCompactCodec {
     private const val TYPE_TEXT = 0x2
     private const val TYPE_PROXY = 0x3
     private const val TYPE_PLUGIN = 0x4
+    private const val TYPE_CAMPUS_SHOWER = 0x5
     private const val TYPE_JSON = 0xF
 
     private const val FLAG_HTTPS_OMITTED = 0x1
@@ -55,10 +57,17 @@ object LinkHubCompactCodec {
     private const val KIND_HTTP = 0
     private const val KIND_SOCKS5 = 1
 
+    private const val SHOWER_SYSTEM_YKT = 0
+    private const val SHOWER_SYSTEM_LIFE = 1
+    private const val SHOWER_FLAG_HAS_PORT = 0x1
+
     private const val MAX_URL_BYTES = 512
     private const val MAX_TEXT_BYTES = 1024
     private const val MAX_HOST_BYTES = 255
     private const val MAX_CREDENTIAL_BYTES = 255
+    private const val MAX_POSNO = 99999
+    private const val MAX_PORT = 99999999
+    private const val MAX_DEVICE_NO_BYTES = 255
 
     private val json = Json { ignoreUnknownKeys = true }
     private val encoder = Base64.getUrlEncoder().withoutPadding()
@@ -87,6 +96,8 @@ object LinkHubCompactCodec {
                 val manifestUrl = envelope.payload.stringField("manifestUrl")?.trim().orEmpty()
                 encodeUrlPayload(TYPE_PLUGIN, manifestUrl, requireHttps = true) ?: return null
             }
+
+            LinkHubType.CAMPUS_SHOWER -> encodeCampusShower(envelope.payload) ?: return null
 
             else -> return null
         }
@@ -131,6 +142,8 @@ object LinkHubCompactCodec {
                     ?: return LinkHubInlineResult.Invalid
                 ok(LinkHubType.LAYOUT_PLUGIN, buildJsonObject { put("manifestUrl", manifestUrl) })
             }
+
+            TYPE_CAMPUS_SHOWER -> decodeCampusShower(bytes) ?: return LinkHubInlineResult.Invalid
 
             TYPE_JSON -> {
                 val text = bytes.copyOfRange(1, bytes.size).toString(Charsets.UTF_8)
@@ -191,6 +204,95 @@ object LinkHubCompactCodec {
         out.write(passBytes.size)
         out.write(passBytes)
         return out.toByteArray()
+    }
+
+    private fun encodeCampusShower(payload: JsonObject): ByteArray? {
+        return when (payload.stringField("system")?.trim()?.lowercase()) {
+            "yktxyyy" -> {
+                val posno = payload.stringField("posno")?.trim()?.toIntOrNull() ?: return null
+                if (posno !in 1..MAX_POSNO) return null
+                byteArrayOf(
+                    typeByte(TYPE_CAMPUS_SHOWER),
+                    SHOWER_SYSTEM_YKT.toByte(),
+                    ((posno shr 16) and 0xFF).toByte(),
+                    ((posno shr 8) and 0xFF).toByte(),
+                    (posno and 0xFF).toByte()
+                )
+            }
+
+            "life_service" -> {
+                val imeiBytes = payload.stringField("imei")?.trim().orEmpty().toByteArray(Charsets.UTF_8)
+                if (imeiBytes.isEmpty() || imeiBytes.size > MAX_DEVICE_NO_BYTES) return null
+                val portText = payload.stringField("port")?.trim().orEmpty()
+                val port = if (portText.isEmpty()) null else portText.toIntOrNull() ?: return null
+                if (port != null && port !in 1..MAX_PORT) return null
+
+                val out = ByteArrayOutputStream()
+                out.write(typeByte(TYPE_CAMPUS_SHOWER).toInt())
+                out.write(SHOWER_SYSTEM_LIFE)
+                out.write(if (port == null) 0 else SHOWER_FLAG_HAS_PORT)
+                if (port != null) {
+                    out.write((port ushr 24) and 0xFF)
+                    out.write((port ushr 16) and 0xFF)
+                    out.write((port ushr 8) and 0xFF)
+                    out.write(port and 0xFF)
+                }
+                out.write(imeiBytes.size)
+                out.write(imeiBytes)
+                out.toByteArray()
+            }
+
+            else -> null
+        }
+    }
+
+    private fun decodeCampusShower(bytes: ByteArray): LinkHubInlineResult? {
+        if (bytes.size < 3) return null
+        return when (bytes[1].toInt() and 0xFF) {
+            SHOWER_SYSTEM_YKT -> {
+                if (bytes.size != 5) return null
+                val posno = ((bytes[2].toInt() and 0xFF) shl 16) or
+                    ((bytes[3].toInt() and 0xFF) shl 8) or
+                    (bytes[4].toInt() and 0xFF)
+                if (posno !in 1..MAX_POSNO) return null
+                ok(
+                    LinkHubType.CAMPUS_SHOWER,
+                    buildJsonObject {
+                        put("system", "yktxyyy")
+                        put("posno", posno.toString())
+                    }
+                )
+            }
+
+            SHOWER_SYSTEM_LIFE -> {
+                var index = 2
+                val flags = bytes[index++].toInt() and 0xFF
+                val hasPort = flags and SHOWER_FLAG_HAS_PORT != 0
+                var port: Int? = null
+                if (hasPort) {
+                    if (index + 4 > bytes.size) return null
+                    port = ((bytes[index].toInt() and 0xFF) shl 24) or
+                        ((bytes[index + 1].toInt() and 0xFF) shl 16) or
+                        ((bytes[index + 2].toInt() and 0xFF) shl 8) or
+                        (bytes[index + 3].toInt() and 0xFF)
+                    index += 4
+                    if (port !in 1..MAX_PORT) return null
+                }
+                val (imei, next) = readSizedString(bytes, index) ?: return null
+                // 严格：不允许尾随垃圾字节
+                if (imei.isEmpty() || next != bytes.size) return null
+                ok(
+                    LinkHubType.CAMPUS_SHOWER,
+                    buildJsonObject {
+                        put("system", "life_service")
+                        put("imei", imei)
+                        if (port != null) put("port", port.toString())
+                    }
+                )
+            }
+
+            else -> null
+        }
     }
 
     // --- 解码辅助 ---

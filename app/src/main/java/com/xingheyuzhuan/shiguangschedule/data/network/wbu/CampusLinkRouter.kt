@@ -15,8 +15,12 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
  * - `/w/{cd}` -> 饮水机原生出水页面 `Destination.UjingWater(cd)`
  * - `/wm/{uuid}` -> 洗衣机 H5 页面 `Destination.WebApp`
  * - `/hd/{cd}` -> 吹风机（由 [extractHairdryer] 单独处理：调起支付宝 U净 页面）
+ * - `/s/{系统}/{设备号}[/{端口}]` -> 洗浴 `Destination.ShowerDirect`（见 [CampusShowerLink]）
  * - `/url/{code}`、短别名 `/u/{code}` -> 通用链接节点 `Destination.LinkHub`
  *   （host 必须是 [LinkHubUrl.host]，详见 `LINK_HUB_PROTOCOL.md`）
+ *
+ * 前四类是「设备直达命名空间」：链接内容即设备身份，离线可用、不需要服务端，
+ * 因此**不校验域名**（能进 App 的链接已由 `AndroidManifest.xml` 的 intent-filter 限定在站点域名上）。
  */
 object CampusLinkRouter {
 
@@ -58,7 +62,25 @@ object CampusLinkRouter {
             }
         }
 
-        // 3. 通用链接节点: /url/{code}、短别名 /u/{code}（服务端短码或内嵌 fragment 载荷）
+        // 3. 洗浴直达: /s/y/{机号}、/s/l/{设备号}[/{端口}]
+        CampusShowerLink.parse(trimmed)?.let { direct ->
+            return when (direct) {
+                is CampusShowerLink.Direct.Ykt -> Destination.ShowerDirect(
+                    system = direct.system,
+                    code = direct.posno,
+                    scanId = scanId
+                )
+
+                is CampusShowerLink.Direct.Life -> Destination.ShowerDirect(
+                    system = direct.system,
+                    code = direct.imei,
+                    port = direct.port,
+                    scanId = scanId
+                )
+            }
+        }
+
+        // 4. 通用链接节点: /url/{code}、短别名 /u/{code}（服务端短码或内嵌 fragment 载荷）
         //    先于 U净 兜底解析：内嵌载荷是 base64url，不会与设备码形式冲突
         LinkHubUrl.parse(trimmed)?.let { node ->
             return Destination.LinkHub(
@@ -69,7 +91,7 @@ object CampusLinkRouter {
             )
         }
 
-        // 4. 通用 U 净/小天鹅链接兜底解析
+        // 5. 通用 U 净/小天鹅链接兜底解析
         val ujingRes = UjingQrLink.parse(trimmed)
         if (ujingRes is UjingQrLink.Result.Water) {
             return Destination.UjingWater(cd = ujingRes.cd, scanId = scanId)

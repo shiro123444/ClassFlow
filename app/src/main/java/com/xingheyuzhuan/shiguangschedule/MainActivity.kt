@@ -754,7 +754,7 @@ fun AppNavigation(
                     val fromMain = initialState.metadata[ShiguangNavMetadata.IsMainScreenKey] ?: false
                     val toMain = targetState.metadata[ShiguangNavMetadata.IsMainScreenKey] ?: false
 
-                    if (fromMain && toMain) {
+                    if (fromMain && toMain || isSeamlessHandoff(initialState.key as? Destination, targetState.key as? Destination)) {
                         EnterTransition.None togetherWith ExitTransition.None
                     } else {
                         slideInHorizontally(initialOffsetX = { it }, animationSpec = animSpec) togetherWith
@@ -765,7 +765,7 @@ fun AppNavigation(
                     val fromMain = initialState.metadata[ShiguangNavMetadata.IsMainScreenKey] ?: false
                     val toMain = targetState.metadata[ShiguangNavMetadata.IsMainScreenKey] ?: false
 
-                    if (fromMain && toMain) {
+                    if (fromMain && toMain || isSeamlessHandoff(initialState.key as? Destination, targetState.key as? Destination)) {
                         EnterTransition.None togetherWith ExitTransition.None
                     } else {
                         slideInHorizontally(initialOffsetX = { -it / 3 }, animationSpec = animSpec) + fadeIn() togetherWith
@@ -897,6 +897,13 @@ fun AppNavigation(
                                 code = destination.code,
                                 inline = destination.inline,
                                 origin = destination.origin
+                            )
+
+                            is Destination.ShowerDirect -> com.xingheyuzhuan.shiguangschedule.ui.campus.shower.ShowerDirectScreen(
+                                navBridge = navBridge,
+                                system = destination.system,
+                                code = destination.code,
+                                port = destination.port
                             )
 
                             is Destination.AddEditCourse -> AddEditCourseScreen(

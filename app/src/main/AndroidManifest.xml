@@ -78,7 +78,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
 
-            <!-- 校园服务 NFC 感应直达入口 (NDEF_DISCOVERED: 饮水机 /w/、洗衣机 /wm/、吹风机 /hd/、通用节点 /url/ 与短别名 /u/) -->
+            <!-- 校园服务 NFC 感应直达入口 (NDEF_DISCOVERED: 饮水机 /w/、洗衣机 /wm/、吹风机 /hd/、洗浴 /s/、通用节点 /url/ 与短别名 /u/) -->
             <intent-filter>
                 <action android:name="android.nfc.action.NDEF_DISCOVERED" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -90,6 +90,8 @@
                 <data android:scheme="https" android:host="${linkHubHost}" android:pathPrefix="/w/" />
                 <data android:scheme="https" android:host="${linkHubHost}" android:pathPrefix="/wm/" />
                 <data android:scheme="https" android:host="${linkHubHost}" android:pathPrefix="/hd/" />
+                <!-- 洗浴设备直达 /s/{系统}/{设备号}（马影河 1 栋 / 2-3 栋），见 CampusShowerLink -->
+                <data android:scheme="https" android:host="${linkHubHost}" android:pathPrefix="/s/" />
                 <!-- 通用链接节点（服务端短码 / 内嵌载荷），域名来自 CLASSFLOW_LINK_HUB_HOST -->
                 <data android:scheme="https" android:host="${linkHubHost}" android:pathPrefix="/url/" />
                 <data android:scheme="https" android:host="${linkHubHost}" android:pathPrefix="/u/" />
@@ -106,7 +108,7 @@
             </intent-filter>
 
             <!--
-              通用链接节点与 hub 站设备直达入口 (VIEW: /url/、短别名 /u/，以及 hub 站同时提供的 /w/ /wm/ /hd/)。
+              通用链接节点与 hub 站设备直达入口 (VIEW: /url/、短别名 /u/，以及 hub 站同时提供的 /w/ /wm/ /hd/ /s/)。
               单独一个 filter：域名验证是按 host 逐个进行的，与 U净 host 分开写，
               某个 host 的 assetlinks.json 出问题不会牵连另一个。
               该 host 的 .well-known/assetlinks.json 已包含 com.shiro.classflow 与 .dev 两个包名。
@@ -132,6 +134,10 @@
                 <data android:scheme="https" />
                 <data android:host="${linkHubHost}" />
                 <data android:pathPrefix="/hd/" />
+                <!-- 洗浴设备直达 /s/{系统}/{设备号}（马影河 1 栋 / 2-3 栋） -->
+                <data android:scheme="https" />
+                <data android:host="${linkHubHost}" />
+                <data android:pathPrefix="/s/" />
             </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"

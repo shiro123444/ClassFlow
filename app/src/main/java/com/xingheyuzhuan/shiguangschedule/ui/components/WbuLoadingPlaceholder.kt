@@ -24,6 +24,17 @@ import androidx.compose.ui.unit.dp
 import com.xingheyuzhuan.shiguangschedule.R
 
 /**
+ * WBU 品牌强调色：浅色主题用深蓝，深色主题用浅蓝。
+ *
+ * 供品牌占位首屏与链接过渡动画等「单色纹样」场景共用，保证两处取色一致。
+ */
+@Composable
+fun wbuBrandAccent(): Color {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return if (dark) Color(0xFF8FC3EC) else Color(0xFF005FAD)
+}
+
+/**
  * 通用品牌占位首屏（预留）：品牌色铺满全屏 + WBU 编钟纹样居中。
  *
  * 编钟纹样中间为镂空（透明），会直接透出底部容器的颜色，形成「底色即纹样内胆」的效果。
@@ -36,7 +47,7 @@ fun WbuLoadingPlaceholder(
 ) {
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val backgroundColor = if (dark) Color(0xFF0F1A24) else Color(0xFFDCEAF8)
-    val accentColor = if (dark) Color(0xFF8FC3EC) else Color(0xFF005FAD)
+    val accentColor = wbuBrandAccent()
     val textColor = if (dark) Color(0xFFA9C4DA) else Color(0xFF3D6E99)
 
     Box(

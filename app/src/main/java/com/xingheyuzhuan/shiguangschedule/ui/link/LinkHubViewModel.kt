@@ -82,7 +82,8 @@ sealed interface LinkHubUiState {
  * - 内嵌载荷（URL fragment）→ 本地解码，**不联网**；
  * - 服务端短码 → [LinkHubClient] 取 JSON 信封（线格式 A，见 `LINK_HUB_PROTOCOL.md` 第 3 节）。
  *
- * 任何动作都必须经过用户点「应用」，不存在自动落地路径。
+ * 默认任何动作都必须经过用户点「应用」；声明 `autoApply` 的处理器在**服务端短码**节点上免确认落地，
+ * 声明 `autoApplyInline` 的处理器在**内嵌载荷**上同样免确认（仅限动作边界明确的设备类型）。
  */
 @HiltViewModel
 class LinkHubViewModel @Inject constructor(
@@ -96,6 +97,10 @@ class LinkHubViewModel @Inject constructor(
     /** 需要在内置 WebView 打开的地址（一次性事件）。 */
     private val _openWebView = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val openWebView: SharedFlow<String> = _openWebView.asSharedFlow()
+
+    /** 需要跳转到指定网页应用容器（一次性事件，如 `campus_shower` 免确认直达）。 */
+    private val _openWebApp = MutableSharedFlow<LinkHubApplyResult.OpenWebApp>(extraBufferCapacity = 1)
+    val openWebApp: SharedFlow<LinkHubApplyResult.OpenWebApp> = _openWebApp.asSharedFlow()
 
     private var started = false
     private var pendingHandler: LinkHubActionHandler? = null
@@ -138,20 +143,36 @@ class LinkHubViewModel @Inject constructor(
     fun apply() {
         val confirm = _state.value as? LinkHubUiState.Confirm ?: return
         val handler = pendingHandler ?: return
+        applyNode(confirm.node, handler, auto = false)
+    }
+
+    /**
+     * 执行落地。
+     *
+     * [auto] 为 true（免确认节点）时**不写任何中间状态**：状态停在 [LinkHubUiState.Resolving]，
+     * 页面因此一直保持品牌过渡态，直到被目标页替换或被失败态取代 —— 避免「确认页闪一下再跳走」。
+     * 失败仍然如实上报（[LinkHubUiState.Failed]），用户才有机会看到原因。
+     */
+    private fun applyNode(node: LinkHubNode, handler: LinkHubActionHandler, auto: Boolean) {
         viewModelScope.launch {
-            _state.value = LinkHubUiState.Applying
-            val result = runCatching { handler.apply(confirm.node.envelope) }
+            if (!auto) _state.value = LinkHubUiState.Applying
+            val result = runCatching { handler.apply(node.envelope) }
                 .getOrElse { LinkHubApplyResult.Failed(R.string.link_hub_error_invalid) }
             when (result) {
                 is LinkHubApplyResult.Done ->
                     _state.value = LinkHubUiState.Applied(result.messageRes)
 
                 is LinkHubApplyResult.Failed ->
-                    _state.value = LinkHubUiState.Failed(result.messageRes)
+                    _state.value = LinkHubUiState.Failed(result.messageRes, retryable = result.retryable)
 
                 is LinkHubApplyResult.OpenUrl -> {
-                    _state.value = LinkHubUiState.Applied(R.string.link_hub_applied_open)
+                    if (!auto) _state.value = LinkHubUiState.Applied(R.string.link_hub_applied_open)
                     _openWebView.tryEmit(result.url)
+                }
+
+                is LinkHubApplyResult.OpenWebApp -> {
+                    if (!auto) _state.value = LinkHubUiState.Applied(R.string.link_hub_applied_open)
+                    _openWebApp.tryEmit(result)
                 }
             }
         }
@@ -214,6 +235,11 @@ class LinkHubViewModel @Inject constructor(
         }
 
         pendingHandler = handler
+        // 免确认：服务端短码恒可；内嵌载荷需处理器显式声明 autoApplyInline（如 campus_shower）
+        if (handler.autoApply && (node.origin == LinkHubOrigin.SERVER || handler.autoApplyInline)) {
+            applyNode(node, handler, auto = true)
+            return
+        }
         _state.value = LinkHubUiState.Confirm(node = node, facts = handler.summarize(envelope))
     }
 

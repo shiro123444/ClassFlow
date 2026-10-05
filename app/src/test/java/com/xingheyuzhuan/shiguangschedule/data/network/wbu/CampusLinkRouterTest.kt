@@ -28,6 +28,31 @@ class CampusLinkRouterTest {
     }
 
     @Test
+    fun parsesShowerYktUri() {
+        val dest = CampusLinkRouter.parse("https://wbu.pennote.cn/s/y/10101")
+        assertNotNull(dest)
+        assertTrue(dest is Destination.ShowerDirect)
+        val shower = dest as Destination.ShowerDirect
+        assertEquals(CampusShowerLink.SYSTEM_YKT, shower.system)
+        assertEquals("10101", shower.code)
+        assertNull(shower.port)
+    }
+
+    @Test
+    fun parsesShowerLifeUriWithPort() {
+        val shower = CampusLinkRouter.parse("https://wbu.pennote.cn/s/l/1234567890/2") as Destination.ShowerDirect
+        assertEquals(CampusShowerLink.SYSTEM_LIFE, shower.system)
+        assertEquals("1234567890", shower.code)
+        assertEquals("2", shower.port)
+    }
+
+    @Test
+    fun ignoresShowerLikeUriThatIsNotADevice() {
+        assertNull(CampusLinkRouter.parse("https://wbu.pennote.cn/s/y/abc"))
+        assertNull(CampusLinkRouter.parse("https://wbu.pennote.cn/s/download"))
+    }
+
+    @Test
     fun ignoresUnrelatedUri() {
         val dest = CampusLinkRouter.parse("https://ujing.example.com/other/path")
         assertNull(dest)
