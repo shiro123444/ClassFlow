@@ -9,6 +9,8 @@ import android.util.Log
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.ConsoleMessage
+import android.webkit.JsPromptResult
+import android.webkit.JsResult
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -103,10 +105,12 @@ import com.xingheyuzhuan.shiguangschedule.data.repository.CourseConversionReposi
 import com.xingheyuzhuan.shiguangschedule.data.repository.CourseTableRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.TimeSlotRepository
 import com.xingheyuzhuan.shiguangschedule.ui.components.CourseTablePickerDialog
-import kotlinx.coroutines.Dispatchers
+import com.xingheyuzhuan.shiguangschedule.ui.components.WebJsDialogHost
+import com.xingheyuzhuan.shiguangschedule.ui.components.WebJsDialogRequest
+import com.xingheyuzhuan.shiguangschedule.ui.components.WebJsDialogState
+import com.xingheyuzhuan.shiguangschedule.ui.components.webDialogPageLabel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.launch
 import java.io.File
 
 private const val WBU_HOST = "jwxt.wbu.edu.cn"
@@ -236,6 +240,9 @@ fun WebViewScreen(
     // --- Channel 和 Bridge 实例化 ---
     val uiEventChannel = remember { Channel<WebUiEvent>(Channel.BUFFERED) }
     var androidBridge: AndroidBridge? by remember { mutableStateOf(null) }
+
+    // 网页原生 alert / confirm / prompt 的挂起队列（由 WebJsDialogHost 渲染成应用自己的弹窗）
+    val jsDialogState = remember { WebJsDialogState() }
 
 
     val webView = remember {
@@ -376,6 +383,64 @@ fun WebViewScreen(
                     }
                     return super.onConsoleMessage(consoleMessage)
                 }
+
+                // ── 劫持网页原生对话框：返回 true 表示由我们自己弹窗 ──
+                // 页面 JS 会阻塞到 JsResult 被落定为止（与系统弹窗行为一致），
+                // 因此这里只入队，落定交给 WebJsDialogHost 的按钮 / 页面销毁兜底。
+
+                override fun onJsAlert(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
+                    if (message == null || result == null) {
+                        return super.onJsAlert(view, url, message, result)
+                    }
+                    Log.d("WebViewScreen", "接管网页 alert: $message @$url")
+                    jsDialogState.enqueue(
+                        WebJsDialogRequest.Alert(
+                            pageLabel = webDialogPageLabel(url ?: view?.url),
+                            message = message,
+                            onConfirm = { result.confirm() },
+                        )
+                    )
+                    return true
+                }
+
+                override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
+                    if (message == null || result == null) {
+                        return super.onJsConfirm(view, url, message, result)
+                    }
+                    Log.d("WebViewScreen", "接管网页 confirm: $message @$url")
+                    jsDialogState.enqueue(
+                        WebJsDialogRequest.Confirm(
+                            pageLabel = webDialogPageLabel(url ?: view?.url),
+                            message = message,
+                            onConfirm = { result.confirm() },
+                            onCancel = { result.cancel() },
+                        )
+                    )
+                    return true
+                }
+
+                override fun onJsPrompt(
+                    view: WebView?,
+                    url: String?,
+                    message: String?,
+                    defaultValue: String?,
+                    result: JsPromptResult?
+                ): Boolean {
+                    if (message == null || result == null) {
+                        return super.onJsPrompt(view, url, message, defaultValue, result)
+                    }
+                    Log.d("WebViewScreen", "接管网页 prompt: $message @$url")
+                    jsDialogState.enqueue(
+                        WebJsDialogRequest.Prompt(
+                            pageLabel = webDialogPageLabel(url ?: view?.url),
+                            message = message,
+                            defaultValue = defaultValue.orEmpty(),
+                            onConfirmInput = { input -> result.confirm(input) },
+                            onCancel = { result.cancel() },
+                        )
+                    )
+                    return true
+                }
             }
 
             // 首个页面交给下面的 LaunchedEffect(currentUrl) 加载（此时可能还在探测校园网）。
@@ -464,24 +529,26 @@ fun WebViewScreen(
     DisposableEffect(webView) {
         onDispose {
             Log.d("WebViewScreen", "开始清理 WebView 资源")
+
+            // 先把还挂着的网页对话框按「取消」落定，否则页面 JS 会永久卡住
+            jsDialogState.cancelAll()
+
             webView.stopLoading()
 
-            // 在后台线程执行耗时的清理操作
-            coroutineScope.launch(Dispatchers.IO) {
-                try {
-                    webView.clearCache(true)
-                    webView.clearFormData()
-                    webView.clearHistory()
-                    // VPN cookies 已桥接到 OkHttp 持久化存储，可安全清理 WebView cookies
-                    val cookieManager = CookieManager.getInstance()
-                    cookieManager.removeAllCookies(null)
-                    cookieManager.flush()
-                    WebStorage.getInstance().deleteAllData()
-                    Log.d("WebViewScreen", "WebView 资源清理完成")
-                } catch (e: Exception) {
-                    Log.e("WebViewScreen", "清理资源时出错: ${e.message}")
-                }
-            }
+            // 注意：WebView 的方法必须在创建它的线程（主线程）上调用。
+            // 之前放在 Dispatchers.IO 里清理会抛 "A WebView method was called on thread ..."，
+            // 结果是 cache / cookies / storage 一条都没清掉，这里回到主线程执行。
+            runCatching {
+                webView.clearCache(true)
+                webView.clearFormData()
+                webView.clearHistory()
+                // VPN cookies 已桥接到 OkHttp 持久化存储，可安全清理 WebView cookies
+                val cookieManager = CookieManager.getInstance()
+                cookieManager.removeAllCookies(null)
+                cookieManager.flush()
+                WebStorage.getInstance().deleteAllData()
+                Log.d("WebViewScreen", "WebView 资源清理完成")
+            }.onFailure { Log.e("WebViewScreen", "清理资源时出错: ${it.message}", it) }
 
             webView.removeAllViews()
             webView.destroy()
@@ -694,6 +761,9 @@ fun WebViewScreen(
                 webView = webView,
                 uiEvents = uiEventChannel.receiveAsFlow()
             )
+
+            // 网页原生 alert / confirm / prompt：用应用自己的弹窗替代系统样式
+            WebJsDialogHost(jsDialogState)
 
             if (isProbingCampus) {
                 CampusNetworkProbeOverlay(

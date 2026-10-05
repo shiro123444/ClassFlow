@@ -287,6 +287,10 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="badge_standby">Backup</string>
     <string name="title_wbu_sync_schedule">WebView Import</string>
     <string name="desc_wbu_sync_schedule">Browser fallback when direct connection is blocked</string>
+    <!-- Host dialog for native alert / confirm / prompt -->
+    <string name="dialog_web_message_title">Page message</string>
+    <string name="dialog_web_message_title_from">Message from %1$s</string>
+    <string name="dialog_web_prompt_hint">Type here</string>
     <string name="status_scan_qr_to_login">Scan QR to Log In</string>
     <string name="status_qr_fetching">Fetching QR code...</string>
     <string name="status_qr_fetch_failed">Failed to load QR code. Tap to retry.</string>

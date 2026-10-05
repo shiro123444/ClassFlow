@@ -13,6 +13,8 @@ import android.util.Log
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.JsPromptResult
+import android.webkit.JsResult
 import android.webkit.PermissionRequest
 import android.webkit.SslErrorHandler
 import android.webkit.ValueCallback
@@ -110,9 +112,12 @@ import com.xingheyuzhuan.shiguangschedule.ui.components.WbuAuthPromptDialogs
 import com.xingheyuzhuan.shiguangschedule.ui.campus.qrscan.QrScannerOverlay
 import com.xingheyuzhuan.shiguangschedule.ui.components.UjingBrandLoading
 import com.xingheyuzhuan.shiguangschedule.ui.components.WbuLoadingPlaceholder
+import com.xingheyuzhuan.shiguangschedule.ui.components.WebJsDialogHost
+import com.xingheyuzhuan.shiguangschedule.ui.components.WebJsDialogRequest
+import com.xingheyuzhuan.shiguangschedule.ui.components.WebJsDialogState
+import com.xingheyuzhuan.shiguangschedule.ui.components.webDialogPageLabel
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WasherEntryResolver
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.web.DESKTOP_USER_AGENT
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -987,6 +992,12 @@ private fun FullScreenWebContent(
     }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
+    // 网页原生 alert / confirm / prompt 的挂起队列（由 WebJsDialogHost 渲染成应用自己的弹窗）
+    val jsDialogState = remember { WebJsDialogState() }
+
+    // 网页弹窗标题：优先用应用名（一卡通 / 图书馆座位预约），没匹配到定义时才退回域名
+    val jsDialogPageLabel: String? = definition?.let { context.getString(it.titleRes) }
+
     val webView = remember {
         WebView(context).apply {
             layoutParams = ViewGroup.LayoutParams(
@@ -1290,6 +1301,64 @@ private fun FullScreenWebContent(
                     loadingProgress = newProgress / 100f
                 }
 
+                // ── 劫持网页原生对话框：返回 true 表示由我们自己弹窗 ──
+                // 页面 JS 会阻塞到 JsResult 被落定为止（与系统弹窗行为一致），
+                // 因此这里只入队，落定交给 WebJsDialogHost 的按钮 / 页面销毁兜底。
+
+                override fun onJsAlert(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
+                    if (message == null || result == null) {
+                        return super.onJsAlert(view, url, message, result)
+                    }
+                    Log.i("WebAppScreen", "接管网页 alert: $message @$url")
+                    jsDialogState.enqueue(
+                        WebJsDialogRequest.Alert(
+                            pageLabel = jsDialogPageLabel ?: webDialogPageLabel(url ?: view?.url),
+                            message = message,
+                            onConfirm = { result.confirm() },
+                        )
+                    )
+                    return true
+                }
+
+                override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
+                    if (message == null || result == null) {
+                        return super.onJsConfirm(view, url, message, result)
+                    }
+                    Log.i("WebAppScreen", "接管网页 confirm: $message @$url")
+                    jsDialogState.enqueue(
+                        WebJsDialogRequest.Confirm(
+                            pageLabel = jsDialogPageLabel ?: webDialogPageLabel(url ?: view?.url),
+                            message = message,
+                            onConfirm = { result.confirm() },
+                            onCancel = { result.cancel() },
+                        )
+                    )
+                    return true
+                }
+
+                override fun onJsPrompt(
+                    view: WebView?,
+                    url: String?,
+                    message: String?,
+                    defaultValue: String?,
+                    result: JsPromptResult?
+                ): Boolean {
+                    if (message == null || result == null) {
+                        return super.onJsPrompt(view, url, message, defaultValue, result)
+                    }
+                    Log.i("WebAppScreen", "接管网页 prompt: $message @$url")
+                    jsDialogState.enqueue(
+                        WebJsDialogRequest.Prompt(
+                            pageLabel = jsDialogPageLabel ?: webDialogPageLabel(url ?: view?.url),
+                            message = message,
+                            defaultValue = defaultValue.orEmpty(),
+                            onConfirmInput = { input -> result.confirm(input) },
+                            onCancel = { result.cancel() },
+                        )
+                    )
+                    return true
+                }
+
                 override fun onPermissionRequest(request: PermissionRequest?) {
                     if (request == null) return
                     val resources = request.resources
@@ -1355,14 +1424,20 @@ private fun FullScreenWebContent(
             filePathCallback = null
             pendingPermissionRequest?.deny()
             pendingPermissionRequest = null
+
+            // 先把还挂着的网页对话框按「取消」落定，否则页面 JS 会永久卡住
+            jsDialogState.cancelAll()
+
             webView.stopLoading()
-            coroutineScope.launch(Dispatchers.IO) {
-                runCatching {
-                    webView.clearCache(true)
-                    webView.clearHistory()
-                    WebStorage.getInstance().deleteAllData()
-                }
-            }
+
+            // WebView 的方法必须在创建它的线程（主线程）上调用：放在 Dispatchers.IO 里
+            // 会直接抛 "A WebView method was called on thread ..."，等于什么都没清掉。
+            runCatching {
+                webView.clearCache(true)
+                webView.clearHistory()
+                WebStorage.getInstance().deleteAllData()
+            }.onFailure { Log.w("WebAppScreen", "清理 WebView 资源失败", it) }
+
             webView.removeAllViews()
             webView.destroy()
         }
@@ -1373,6 +1448,9 @@ private fun FullScreenWebContent(
             modifier = Modifier.fillMaxSize(),
             factory = { webView }
         )
+
+        // 网页原生 alert / confirm / prompt：用应用自己的弹窗替代系统样式
+        WebJsDialogHost(jsDialogState)
 
         if (loadingProgress < 1.0f) {
             LinearProgressIndicator(
