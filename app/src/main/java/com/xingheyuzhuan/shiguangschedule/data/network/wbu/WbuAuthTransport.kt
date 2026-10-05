@@ -1332,11 +1332,22 @@ internal class WbuAuthTransport(
                 !prefs.getString(fieldKey(FIELD_PASSWORD_IV, service, acc), null).isNullOrBlank()
         }
 
+        /**
+         * 该服务**自身**是否有可用的已保存密码：既要存过密码，也要开着「记住密码」。
+         *
+         * UI 判断「这个密码框要不要显示已保存占位符」时用这个，而不是 [hasSavedPassword]：
+         * 后者的教务回退会让教务密码框在只存了统一认证密码时也显示占位符，
+         * 与「记住密码」勾选框（按服务自身判定）自相矛盾。
+         */
+        fun hasOwnSavedPassword(context: Context, service: CredentialService): Boolean =
+            hasOwnPassword(context, service) && isRememberPasswordEnabled(context, service)
+
+        /** 该服务本次登录**能否直接用已保存的密码**（含教务对统一认证的回退）。 */
         fun hasSavedPassword(
             context: Context,
             service: CredentialService = CredentialService.UNIFIED_AUTH
         ): Boolean {
-            if (hasOwnPassword(context, service) && isRememberPasswordEnabled(context, service)) return true
+            if (hasOwnSavedPassword(context, service)) return true
             // 教务系统：自身密码槽为空时回退统一认证（两者当前共用同一密码）
             if (service == CredentialService.JIAOWU) return hasSavedPassword(context, CredentialService.UNIFIED_AUTH)
             return false

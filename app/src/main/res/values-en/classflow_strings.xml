@@ -240,6 +240,7 @@ Overwriting will replace all current courses.</string>
     <string name="pref_skip_campus_network_check">Skip Campus Network Detection</string>
     <string name="label_jwxt_password">JWXT Password</string>
     <string name="label_cas_password">CAS Password</string>
+    <string name="hint_password_follows_unified_auth">Will use the saved Unified Auth password</string>
     <string name="title_choose_auth_type">Select Authentication Mode</string>
     <string name="hint_tap_qr_to_refresh">Tap QR code to refresh</string>
     <string name="title_webvpn_sms_verification">WebVPN SMS Verification</string>

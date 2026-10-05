@@ -254,6 +254,7 @@
     <string name="pref_skip_campus_network_check">不检测校园网环境</string>
     <string name="label_jwxt_password">教务系统密码</string>
     <string name="label_cas_password">统一认证密码</string>
+    <string name="hint_password_follows_unified_auth">将使用已保存的统一认证密码</string>
     <string name="title_choose_auth_type">选择登录认证方式</string>
     <string name="hint_tap_qr_to_refresh">点二维码可刷新</string>
     <string name="title_webvpn_sms_verification">WebVPN 短信验证</string>

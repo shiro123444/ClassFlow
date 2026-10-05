@@ -1,28 +1,6 @@
 package com.xingheyuzhuan.shiguangschedule.ui.campus.components
 
 import android.content.Context
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -32,16 +10,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.unit.dp
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
@@ -65,6 +35,7 @@ import com.xingheyuzhuan.shiguangschedule.ui.components.PortalCaptchaDialog
 import com.xingheyuzhuan.shiguangschedule.ui.components.SliderCaptchaDialog
 import com.xingheyuzhuan.shiguangschedule.ui.components.SslIssueDialog
 import com.xingheyuzhuan.shiguangschedule.ui.components.VpnSmsCodeDialog
+import com.xingheyuzhuan.shiguangschedule.ui.components.VpnPasswordPromptDialog
 import com.xingheyuzhuan.shiguangschedule.ui.components.WbuAuthBottomSheet
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -262,153 +233,12 @@ fun WbuCampusAuthSheet(
     }
 
     // 2. WebVPN 统一认证密码询问弹窗（教务密码模式且未配置有效 TWFID 时触发）
+        // 2. WebVPN 统一认证密码询问弹窗（教务密码模式且未配置有效 TWFID 时触发）
     vpnPasswordDeferred?.let { deferred ->
-        var rememberVpnPassword by remember { mutableStateOf(WbuSyncEngine.isRememberVpnPasswordEnabled(context)) }
-        var hasSavedVpnPassword by remember { mutableStateOf(WbuSyncEngine.hasSavedVpnPassword(context)) }
-        var isVpnPasswordModified by remember { mutableStateOf(false) }
-        var inputPassword by remember {
-            mutableStateOf(if (WbuSyncEngine.hasSavedVpnPassword(context)) "••••••••" else "")
-        }
-        var passwordVisible by remember { mutableStateOf(false) }
-
-        DisposableEffect(rememberVpnPassword) {
-            onDispose {
-                if (!rememberVpnPassword) {
-                    WbuSyncEngine.setRememberVpnPasswordEnabled(context, false)
-                    WbuSyncEngine.clearSavedVpnPassword(context)
-                }
-            }
-        }
-
-        AlertDialog(
-            onDismissRequest = {
-                deferred.complete(null)
+        VpnPasswordPromptDialog(
+            onSubmit = { value ->
+                deferred.complete(value)
                 vpnPasswordDeferred = null
-            },
-            title = { Text(stringResource(R.string.title_connect_webvpn)) },
-            text = {
-                Column {
-                    Text(
-                        text = stringResource(R.string.desc_connect_webvpn),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = inputPassword,
-                        onValueChange = { newValue ->
-                            if (hasSavedVpnPassword && !isVpnPasswordModified) {
-                                isVpnPasswordModified = true
-                                inputPassword = if (newValue.startsWith("••••••••")) {
-                                    newValue.removePrefix("••••••••")
-                                } else if (newValue.endsWith("••••••••")) {
-                                    newValue.removeSuffix("••••••••")
-                                } else if (newValue.contains("••••••••")) {
-                                    newValue.replace("••••••••", "")
-                                } else {
-                                    newValue
-                                }
-                            } else {
-                                inputPassword = newValue
-                            }
-                        },
-                        label = { Text(stringResource(R.string.label_webvpn_password)) },
-                        singleLine = true,
-                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        trailingIcon = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(end = 6.dp)
-                            ) {
-                                // 预填已记住的密码（••••••••）时隐藏"显示密码"按钮，避免展示无意义的占位符
-                                if (!(hasSavedVpnPassword && !isVpnPasswordModified)) {
-                                    IconButton(
-                                        onClick = { passwordVisible = !passwordVisible },
-                                        modifier = Modifier.size(36.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                }
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable {
-                                            val next = !rememberVpnPassword
-                                            rememberVpnPassword = next
-                                            if (!next) {
-                                                hasSavedVpnPassword = false
-                                                if (!isVpnPasswordModified && inputPassword == "••••••••") {
-                                                    inputPassword = ""
-                                                }
-                                            } else {
-                                                WbuSyncEngine.setRememberVpnPasswordEnabled(context, true)
-                                            }
-                                        }
-                                        .padding(horizontal = 4.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = stringResource(R.string.label_remember_password),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Checkbox(
-                                        checked = rememberVpnPassword,
-                                        onCheckedChange = { next ->
-                                            rememberVpnPassword = next
-                                            if (!next) {
-                                                hasSavedVpnPassword = false
-                                                if (!isVpnPasswordModified && inputPassword == "••••••••") {
-                                                    inputPassword = ""
-                                                }
-                                            } else {
-                                                WbuSyncEngine.setRememberVpnPasswordEnabled(context, true)
-                                            }
-                                        },
-                                        modifier = Modifier
-                                            .size(20.dp)
-                                            .scale(0.85f)
-                                    )
-                                }
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val finalPassword = if (hasSavedVpnPassword && !isVpnPasswordModified) {
-                            WbuSyncEngine.getSavedVpnPassword(context) ?: ""
-                        } else {
-                            inputPassword
-                        }
-                        if (rememberVpnPassword && finalPassword.isNotBlank()) {
-                            WbuSyncEngine.saveVpnPassword(context, finalPassword)
-                        }
-                        deferred.complete(finalPassword.ifBlank { null })
-                        vpnPasswordDeferred = null
-                    }
-                ) {
-                    Text(stringResource(R.string.action_continue_connect))
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        deferred.complete(null)
-                        vpnPasswordDeferred = null
-                    }
-                ) {
-                    Text(stringResource(R.string.action_cancel))
-                }
             }
         )
     }

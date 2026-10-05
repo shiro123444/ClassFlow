@@ -82,6 +82,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -98,7 +99,6 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.google.zxing.BarcodeFormat
@@ -194,20 +194,49 @@ fun WbuAuthBottomSheet(
         CredentialService.UNIFIED_AUTH
     }
     var rememberPassword by remember(passwordService) { mutableStateOf(WbuAuthTransport.isRememberPasswordEnabled(context, passwordService)) }
-    var hasSavedPassword by remember(passwordService) { mutableStateOf(WbuAuthTransport.hasSavedPassword(context, passwordService)) }
-    var isPasswordModified by remember(passwordService) { mutableStateOf(false) }
+    // 占位符只看该服务**自身**的密码槽：教务「跟随统一认证」不算已经存过教务密码
+    var hasOwnSavedPassword by remember(passwordService) { mutableStateOf(WbuAuthTransport.hasOwnSavedPassword(context, passwordService)) }
     var studentId by remember(initialStudentId) { mutableStateOf(initialStudentId) }
-    var password by remember(passwordService) {
-        mutableStateOf(if (WbuAuthTransport.hasSavedPassword(context, passwordService)) "••••••••" else "")
-    }
+    // 每种密码类型各自一份草稿：切来切去不会把用户已经打进去的内容吞掉
+    val passwordDrafts = remember { mutableMapOf<CredentialService, PasswordDraft>() }
+    val passwordDraft = remember(passwordService) { passwordDrafts.getOrPut(passwordService) { PasswordDraft() } }
     var useVpn by remember(initialUseVpn) { mutableStateOf(initialUseVpn) }
-    // 切换密码类型时刷新该类型自己的「已保存」状态与占位符（用户已在改密码则不动输入框）
+    // 教务自身没存密码时，本次登录会「跟随统一认证」：字段保持空白，只用一行提示说明会用到统一认证密码
+    val followsUnifiedAuth = !hasOwnSavedPassword && WbuAuthTransport.hasSavedPassword(context, passwordService)
+    // 本次登录能否直接用已保存的密码（含教务回退）
+    val hasUsableSavedPassword = hasOwnSavedPassword || followsUnifiedAuth
+    /**
+     * 解析本次真正要用的密码：占位符态 → 已保存的密码；用户改过 → 草稿；草稿为空但可回退 → 回退到的统一认证密码。
+     *
+     * 槽位存在却取不出明文（换机 / 恢复备份后 KeyStore 失效）时顺手清掉这个坏槽位并要求重新输入，
+     * 绝不把占位符或空串当成密码发出去。
+     */
+    fun resolveEffectivePassword(): String {
+        val stored = if (hasOwnSavedPassword && !passwordDraft.edited) {
+            WbuAuthTransport.getSavedPassword(context, passwordService)
+        } else {
+            null
+        }
+        val effective = when {
+            !stored.isNullOrBlank() -> stored
+            passwordDraft.text.isNotBlank() -> passwordDraft.text
+            // 完全没动过输入框（显示占位符 / 教务跟随统一认证）时才允许直接用保存的密码；
+            // 用户把字段清空后再按登录，就该当成「还没输密码」，而不是又拿保存的密码去登
+            !passwordDraft.edited -> WbuAuthTransport.getSavedPassword(context, passwordService).orEmpty()
+            else -> ""
+        }
+        if (effective.isBlank() && hasOwnSavedPassword) {
+            WbuAuthTransport.setRememberPasswordEnabled(context, passwordService, false)
+            WbuAuthTransport.clearSavedPassword(context, passwordService)
+            hasOwnSavedPassword = false
+            passwordDraft.edited = true
+        }
+        return effective
+    }
+    // 切换密码类型时刷新该类型自己的「已保存」状态（草稿按服务保留，不要动用户已经打进去的内容）
     LaunchedEffect(passwordService) {
         rememberPassword = WbuAuthTransport.isRememberPasswordEnabled(context, passwordService)
-        hasSavedPassword = WbuAuthTransport.hasSavedPassword(context, passwordService)
-        if (!isPasswordModified) {
-            password = if (hasSavedPassword) "••••••••" else ""
-        }
+        hasOwnSavedPassword = WbuAuthTransport.hasOwnSavedPassword(context, passwordService)
     }
     var authMenuExpanded by remember { mutableStateOf(false) }
     var panelExpanded by remember { mutableStateOf(false) }
@@ -315,14 +344,19 @@ fun WbuAuthBottomSheet(
             }
         }
     }
-    // 延迟清空密码（防抖机制）：如果用户取消勾选了“记住密码”，在退出 BottomSheet 时统一清空持久化密码，
-    // 避免操作时误触导致数据立刻抹除
-    DisposableEffect(rememberPassword) {
+    // 取消勾选「记住密码」时不立刻抹除（防误触），只记下「这次要清哪些服务」，关闭 Sheet 时再统一清。
+    //
+    // 旧写法把 DisposableEffect 的 key 设成 rememberPassword，取消勾选那一刻旧 effect 就被 dispose，
+    // 而它捕获的委托读到的是**当前值** false —— 于是「延迟清空」实际上还是立刻清空；
+    // 而且它捕获的 passwordService 是普通值，切过密码类型之后会去清**上一个服务**的槽位。
+    val pendingPasswordClear = remember { mutableStateListOf<CredentialService>() }
+    DisposableEffect(Unit) {
         onDispose {
-            if (!rememberPassword) {
-                WbuAuthTransport.setRememberPasswordEnabled(context, passwordService, false)
-                WbuAuthTransport.clearSavedPassword(context, passwordService)
+            pendingPasswordClear.forEach { service ->
+                WbuAuthTransport.setRememberPasswordEnabled(context, service, false)
+                WbuAuthTransport.clearSavedPassword(context, service)
             }
+            pendingPasswordClear.clear()
         }
     }
     // 打开即全展开，避免内容过高时停在半展开状态，导致登录后下方的报错信息被遮挡
@@ -384,56 +418,43 @@ fun WbuAuthBottomSheet(
             when (method) {
                 WbuLoginMethod.PASSWORD -> {
                     PasswordInput(
-                        value = password,
-                        onValueChange = { newValue ->
-                            if (hasSavedPassword && !isPasswordModified) {
-                                // 第一次在占位符状态下输入：若按退格删除或直接打字，均视为重新开始输入新密码
-                                isPasswordModified = true
-                                password = if (newValue.startsWith("••••••••")) {
-                                    newValue.removePrefix("••••••••")
-                                } else if (newValue.endsWith("••••••••")) {
-                                    newValue.removeSuffix("••••••••")
-                                } else if (newValue.contains("••••••••")) {
-                                    newValue.replace("••••••••", "")
-                                } else {
-                                    newValue
-                                }
-                            } else {
-                                password = newValue
-                            }
-                        },
+                        draft = passwordDraft,
+                        hasSavedPassword = hasOwnSavedPassword,
                         authMode = authMode,
                         onAuthModeChange = { newMode ->
+                            // 只是切一下密码类型不等于要改全局偏好：登录方式在真正提交（或用户显式勾选记住密码）
+                            // 时才写回，否则「随手切一下看看」会把用户的默认登录方式改掉
                             authMode = newMode
-                            // 指定了默认登录方式时（如选课页）不写回全局偏好，避免影响其它页面
-                            if (rememberPassword && defaultAuthMode == null) {
-                                WbuAuthTransport.setSavedAuthMode(context, newMode)
-                            }
                         },
                         menuExpanded = authMenuExpanded,
                         onMenuExpandedChange = { authMenuExpanded = it },
                         lockPasswordType = lockPasswordType,
                         rememberPassword = rememberPassword,
+                        supportingText = if (followsUnifiedAuth && !passwordDraft.edited) {
+                            stringResource(R.string.hint_password_follows_unified_auth)
+                        } else {
+                            null
+                        },
                         onRememberPasswordChange = { checked ->
                             rememberPassword = checked
                             if (!checked) {
-                                hasSavedPassword = false
-                                if (!isPasswordModified && password == "••••••••") {
-                                    password = ""
-                                }
+                                // 只是取消勾选：先把占位符收起来（字段跟着变空），真正的抹除留到关闭 Sheet 时做
+                                hasOwnSavedPassword = false
+                                if (passwordService !in pendingPasswordClear) pendingPasswordClear.add(passwordService)
                             } else {
+                                pendingPasswordClear.remove(passwordService)
                                 WbuAuthTransport.setRememberPasswordEnabled(context, passwordService, true)
                                 if (defaultAuthMode == null) {
                                     WbuAuthTransport.setSavedAuthMode(context, authMode)
                                 }
-                                val effective = if (hasSavedPassword && !isPasswordModified) {
+                                val effective = if (hasOwnSavedPassword && !passwordDraft.edited) {
                                     WbuAuthTransport.getSavedPassword(context, passwordService) ?: ""
                                 } else {
-                                    password
+                                    passwordDraft.text
                                 }
                                 if (effective.isNotBlank()) {
                                     WbuAuthTransport.savePassword(context, passwordService, effective)
-                                    hasSavedPassword = true
+                                    hasOwnSavedPassword = true
                                 }
                             }
                         },
@@ -575,29 +596,29 @@ fun WbuAuthBottomSheet(
             // 登录按钮
             val (label, enabled, action) = when (method) {
                 WbuLoginMethod.PASSWORD -> {
-                    val canSubmit = studentId.isNotBlank() && (password.isNotBlank() || hasSavedPassword)
+                    val canSubmit = studentId.isNotBlank() && (
+                        passwordDraft.text.isNotBlank() || (hasUsableSavedPassword && !passwordDraft.edited)
+                        )
                     Triple(
                         primaryButtonText ?: stringResource(R.string.action_one_tap_sync),
                         canSubmit,
                         {
-                            val effectivePassword = if (hasSavedPassword && !isPasswordModified) {
-                                WbuAuthTransport.getSavedPassword(context, passwordService) ?: password
-                            } else {
-                                password
-                            }
-                            if (rememberPassword && effectivePassword.isNotBlank()) {
-                                WbuAuthTransport.setRememberPasswordEnabled(context, passwordService, true)
-                                WbuAuthTransport.savePassword(context, passwordService, effectivePassword)
-                                if (defaultAuthMode == null) {
-                                    WbuAuthTransport.setSavedAuthMode(context, authMode)
+                            val effectivePassword = resolveEffectivePassword()
+                            if (effectivePassword.isNotBlank()) {
+                                if (rememberPassword) {
+                                    WbuAuthTransport.setRememberPasswordEnabled(context, passwordService, true)
+                                    WbuAuthTransport.savePassword(context, passwordService, effectivePassword)
+                                    if (defaultAuthMode == null) {
+                                        WbuAuthTransport.setSavedAuthMode(context, authMode)
+                                    }
+                                    hasOwnSavedPassword = true
+                                } else {
+                                    // 没勾「记住密码」也走同一套延迟清理，避免一按登录就把旧密码抹掉
+                                    hasOwnSavedPassword = false
+                                    if (passwordService !in pendingPasswordClear) pendingPasswordClear.add(passwordService)
                                 }
-                                hasSavedPassword = true
-                            } else if (!rememberPassword) {
-                                WbuAuthTransport.setRememberPasswordEnabled(context, passwordService, false)
-                                WbuAuthTransport.clearSavedPassword(context, passwordService)
-                                hasSavedPassword = false
+                                onPasswordLogin(studentId, effectivePassword, useVpn, authMode)
                             }
-                            onPasswordLogin(studentId, effectivePassword, useVpn, authMode)
                         }
                     )
                 }
@@ -633,10 +654,6 @@ fun WbuAuthBottomSheet(
             if (showSyncButton) {
                 // 小按钮：默认用统一认证凭据做一次真正的 CAS 登录（不再直接复用当前 Cookie）；
                 // 调用方提供了自定义动作时（如课表页）优先用自定义的。
-                val syncPassword = password
-                    .takeIf { isPasswordModified && it != "••••••••" }
-                    .orEmpty()
-                    .ifBlank { WbuAuthTransport.getSavedPassword(context, CredentialService.UNIFIED_AUTH).orEmpty() }
                 // 双按钮：左「登录同步」(2/3) + 右「统一认证登录」图标 (1/3)
                 Row(
                     modifier = Modifier
@@ -657,6 +674,10 @@ fun WbuAuthBottomSheet(
                     }
                     Button(
                         onClick = {
+                            // 已保存密码的解密只放在点击时做：放进组合体里会让每次重组都在主线程走一遍 KeyStore
+                            val syncPassword = passwordDraft.text
+                                .takeIf { passwordDraft.edited && it.isNotBlank() }
+                                ?: WbuAuthTransport.getSavedPassword(context, CredentialService.UNIFIED_AUTH).orEmpty()
                             onSyncWithCredentials?.invoke()
                                 ?: onPasswordLogin(studentId, syncPassword, useVpn, WbuAuthMode.UNIFIED_CAS)
                         },
@@ -955,8 +976,8 @@ fun WbuAuthBottomSheet(
 }
 @Composable
 private fun PasswordInput(
-    value: String,
-    onValueChange: (String) -> Unit,
+    draft: PasswordDraft,
+    hasSavedPassword: Boolean,
     authMode: WbuAuthMode,
     onAuthModeChange: (WbuAuthMode) -> Unit,
     menuExpanded: Boolean,
@@ -964,12 +985,21 @@ private fun PasswordInput(
     lockPasswordType: Boolean = false,
     rememberPassword: Boolean,
     onRememberPasswordChange: (Boolean) -> Unit,
-    enabled: Boolean
+    enabled: Boolean,
+    supportingText: String? = null
 ) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = { Text(if (authMode == WbuAuthMode.JYXT_LEGACY) stringResource(R.string.label_jwxt_password) else stringResource(R.string.label_cas_password)) },
+    SavedPasswordField(
+        draft = draft,
+        hasSavedPassword = hasSavedPassword,
+        label = if (authMode == WbuAuthMode.JYXT_LEGACY) {
+            stringResource(R.string.label_jwxt_password)
+        } else {
+            stringResource(R.string.label_cas_password)
+        },
+        modifier = Modifier.fillMaxWidth(),
+        enabled = enabled,
+        supportingText = supportingText,
+        colors = savedPasswordFieldColors(),
         leadingIcon = {
             if (lockPasswordType) {
                 Box(
@@ -1053,17 +1083,6 @@ private fun PasswordInput(
                 )
             }
         },
-        singleLine = true,
-        visualTransformation = PasswordVisualTransformation(),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-        ),
-        enabled = enabled
     )
 }
 @Composable

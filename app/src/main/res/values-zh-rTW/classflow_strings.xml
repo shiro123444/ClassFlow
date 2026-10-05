@@ -238,6 +238,7 @@
     <string name="pref_skip_campus_network_check">不檢測校園網路環境</string>
     <string name="label_jwxt_password">教務系統密碼</string>
     <string name="label_cas_password">統一認證密碼</string>
+    <string name="hint_password_follows_unified_auth">將使用已儲存的統一認證密碼</string>
     <string name="title_choose_auth_type">選擇登入認證方式</string>
     <string name="hint_tap_qr_to_refresh">點二維碼可重新整理</string>
     <string name="title_webvpn_sms_verification">WebVPN 簡訊驗證</string>

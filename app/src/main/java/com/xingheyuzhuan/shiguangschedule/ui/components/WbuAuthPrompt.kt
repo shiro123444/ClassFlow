@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -43,6 +44,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -114,16 +117,36 @@ fun VpnPasswordPromptDialog(onSubmit: (String?) -> Unit) {
     val context = LocalContext.current
     var rememberVpnPassword by remember { mutableStateOf(WbuSyncEngine.isRememberVpnPasswordEnabled(context)) }
     var hasSavedVpnPassword by remember { mutableStateOf(WbuSyncEngine.hasSavedVpnPassword(context)) }
-    var isVpnPasswordModified by remember { mutableStateOf(false) }
-    var inputPassword by remember {
-        mutableStateOf(if (WbuSyncEngine.hasSavedVpnPassword(context)) "••••••••" else "")
-    }
+    // 门禁密码同样用「草稿 + 占位符」：占位符只是显示态，退格一次不会再把它当成真密码
+    val draft = remember { PasswordDraft() }
     var passwordVisible by remember { mutableStateOf(false) }
+    val showPlaceholder = hasSavedVpnPassword && !draft.edited
 
-    // 关闭弹窗时若用户取消了记住密码，统一清空持久化数据
-    DisposableEffect(rememberVpnPassword) {
+    /** 勾选/取消「记住密码」：勾上就地保存，取消时的抹除留到弹窗关闭（见下面的 DisposableEffect）。 */
+    fun onRememberChange(checked: Boolean) {
+        rememberVpnPassword = checked
+        if (!checked) {
+            hasSavedVpnPassword = false
+            return
+        }
+        WbuSyncEngine.setRememberVpnPasswordEnabled(context, true)
+        val effective = if (showPlaceholder) {
+            WbuSyncEngine.getSavedVpnPassword(context) ?: ""
+        } else {
+            draft.text
+        }
+        if (effective.isNotBlank()) {
+            WbuSyncEngine.saveVpnPassword(context, effective)
+            hasSavedVpnPassword = true
+        }
+    }
+
+    // 关闭弹窗时若用户取消了记住密码，统一清空持久化数据。
+    // key 用 Unit：取消勾选那一刻不该立刻抹除（误触就没了），等弹窗真正离开组合时再按最新状态清。
+    val currentRememberVpnPassword = rememberUpdatedState(rememberVpnPassword)
+    DisposableEffect(Unit) {
         onDispose {
-            if (!rememberVpnPassword) {
+            if (!currentRememberVpnPassword.value) {
                 WbuSyncEngine.setRememberVpnPasswordEnabled(context, false)
                 WbuSyncEngine.clearSavedVpnPassword(context)
             }
@@ -141,35 +164,23 @@ fun VpnPasswordPromptDialog(onSubmit: (String?) -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = inputPassword,
-                    onValueChange = { newValue ->
-                        if (hasSavedVpnPassword && !isVpnPasswordModified) {
-                            isVpnPasswordModified = true
-                            inputPassword = if (newValue.startsWith("••••••••")) {
-                                newValue.removePrefix("••••••••")
-                            } else if (newValue.endsWith("••••••••")) {
-                                newValue.removeSuffix("••••••••")
-                            } else if (newValue.contains("••••••••")) {
-                                newValue.replace("••••••••", "")
-                            } else {
-                                newValue
-                            }
-                        } else {
-                            inputPassword = newValue
-                        }
+                SavedPasswordField(
+                    draft = draft,
+                    hasSavedPassword = hasSavedVpnPassword,
+                    label = stringResource(R.string.label_webvpn_password),
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = if (passwordVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
                     },
-                    label = { Text(stringResource(R.string.label_webvpn_password)) },
-                    singleLine = true,
-                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     trailingIcon = {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(end = 6.dp)
                         ) {
-                            // 预填已记住的密码（••••••••）时隐藏"显示密码"按钮，避免展示无意义的占位符
-                            if (!(hasSavedVpnPassword && !isVpnPasswordModified)) {
+                            // 预填已记住的密码（占位符）时隐藏"显示密码"按钮，避免展示无意义的占位符
+                            if (!showPlaceholder) {
                                 IconButton(
                                     onClick = { passwordVisible = !passwordVisible },
                                     modifier = Modifier.size(36.dp)
@@ -189,18 +200,7 @@ fun VpnPasswordPromptDialog(onSubmit: (String?) -> Unit) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        val next = !rememberVpnPassword
-                                        rememberVpnPassword = next
-                                        if (!next) {
-                                            hasSavedVpnPassword = false
-                                            if (!isVpnPasswordModified && inputPassword == "••••••••") {
-                                                inputPassword = ""
-                                            }
-                                        } else {
-                                            WbuSyncEngine.setRememberVpnPasswordEnabled(context, true)
-                                        }
-                                    }
+                                    .clickable { onRememberChange(!rememberVpnPassword) }
                                     .padding(horizontal = 4.dp, vertical = 4.dp)
                             ) {
                                 Text(
@@ -211,38 +211,32 @@ fun VpnPasswordPromptDialog(onSubmit: (String?) -> Unit) {
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Checkbox(
                                     checked = rememberVpnPassword,
-                                    onCheckedChange = { next ->
-                                        rememberVpnPassword = next
-                                        if (!next) {
-                                            hasSavedVpnPassword = false
-                                            if (!isVpnPasswordModified && inputPassword == "••••••••") {
-                                                inputPassword = ""
-                                            }
-                                        } else {
-                                            WbuSyncEngine.setRememberVpnPasswordEnabled(context, true)
-                                        }
-                                    },
+                                    onCheckedChange = { onRememberChange(it) },
                                     modifier = Modifier
                                         .size(20.dp)
                                         .scale(0.85f)
                                 )
                             }
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth()
+                    }
                 )
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
-                    val finalPassword = if (hasSavedVpnPassword && !isVpnPasswordModified) {
-                        WbuSyncEngine.getSavedVpnPassword(context) ?: ""
+                    val finalPassword = if (showPlaceholder) {
+                        WbuSyncEngine.getSavedVpnPassword(context).orEmpty()
                     } else {
-                        inputPassword
+                        draft.text
                     }
                     if (rememberVpnPassword && finalPassword.isNotBlank()) {
+                        WbuSyncEngine.setRememberVpnPasswordEnabled(context, true)
                         WbuSyncEngine.saveVpnPassword(context, finalPassword)
+                    } else if (!rememberVpnPassword) {
+                        WbuSyncEngine.setRememberVpnPasswordEnabled(context, false)
+                        WbuSyncEngine.clearSavedVpnPassword(context)
+                        hasSavedVpnPassword = false
                     }
                     onSubmit(finalPassword.ifBlank { null })
                 }
@@ -374,15 +368,21 @@ object WbuAuthPromptBus {
 
     private var pending: CompletableDeferred<String?>? = null
 
+    /**
+     * 串行化补输入：弹窗本身是模态的，同时来两个请求只会互相覆盖 ——
+     * 旧的 `pending` 会被后一个覆盖，前一个 `ask` 永远等不到结果；而且 `finally` 还会把界面上的新请求一起清掉。
+     */
+    private val mutex = Mutex()
+
     /** 短信重发钩子：由发起方在调用前注入。 */
     var onResendSmsCode: (suspend () -> Unit)? = null
 
     /** 挂起等待用户输入；返回 null 表示用户取消。 */
-    suspend fun ask(request: WbuAuthPromptRequest): String? {
+    suspend fun ask(request: WbuAuthPromptRequest): String? = mutex.withLock {
         val deferred = CompletableDeferred<String?>()
         pending = deferred
         _request.value = request
-        return try {
+        try {
             deferred.await()
         } finally {
             pending = null
