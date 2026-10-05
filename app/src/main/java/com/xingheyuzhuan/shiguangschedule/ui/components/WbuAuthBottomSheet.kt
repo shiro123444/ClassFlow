@@ -142,7 +142,11 @@ private fun generateQrBitmap(content: String, size: Int = 512): ImageBitmap? {
 @Composable
 fun WbuAuthBottomSheet(
     onDismissRequest: () -> Unit,
-    onPasswordLogin: (String, String, Boolean, WbuAuthMode) -> Unit,
+    /**
+     * 密码登录。第 5 个参数是**结果回调**：Sheet 只在回调 `true` 时才把密码落盘
+     * （打错的密码不该被记住，更不该在下次静默登录里被继续使用）。
+     */
+    onPasswordLogin: (String, String, Boolean, WbuAuthMode, (Boolean) -> Unit) -> Unit,
     onDynamicCodeLogin: (String, String, Boolean) -> Unit,
     onSendDynamicCode: suspend (String, Boolean) -> DynamicCodeSendResult,
     onStartQr: (Boolean) -> Unit,
@@ -442,19 +446,11 @@ fun WbuAuthBottomSheet(
                                 hasOwnSavedPassword = false
                                 if (passwordService !in pendingPasswordClear) pendingPasswordClear.add(passwordService)
                             } else {
+                                // 勾上只表示「这次的密码登录成功后帮我记住」：真正落盘在下面的登录结果回调里，
+                                // 这里只撤销「待清理」状态并记下登录方式
                                 pendingPasswordClear.remove(passwordService)
-                                WbuAuthTransport.setRememberPasswordEnabled(context, passwordService, true)
                                 if (defaultAuthMode == null) {
                                     WbuAuthTransport.setSavedAuthMode(context, authMode)
-                                }
-                                val effective = if (hasOwnSavedPassword && !passwordDraft.edited) {
-                                    WbuAuthTransport.getSavedPassword(context, passwordService) ?: ""
-                                } else {
-                                    passwordDraft.text
-                                }
-                                if (effective.isNotBlank()) {
-                                    WbuAuthTransport.savePassword(context, passwordService, effective)
-                                    hasOwnSavedPassword = true
                                 }
                             }
                         },
@@ -605,19 +601,24 @@ fun WbuAuthBottomSheet(
                         {
                             val effectivePassword = resolveEffectivePassword()
                             if (effectivePassword.isNotBlank()) {
-                                if (rememberPassword) {
-                                    WbuAuthTransport.setRememberPasswordEnabled(context, passwordService, true)
-                                    WbuAuthTransport.savePassword(context, passwordService, effectivePassword)
-                                    if (defaultAuthMode == null) {
-                                        WbuAuthTransport.setSavedAuthMode(context, authMode)
-                                    }
-                                    hasOwnSavedPassword = true
-                                } else {
+                                val shouldRemember = rememberPassword
+                                if (!shouldRemember) {
                                     // 没勾「记住密码」也走同一套延迟清理，避免一按登录就把旧密码抹掉
                                     hasOwnSavedPassword = false
                                     if (passwordService !in pendingPasswordClear) pendingPasswordClear.add(passwordService)
                                 }
-                                onPasswordLogin(studentId, effectivePassword, useVpn, authMode)
+                                // 密码先不落盘：等调用方回报「登录成功」才保存
+                                onPasswordLogin(studentId, effectivePassword, useVpn, authMode) { success ->
+                                    if (!success) return@onPasswordLogin
+                                    if (shouldRemember) {
+                                        WbuAuthTransport.setRememberPasswordEnabled(context, passwordService, true)
+                                        WbuAuthTransport.savePassword(context, passwordService, effectivePassword)
+                                        if (defaultAuthMode == null) {
+                                            WbuAuthTransport.setSavedAuthMode(context, authMode)
+                                        }
+                                        hasOwnSavedPassword = true
+                                    }
+                                }
                             }
                         }
                     )
@@ -678,8 +679,9 @@ fun WbuAuthBottomSheet(
                             val syncPassword = passwordDraft.text
                                 .takeIf { passwordDraft.edited && it.isNotBlank() }
                                 ?: WbuAuthTransport.getSavedPassword(context, CredentialService.UNIFIED_AUTH).orEmpty()
+                            // 「同步」用的是已经保存过的密码，没有需要落盘的东西，结果回调给空实现
                             onSyncWithCredentials?.invoke()
-                                ?: onPasswordLogin(studentId, syncPassword, useVpn, WbuAuthMode.UNIFIED_CAS)
+                                ?: onPasswordLogin(studentId, syncPassword, useVpn, WbuAuthMode.UNIFIED_CAS) { }
                         },
                         modifier = Modifier
                             .weight(1f)

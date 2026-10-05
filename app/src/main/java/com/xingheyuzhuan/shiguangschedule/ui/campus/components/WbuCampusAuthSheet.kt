@@ -437,7 +437,7 @@ fun WbuCampusAuthSheet(
         onSyncWithCredentials = onSyncWithCredentials,
         onStartQr = { useVpn -> startQrFlow(useVpn) },
         onRefreshQr = { useVpn -> startQrFlow(useVpn) },
-        onPasswordLogin = { sid, pwd, useVpn, authMode ->
+        onPasswordLogin = { sid, pwd, useVpn, authMode, reportResult ->
             scope.launch {
                 try {
                     isLoading = true
@@ -626,6 +626,8 @@ fun WbuCampusAuthSheet(
                     }
 
                     isLoading = false
+                    // 回报结果：只有成功时 Sheet 才会把密码落盘（失败时什么都不存）
+                    reportResult(ok)
                     if (ok) {
                         onLoginSuccess()
                         if (dismissOnSuccess) onDismiss()
