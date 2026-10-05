@@ -125,13 +125,17 @@ private val TOP_CHROME_RESERVED = 84.dp
  */
 private val PROGRESS_NOTICE_CONTAINER = Color(0xFF2E7D32)
 
+/** 中性提示：半透明黑底 + 白字（与取景框底部的提示胶囊同款）。 */
+private val NEUTRAL_NOTICE_CONTAINER = Color.Black.copy(alpha = 0.6f)
+
 /**
  * 顶部一次性提示的语气。
  *
  * [PROGRESS] 表示「正在进行中」（如正在核验设备状态）：用绿色，让用户知道程序在干活而不是报错；
- * [ERROR] 表示「这次没成」（码不属于本 App、设备无效、网络异常等）：用主题错误色。
+ * [NEUTRAL] 表示「一个中性的识别结果」（如扫到的码不认识）：用半透明黑底，不渲染成错误；
+ * [ERROR] 表示「这次没成」（设备无效、网络异常等）：用主题错误色。
  */
-internal enum class QrNoticeTone { PROGRESS, ERROR }
+internal enum class QrNoticeTone { PROGRESS, NEUTRAL, ERROR }
 
 /**
  * 通用扫码取景脚手架：统一「扫一扫」与网页应用扫码的圆图标 UI。
@@ -331,6 +335,7 @@ internal fun QrScannerScaffold(
         notice?.let { text ->
             val (container, content) = when (noticeTone) {
                 QrNoticeTone.PROGRESS -> PROGRESS_NOTICE_CONTAINER to Color.White
+                QrNoticeTone.NEUTRAL -> NEUTRAL_NOTICE_CONTAINER to Color.White
                 QrNoticeTone.ERROR ->
                     MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
             }
@@ -340,7 +345,8 @@ internal fun QrScannerScaffold(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
-                    .padding(top = 60.dp)
+                    // 左右留边：提示再长也只折行，不会撑满屏幕宽度
+                    .padding(top = 60.dp, start = 24.dp, end = 24.dp)
             ) {
                 Text(
                     text = text,

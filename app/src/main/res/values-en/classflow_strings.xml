@@ -755,7 +755,7 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="qr_scan_need_login_title">Not signed in to unified auth</string>
     <string name="qr_scan_need_login_desc">This device must be signed in to unified auth before confirming</string>
     <string name="action_qr_scan_login">Sign in</string>
-    <string name="qr_scan_err_not_cas">Not a unified-auth sign-in code — point at the QR code shown on the computer login page</string>
+    <string name="qr_scan_err_unrecognized">Don\'t recognize this code~ (・_・?)</string>
     <string name="qr_scan_shower_checking">Verifying shower device...</string>
     <string name="qr_scan_err_shower_invalid">Shower device not recognized. Make sure you scanned the QR code on the water controller.</string>
     <string name="qr_scan_err_shower_unavailable">Could not verify the shower device. Check your network and try again.</string>

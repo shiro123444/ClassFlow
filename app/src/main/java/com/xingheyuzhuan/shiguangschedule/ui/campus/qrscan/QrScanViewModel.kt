@@ -40,9 +40,6 @@ private const val STICKY_NOTICE_POLL_MS = 200L
 
 /** 扫码失败类型。 */
 enum class QrScanError {
-    /** 扫到的不是统一认证登录二维码。 */
-    NOT_CAS_QR,
-
     /** 二维码已失效。 */
     EXPIRED,
 
@@ -73,8 +70,8 @@ sealed interface QrScanUiState {
 
 /** 取景期间的一次性提示（含相册选图路径）。 */
 enum class QrTransientNotice {
-    /** 扫到的码不是统一认证登录二维码，也不属于任何已支持的分流。 */
-    NOT_CAS_QR,
+    /** 扫到的码不属于任何已支持的分流（统一认证 / 设备码 / 通用链接节点）。 */
+    UNRECOGNIZED,
 
     /** 相册选图里没解出二维码。 */
     PHOTO_NO_CODE,
@@ -121,7 +118,7 @@ class QrScanViewModel @Inject constructor(
     )
     val state: StateFlow<QrScanUiState> = _state.asStateFlow()
 
-    /** 取景期间的一次性提示（如「不是统一认证二维码」），不中断取景。 */
+    /** 取景期间的一次性提示（码不属于任何已支持的分流、洗浴设备校验失败等），不中断取景。 */
     private val _transientNotice = MutableStateFlow<QrTransientNotice?>(null)
     val transientNotice: StateFlow<QrTransientNotice?> = _transientNotice.asStateFlow()
 
@@ -473,12 +470,12 @@ class QrScanViewModel @Inject constructor(
         tlsDeferred?.complete(allow)
     }
 
-    /** 相机每帧都会回调，扫描非统一认证码时用它节流提示。 */
+    /** 相机每帧都会回调，扫到不认识的码时用它节流提示。 */
     private fun notifyRejected() {
         val now = System.currentTimeMillis()
         if (now - lastRejectNoticeAt < 2000L) return
         lastRejectNoticeAt = now
-        showNotice(QrTransientNotice.NOT_CAS_QR)
+        showNotice(QrTransientNotice.UNRECOGNIZED)
     }
 
     /** 机号经服务端确认无效时提示（跟码：不把码移开就一直显示）。 */

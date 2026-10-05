@@ -755,7 +755,7 @@
     <string name="qr_scan_need_login_title">未登录统一认证</string>
     <string name="qr_scan_need_login_desc">扫码确认需要本机已登录统一认证</string>
     <string name="action_qr_scan_login">去登录</string>
-    <string name="qr_scan_err_not_cas">不是统一认证登录二维码，请对准电脑端登录页上的二维码</string>
+    <string name="qr_scan_err_unrecognized">不认识这个码哦~ (・_・?)</string>
     <string name="qr_scan_shower_checking">正在校验洗浴设备...</string>
     <string name="qr_scan_err_shower_invalid">未识别到洗浴设备，请确认扫描的是控水器上的二维码</string>
     <string name="qr_scan_err_shower_unavailable">洗浴设备校验失败，请检查网络后重试</string>

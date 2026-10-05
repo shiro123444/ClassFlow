@@ -755,7 +755,7 @@
     <string name="qr_scan_need_login_title">未登入統一認證</string>
     <string name="qr_scan_need_login_desc">掃碼確認需要本機已登入統一認證</string>
     <string name="action_qr_scan_login">去登入</string>
-    <string name="qr_scan_err_not_cas">不是統一認證登入二維碼，請對準電腦端登入頁上的二維碼</string>
+    <string name="qr_scan_err_unrecognized">不認識這個碼哦~ (・_・?)</string>
     <string name="qr_scan_shower_checking">正在校驗洗浴設備...</string>
     <string name="qr_scan_err_shower_invalid">未識別到洗浴設備，請確認掃描的是控水器上的二維碼</string>
     <string name="qr_scan_err_shower_unavailable">洗浴設備校驗失敗，請檢查網路後重試</string>

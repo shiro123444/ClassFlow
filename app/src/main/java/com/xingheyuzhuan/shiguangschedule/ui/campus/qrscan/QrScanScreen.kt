@@ -126,8 +126,13 @@ fun QrScanScreen(
     // 统一认证二维码在 NeedLogin 下会被 ViewModel 忽略。
     val scanning = state is QrScanUiState.Scanning || state is QrScanUiState.NeedLogin
     val notice = transientNotice
-    // 「正在核验…」是进行中状态，用绿色；其余（不属于本 App 的码、设备无效等）用错误色
-    val noticeTone = if (washerLoading || showerChecking) QrNoticeTone.PROGRESS else QrNoticeTone.ERROR
+    // 「正在核验…」是进行中状态，用绿色；「不认识这个码」只是一个中性的识别结果，用中性色；
+    // 其余（设备无效等）才是错误，用错误色
+    val noticeTone = when {
+        washerLoading || showerChecking -> QrNoticeTone.PROGRESS
+        notice == QrTransientNotice.UNRECOGNIZED -> QrNoticeTone.NEUTRAL
+        else -> QrNoticeTone.ERROR
+    }
     val noticeString = when {
         washerLoading -> stringResource(R.string.ujing_washer_checking)
         showerChecking -> stringResource(R.string.qr_scan_shower_checking)
@@ -370,7 +375,7 @@ private fun PanelCard(
 
 @Composable
 private fun noticeText(notice: QrTransientNotice): String = when (notice) {
-    QrTransientNotice.NOT_CAS_QR -> stringResource(R.string.qr_scan_err_not_cas)
+    QrTransientNotice.UNRECOGNIZED -> stringResource(R.string.qr_scan_err_unrecognized)
     QrTransientNotice.PHOTO_NO_CODE -> stringResource(R.string.qr_scan_photo_no_code)
     QrTransientNotice.SHOWER_INVALID -> stringResource(R.string.qr_scan_err_shower_invalid)
     QrTransientNotice.SHOWER_UNAVAILABLE -> stringResource(R.string.qr_scan_err_shower_unavailable)
@@ -378,7 +383,6 @@ private fun noticeText(notice: QrTransientNotice): String = when (notice) {
 
 @Composable
 private fun scannerErrorText(kind: QrScanError): String = when (kind) {
-    QrScanError.NOT_CAS_QR -> stringResource(R.string.qr_scan_err_not_cas)
     QrScanError.EXPIRED -> stringResource(R.string.qr_scan_err_expired)
     QrScanError.NETWORK -> stringResource(R.string.qr_scan_err_network)
 }
