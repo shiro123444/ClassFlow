@@ -181,6 +181,8 @@ class MainActivity : AppCompatActivity() {
         const val ACTION_QR_SCAN = "com.xingheyuzhuan.shiguangschedule.action.QR_SCAN"
         /** 桌面快捷方式「一卡通」入口 action（见 res/xml/shortcuts.xml）。 */
         const val ACTION_CAMPUS_CARD = "com.xingheyuzhuan.shiguangschedule.action.CAMPUS_CARD"
+        /** 桌面快捷方式「付款码」入口 action（见 res/xml/shortcuts.xml）。 */
+        const val ACTION_PAY_CODE = "com.xingheyuzhuan.shiguangschedule.action.PAY_CODE"
 
         /** 官网下载页入口的入场动画时长。 */
         private const val DOWNLOAD_ENTRY_ANIM_MS = 2700
@@ -358,6 +360,12 @@ class MainActivity : AppCompatActivity() {
             pendingDeepLink.value = Destination.WebApp(
                 com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId.CAMPUS_CARD.name
             )
+            return
+        }
+
+        // 桌面快捷方式「付款码」：直接进原生取码页，跳过一卡通平台首页
+        if (intent.action == ACTION_PAY_CODE) {
+            pendingDeepLink.value = Destination.CampusCardPayCode
             return
         }
 
@@ -853,6 +861,7 @@ fun AppNavigation(
                             Destination.CredentialManagement -> CredentialManagementScreen(navBridge = navBridge)
                             Destination.CourseSelection -> CourseSelectionScreen(navBridge = navBridge)
                             Destination.QrScan -> QrScanScreen(navBridge = navBridge)
+                            Destination.CampusCardPayCode -> com.xingheyuzhuan.shiguangschedule.ui.campus.paycode.PayCodeScreen(navBridge = navBridge)
                             Destination.UpdateRepo -> UpdateRepoScreen(navBridge = navBridge)
                             Destination.NotificationSettings -> NotificationSettingsScreen(onBack = navBridge::popBackStack)
                             Destination.LanguageSettings -> LanguageSettingScreen(onBack = navBridge::popBackStack)

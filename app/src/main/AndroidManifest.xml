@@ -89,6 +89,11 @@
                 <action android:name="com.xingheyuzhuan.shiguangschedule.action.CAMPUS_CARD" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <!-- 桌面长按图标「付款码」快捷方式入口（直达原生取码页） -->
+            <intent-filter>
+                <action android:name="com.xingheyuzhuan.shiguangschedule.action.PAY_CODE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
 
             <!-- 校园服务 NFC 感应直达入口 (NDEF_DISCOVERED: 饮水机 /w/、洗衣机 /wm/、吹风机 /hd/、洗浴 /s/、通用节点 /url/ 与短别名 /u/) -->
             <intent-filter>

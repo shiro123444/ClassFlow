@@ -56,6 +56,9 @@ sealed interface Destination : NavKey {
     @Serializable data object CourseSelection : Destination
     @Serializable data object QrScan : Destination
 
+    /** 一卡通付款码（原生取码页面，无需进入平台 WebApp）。 */
+    @Serializable data object CampusCardPayCode : Destination
+
     // --- 动态传参页面 ---
 
     @Serializable

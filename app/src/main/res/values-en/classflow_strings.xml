@@ -976,4 +976,32 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="fail_unexpected">The operation did not succeed. The school system may have changed; please retry later</string>
     <string name="desc_enter_unified_auth_password">No unified-authentication password is saved on this device. Enter it to continue</string>
     <string name="action_use_webvpn_once">Use WebVPN for this try</string>
+
+    <!-- Campus-card payment code (native page) -->
+    <string name="title_campus_pay_code">Payment Code</string>
+    <string name="service_pay_code">Payment Code</string>
+    <string name="desc_pay_code">Opens straight to your campus-card payment code, no need to dig through the platform menu</string>
+    <string name="shortcut_short_pay_code">Payment Code</string>
+    <string name="loading_pay_code">Requesting your payment code…</string>
+    <string name="pay_code_balance">Balance ¥%1$s</string>
+    <string name="pay_code_bank_card_tail">Ending in %1$s</string>
+    <string name="pay_code_valid_for">Refreshes in %1$d s</string>
+    <string name="pay_code_refreshing">Getting a new code…</string>
+    <string name="pay_code_expired">This code has expired. Pull down to refresh</string>
+    <string name="pay_code_hint">Hold the QR code in front of the scanner (about 10–20 cm)</string>
+    <string name="pay_code_no_methods">No payment method is available for this account</string>
+    <string name="pay_code_method_unavailable">This payment method is not activated yet</string>
+    <string name="pay_code_card_lost">The campus card is reported lost. Unblock it on the official page first</string>
+    <string name="pay_code_card_frozen">The campus card is frozen. Resolve it on the official page first</string>
+    <string name="pay_code_card_expired">The campus card has expired. Renew it on the official page first</string>
+    <string name="pay_code_bank_unsigned">The bank card has not been signed up yet. Sign up on the official page first</string>
+    <string name="pay_code_error_empty">The campus-card platform did not return a payment code</string>
+    <string name="pay_code_error_load_failed">Failed to get the payment code. Please retry</string>
+    <string name="action_open_official_page">Open official page</string>
+    <string name="a11y_pay_code_qr">Payment code QR</string>
+    <string name="a11y_pay_code_barcode">Payment code barcode</string>
+    <string name="pay_code_action_qr">QR code</string>
+    <string name="pay_code_action_barcode">Barcode</string>
+    <string name="pay_code_action_digits">Digits</string>
+    <string name="pay_code_overlay_hint">Tap anywhere to go back</string>
 </resources>

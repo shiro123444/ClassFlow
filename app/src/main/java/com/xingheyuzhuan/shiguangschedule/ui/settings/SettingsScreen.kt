@@ -267,6 +267,13 @@ fun SettingsScreen(
                     )
                     SettingDivider()
                     SettingTile(
+                        icon = androidx.compose.material.icons.Icons.Rounded.QrCode2,
+                        title = stringResource(R.string.service_pay_code),
+                        subtitle = stringResource(R.string.desc_pay_code),
+                        onClick = { navBridge.navigate(Destination.CampusCardPayCode) }
+                    )
+                    SettingDivider()
+                    SettingTile(
                         icon = androidx.compose.material.icons.Icons.Rounded.HowToReg,
                         title = stringResource(R.string.item_course_selection),
                         subtitle = stringResource(R.string.desc_course_selection),

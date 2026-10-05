@@ -39,6 +39,14 @@ class WbuCampusCardClient(
         const val RESULT_PATH = "/plat/?name=loginTransit"
         const val OAUTH_BASIC = "bW9iaWxlX3NlcnZpY2VfcGxhdGZvcm06bW9iaWxlX3NlcnZpY2VfcGxhdGZvcm1fc2VjcmV0"
         const val CAS_CLIENT_ID = "1524429607647793152"
+
+        /**
+         * 平台「校园码 / 付款码」内页路径。
+         *
+         * 页面用 history 路由（`base = /plat/`），完整地址是 `/plat/campusCode?synjones-auth=<token>`；
+         * 原生页面在「脱机码 / 接口异常」时回落到这一页，见 [buildLaunchUrl]。
+         */
+        const val PATH_CAMPUS_CODE = "campusCode"
     }
 
     data class TokenResult(
@@ -361,10 +369,14 @@ class WbuCampusCardClient(
     }
 
     /**
-     * 构造供 WebView 打开的一卡通平台主页 URL（注入 ?synjones-auth=<access_token>）。
+     * 构造供 WebView 打开的一卡通平台 URL（注入 ?synjones-auth=<access_token>）。
+     *
+     * @param path 平台内页路径（如 `campusCode` = 校园码 / 付款码页）；null 或空 = 平台首页 `?name=` 入口。
+     *             平台路由是 history 模式（`base = /plat/`），内页地址形如 `/plat/campusCode`。
      */
-    fun buildLaunchUrl(accessToken: String): String {
-        return "$BASE_URL/plat/?synjones-auth=$accessToken"
+    fun buildLaunchUrl(accessToken: String, path: String? = null): String {
+        val page = path?.trim()?.trim('/')?.takeIf { it.isNotBlank() } ?: return "$BASE_URL/plat/?synjones-auth=$accessToken"
+        return "$BASE_URL/plat/$page?synjones-auth=$accessToken"
     }
 
     /**

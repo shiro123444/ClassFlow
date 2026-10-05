@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 付款码快捷方式图标：自带底色，避免依赖 Launcher 的图标底色（浅/深色桌面均可见）。
+     图案 = 取景框 + 人民币符号（「付款」语义），与「扫一扫」的纯二维码图标区分开。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 背景圆角底色 -->
+    <path
+        android:fillColor="#FFE4EC"
+        android:pathData="M0,24 A24,24 0 0 1 24,0 H84 A24,24 0 0 1 108,24 V84 A24,24 0 0 1 84,108 H24 A24,24 0 0 1 0,84 Z" />
+
+    <!-- 取景框（四角） -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M20,34 V26 A6,6 0 0 1 26,20 H34 M74,20 H82 A6,6 0 0 1 88,26 V34 M88,74 V82 A6,6 0 0 1 82,88 H74 M34,88 H26 A6,6 0 0 1 20,82 V74"
+        android:strokeColor="#D81B60"
+        android:strokeWidth="5" />
+
+    <!-- 人民币符号：Y 形 -->
+    <path
+        android:fillColor="#D81B60"
+        android:pathData="M41,38 L54,53 L67,38 V45 L54,60 L41,45 Z" />
+
+    <!-- 人民币符号：竖笔 -->
+    <path
+        android:fillColor="#D81B60"
+        android:pathData="M51,59 H57 V78 H51 Z" />
+
+    <!-- 人民币符号：两横 -->
+    <path
+        android:fillColor="#D81B60"
+        android:pathData="M41,57 H67 V62 H41 Z" />
+    <path
+        android:fillColor="#D81B60"
+        android:pathData="M41,67 H67 V72 H41 Z" />
+</vector>

@@ -976,4 +976,32 @@
     <string name="fail_unexpected">操作未成功，可能是學校系統有變動，請稍後重試</string>
     <string name="desc_enter_unified_auth_password">本機沒有儲存統一認證密碼，輸入後繼續</string>
     <string name="action_use_webvpn_once">改用 WebVPN</string>
+
+    <!-- 一卡通付款碼（原生頁面） -->
+    <string name="title_campus_pay_code">付款碼</string>
+    <string name="service_pay_code">付款碼</string>
+    <string name="desc_pay_code">開啟即顯示一卡通校園碼，無需進入平台內翻找選單</string>
+    <string name="shortcut_short_pay_code">付款碼</string>
+    <string name="loading_pay_code">正在向一卡通平台取碼…</string>
+    <string name="pay_code_balance">餘額 ¥%1$s</string>
+    <string name="pay_code_bank_card_tail">末四碼 %1$s</string>
+    <string name="pay_code_valid_for">還有 %1$d 秒自動換碼</string>
+    <string name="pay_code_refreshing">正在取新碼…</string>
+    <string name="pay_code_expired">目前的碼已過期，請下拉重新整理</string>
+    <string name="pay_code_hint">請將二維碼對準掃碼器（約 10–20 公分）</string>
+    <string name="pay_code_no_methods">目前帳號沒有可用的付款方式</string>
+    <string name="pay_code_method_unavailable">該付款方式尚未開通</string>
+    <string name="pay_code_card_lost">校園卡已掛失，請先在官方頁面解除掛失</string>
+    <string name="pay_code_card_frozen">校園卡已凍結，請先在官方頁面處理</string>
+    <string name="pay_code_card_expired">校園卡已過期，請先在官方頁面續期</string>
+    <string name="pay_code_bank_unsigned">銀行卡尚未簽約，請先在官方頁面簽約</string>
+    <string name="pay_code_error_empty">一卡通平台暫時沒有下發付款碼</string>
+    <string name="pay_code_error_load_failed">付款碼取得失敗，請重試</string>
+    <string name="action_open_official_page">開啟官方頁面</string>
+    <string name="a11y_pay_code_qr">付款碼二維碼</string>
+    <string name="a11y_pay_code_barcode">付款碼條碼</string>
+    <string name="pay_code_action_qr">二維碼</string>
+    <string name="pay_code_action_barcode">條碼</string>
+    <string name="pay_code_action_digits">數字碼</string>
+    <string name="pay_code_overlay_hint">點擊任意處返回</string>
 </resources>

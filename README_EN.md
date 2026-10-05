@@ -46,9 +46,10 @@
 | Academic progress | Degree completion and course-category progress |
 | Library | Search the catalogue, view loans, renew books |
 | Campus card | Balance, transactions, utility payments |
+| Payment code | Native campus-code screen: code on entry, auto-rotation, balance, screen kept on at full brightness; QR, CODE128 barcode and a digits view, with an official-page fallback |
 | Scan | Let your phone complete the unified-auth QR login for a PC (status 2 → 1) and route Ujing device codes / shower controllers / generic link nodes; ML Kit / ZXing engines, gallery import supported |
 | Ujing devices | Jump straight to water dispensers, hair dryers, washers and dryers from their QR codes |
-| Desktop shortcuts | Long-press the app icon for "Scan" and "Campus Card" |
+| Desktop shortcuts | Long-press the app icon for "Scan", "Campus Card" and "Payment Code" |
 
 ### 👤 Accounts & credentials
 

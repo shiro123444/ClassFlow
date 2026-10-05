@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 桌面长按图标的静态快捷方式：扫一扫、一卡通（prod 变体）。
+<!-- 桌面长按图标的静态快捷方式：扫一扫、一卡通、付款码（prod 变体）。
      显式指定 targetPackage 与 targetClass 为当前变体，避免与 dev 变体共存时系统弹出应用选择器。 -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -23,6 +23,19 @@
 
         <intent
             android:action="com.xingheyuzhuan.shiguangschedule.action.CAMPUS_CARD"
+            android:targetPackage="com.shiro.classflow"
+            android:targetClass="com.xingheyuzhuan.shiguangschedule.MainActivity" />
+    </shortcut>
+
+    <!-- 付款码：直达原生取码页（一卡通校园码），不必先进平台首页再翻菜单 -->
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_pay_code"
+        android:shortcutId="pay_code"
+        android:shortcutShortLabel="@string/shortcut_short_pay_code">
+
+        <intent
+            android:action="com.xingheyuzhuan.shiguangschedule.action.PAY_CODE"
             android:targetPackage="com.shiro.classflow"
             android:targetClass="com.xingheyuzhuan.shiguangschedule.MainActivity" />
     </shortcut>
