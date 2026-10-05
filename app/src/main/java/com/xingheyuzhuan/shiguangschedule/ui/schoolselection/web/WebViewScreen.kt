@@ -140,7 +140,7 @@ fun WebViewScreen(
     val coroutineScope = rememberCoroutineScope()
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    val startedEmpty: Boolean = remember { initialUrl.isNullOrBlank() || initialUrl == "about:blank" }
+    val startedEmpty: Boolean = remember { isBlankWebPageUrl(initialUrl) }
 
     // --- 预取字符串资源 ---
     val titleEnterUrl = stringResource(R.string.title_enter_url)
@@ -164,8 +164,18 @@ fun WebViewScreen(
         initialUrl?.contains("wbu.edu.cn", ignoreCase = true) == true
     }
 
-    var currentUrl by remember { mutableStateOf(if (isWbuFlow) "about:blank" else (initialUrl ?: "about:blank")) }
-    var inputUrl by remember { mutableStateOf(if (isWbuFlow) "https://" else (initialUrl ?: "https://")) }
+    // 首个要加载的地址：WBU 流程要等校园网探测出结果，空白启动则等用户输入，先留空。
+    // 这里刻意不用 "about:blank" 作为初始地址——空白页一旦被写进 WebView 历史，
+    // 用户按返回就会先停在白屏上，得再按一次才能真正退出。
+    val initialLoadUrl: String = remember {
+        if (isWbuFlow) "" else initialUrl?.takeIf { it.isNotBlank() && it != BLANK_WEB_PAGE_URL }.orEmpty()
+    }
+    val initialInputUrl: String = remember {
+        if (isWbuFlow) "https://"
+        else initialUrl?.takeIf { it.isNotBlank() && it != BLANK_WEB_PAGE_URL } ?: "https://"
+    }
+    var currentUrl by remember { mutableStateOf(initialLoadUrl) }
+    var inputUrl by remember { mutableStateOf(initialInputUrl) }
     var isProbingCampus by remember { mutableStateOf(isWbuFlow) }
     val defaultProbingText = stringResource(R.string.status_probing_campus_network)
     var probeStatusText by remember { mutableStateOf(defaultProbingText) }
@@ -368,7 +378,8 @@ fun WebViewScreen(
                 }
             }
 
-            loadUrl(if (isWbuFlow) "about:blank" else (initialUrl ?: "about:blank"))
+            // 首个页面交给下面的 LaunchedEffect(currentUrl) 加载（此时可能还在探测校园网）。
+            // 这里不再预载 "about:blank"：它会被写进历史，让「返回」先停在白屏上。
         }
     }
 
@@ -422,18 +433,17 @@ fun WebViewScreen(
         }
     }
 
-    // 状态改变时加载 URL
+    // 状态改变时加载 URL。
+    // 首个地址同样走这里加载，因此 WebView 历史的第一条就是真实页面，
+    // 空白状态（等待探测 / 等待输入）不加载任何页面，也就不会污染返回栈。
     LaunchedEffect(currentUrl) {
-        if (currentUrl.isNotBlank() && currentUrl != "about:blank") {
-            val urlToLoad = if (currentUrl.startsWith("http://") || currentUrl.startsWith("https://")) {
-                currentUrl
-            } else {
-                "https://$currentUrl"
-            }
-            webView.loadUrl(urlToLoad)
-        } else if (currentUrl == "about:blank") {
-            webView.loadUrl("about:blank")
+        if (isBlankWebPageUrl(currentUrl)) return@LaunchedEffect
+        val urlToLoad = if (currentUrl.startsWith("http://") || currentUrl.startsWith("https://")) {
+            currentUrl
+        } else {
+            "https://$currentUrl"
         }
+        webView.loadUrl(urlToLoad)
     }
 
     BackHandler {
@@ -443,8 +453,8 @@ fun WebViewScreen(
             isEditingUrl = false
             inputUrl = webView.url ?: currentUrl
             keyboardController?.hide()
-        } else if (webView.canGoBack()) {
-            webView.goBack()
+        } else if (webView.goBackSkippingBlankPages()) {
+            // 已在 WebView 内回退到上一条有效页面（跳过可能残留的 about:blank 空白页）
         } else {
             navBridge.popBackStack()
         }
@@ -549,7 +559,7 @@ fun WebViewScreen(
                         } else if (enableAddressBarToggleButton || startedEmpty) {
                             IconButton(onClick = {
                                 isEditingUrl = true
-                                inputUrl = webView.url?.takeIf { it.isNotBlank() && it != "about:blank" } ?: "https://"
+                                inputUrl = webView.url?.takeIf { !isBlankWebPageUrl(it) } ?: "https://"
                                 keyboardController?.show()
                             }) {
                                 Icon(Icons.Default.Link, contentDescription = stringResource(R.string.a11y_enter_url))
@@ -585,7 +595,7 @@ fun WebViewScreen(
                                     val tText = if (isDesktopMode) toastSwitchedToDesktop else toastSwitchedToPhone
                                     Toast.makeText(context, tText, Toast.LENGTH_SHORT).show()
 
-                                    if (currentUrl.isNotBlank() && currentUrl != "about:blank") {
+                                    if (!isBlankWebPageUrl(currentUrl)) {
                                         webView.loadUrl(currentUrl)
                                     } else {
                                         Toast.makeText(context, toastUrlEmpty, Toast.LENGTH_LONG).show()

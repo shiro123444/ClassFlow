@@ -5,6 +5,50 @@ import android.webkit.WebView
 // 桌面模式的 User Agent
 const val DESKTOP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+/** WebView 未加载任何页面时的占位地址。 */
+const val BLANK_WEB_PAGE_URL = "about:blank"
+
+/**
+ * 判断某个地址是否属于「空白页」：空串（还没加载过）或 [BLANK_WEB_PAGE_URL]。
+ *
+ * 这类地址不应该出现在返回路径上——否则用户按返回只会看到一张白屏，得再按一次才能退出。
+ */
+fun isBlankWebPageUrl(url: String?): Boolean =
+    url.isNullOrBlank() || url.equals(BLANK_WEB_PAGE_URL, ignoreCase = true)
+
+/**
+ * 计算历史中「上一条有效页面」的下标：从 [currentIndex] 往前逐条跳过空白页。
+ *
+ * 抽成纯函数是为了能直接用单元测试覆盖（见 `WebViewBackNavigationTest`）。
+ *
+ * @param urls 历史条目地址，下标从小到大排列
+ * @param currentIndex 当前条目下标
+ * @return 上一条有效页面的下标；返回 null 表示前面已经没有有效页面
+ */
+fun previousRealHistoryIndex(urls: List<String?>, currentIndex: Int): Int? {
+    var index = currentIndex - 1
+    while (index >= 0) {
+        if (!isBlankWebPageUrl(urls.getOrNull(index))) return index
+        index--
+    }
+    return null
+}
+
+/**
+ * 在 WebView 内回退到上一条有效页面，自动跳过 `about:blank` 之类的空白历史条目。
+ *
+ * @return true 表示已触发回退；false 表示前面没有有效页面，调用方应直接退出当前页面
+ */
+fun WebView.goBackSkippingBlankPages(): Boolean {
+    val history = copyBackForwardList()
+    val urls = (0 until history.size).map { history.getItemAtIndex(it)?.url }
+    val currentIndex = history.currentIndex
+    val targetIndex = previousRealHistoryIndex(urls, currentIndex) ?: return false
+    val steps = targetIndex - currentIndex
+    if (steps == -1) goBack() else goBackOrForward(steps)
+    return true
+}
+
 /**
  * 注入网页端交互所需的所有 JavaScript 代码。
  * 包括：
