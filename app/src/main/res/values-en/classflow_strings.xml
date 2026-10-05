@@ -166,7 +166,6 @@ Latest: %2$s</string>
     <string name="desc_campus_network_direct">For on-campus Wi-Fi / wired network</string>
     <string name="label_webvpn_access">WebVPN (Remote)</string>
     <string name="desc_webvpn_access">For off-campus access via VPN</string>
-    <string name="desc_ignore_saved_session">Ignore saved session and force re-login</string>
     <string name="a11y_sync_wbu_schedule">One-tap sync WBU schedule</string>
     <string name="onboarding_tap_anywhere_finish">✓ Tap anywhere to finish</string>
     <string name="onboarding_tap_anywhere_continue">Tap anywhere to continue →</string>
@@ -568,7 +567,6 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="err_otp_login_failed">SMS code login failed. Please check your verification code.</string>
     <string name="format_err_sync_error">Sync error: %1$s</string>
     <string name="snackbar_no_syncable_table">No syncable schedule found</string>
-    <string name="snackbar_ignored_saved_session">Saved session ignored. Please log in again</string>
     <string name="snackbar_otp_submitted_syncing">Code submitted. Synchronizing in background, please wait~</string>
     <string name="snackbar_otp_resent">Verification code resent</string>
     <string name="snackbar_otp_resend_failed">Failed to resend code. Please retry later.</string>

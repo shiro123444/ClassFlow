@@ -164,7 +164,6 @@
     <string name="desc_campus_network_direct">适用于在校园内连接校园网</string>
     <string name="label_webvpn_access">WebVPN 访问</string>
     <string name="desc_webvpn_access">适用于校外通过VPN访问</string>
-    <string name="desc_ignore_saved_session">忽略已保存登录态，强制重新登录</string>
     <string name="a11y_sync_wbu_schedule">一键同步武商院课表</string>
     <string name="onboarding_tap_anywhere_finish">✓ 点击任意处完成</string>
     <string name="onboarding_tap_anywhere_continue">点击任意处继续 →</string>
@@ -568,7 +567,6 @@
     <string name="err_otp_login_failed">动态码登录失败，请检查验证码</string>
     <string name="format_err_sync_error">同步发生错误: %1$s</string>
     <string name="snackbar_no_syncable_table">当前没有可同步的课表</string>
-    <string name="snackbar_ignored_saved_session">已忽略已保存登录态，请重新登录</string>
     <string name="snackbar_otp_submitted_syncing">验证码已提交，后台脚本正在继续同步，请稍候~</string>
     <string name="snackbar_otp_resent">验证码已重新发送</string>
     <string name="snackbar_otp_resend_failed">重新发送失败，请稍后重试</string>

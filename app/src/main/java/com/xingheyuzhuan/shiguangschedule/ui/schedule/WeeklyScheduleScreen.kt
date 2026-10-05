@@ -456,7 +456,12 @@ fun WeeklyScheduleScreen(
         withContext(Dispatchers.Main) {
             wbuSyncStatus = ""
             showWbuAuthDialog = false
-            snackbarHostState.showSuccessSnackbar(appContext.getString(R.string.toast_schedule_imported_success))
+            // 成功提示独立成协程：showSnackbar 会挂起到提示消失（Short ≈ 4s）。
+            // 若在这里 await，调用方的 finally 也要等提示消失才能把 isWbuSyncing 置回 false，
+            // 那段时间点右上角同步按钮会被 `if (isWbuSyncing) return` 直接吞掉（表现为「点了没反应」）。
+            coroutineScope.launch {
+                snackbarHostState.showSuccessSnackbar(appContext.getString(R.string.toast_schedule_imported_success))
+            }
         }
 
         // 检查教务系统是否有新于本地全部课表的新学期
@@ -636,28 +641,7 @@ fun WeeklyScheduleScreen(
                                 wbuError = ""
                                 showWbuAuthDialog = true
                             }
-                        },
-                            // 长按：忽略已保存登录态，清除会话并强制走重新登录
-                            onLongClick = {
-                                if (isWbuSyncing) return@WbuSyncActionButton
-                                coroutineScope.launch {
-                                    val activeTableId = viewModel.uiState.value.tableId
-                                    if (activeTableId == null) {
-                                        snackbarHostState.showSnackbar(appContext.getString(R.string.snackbar_no_syncable_table))
-                                        return@launch
-                                    }
-
-                                    val savedUseVpn = WbuSyncEngine.getSavedUseVpn(appContext) ?: false
-                                    WbuSyncEngine(context = appContext, useVpn = savedUseVpn)
-                                        .clearPersistedSession()
-                                    snackbarHostState.showSnackbar(appContext.getString(R.string.snackbar_ignored_saved_session))
-
-                                    wbuInitialStudentId = WbuSyncEngine.getSavedStudentId(appContext)
-                                    wbuSyncStatus = ""
-                                    wbuError = ""
-                                    showWbuAuthDialog = true
-                                }
-                            })
+                        })
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(

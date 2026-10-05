@@ -2,10 +2,9 @@ package com.xingheyuzhuan.shiguangschedule.ui.schedule.components
 
 import androidx.compose.ui.res.stringResource
 import com.xingheyuzhuan.shiguangschedule.R
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -73,17 +72,14 @@ internal fun liquidGlassSurfaceModifier(
  * ClassFlow 定制：独立文件承载，以缩小 WeeklyScheduleScreen 与上游的差异面。
  *
  * @param onClick 单击：优先尝试使用已保存的登录态无感同步
- * @param onLongClick 长按：忽略已保存登录态，强制走重新登录流程
  * @param hazeState 背景模糊源；传入时按钮采用与导航栏一致的 Liquid Glass 毛玻璃样式
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun WbuSyncActionButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     hazeState: HazeState? = null,
     contentColor: Color? = null,
-    onLongClick: (() -> Unit)? = null
 ) {
     val isDark = LocalIsDarkTheme.current
     val shape = RoundedCornerShape(16.dp)
@@ -93,11 +89,7 @@ fun WbuSyncActionButton(
             .padding(end = 8.dp)
             .size(48.dp)
             .then(liquidGlassSurfaceModifier(hazeState, shape))
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick,
-                onLongClickLabel = stringResource(R.string.desc_ignore_saved_session)
-            ),
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -111,6 +103,6 @@ fun WbuSyncActionButton(
 @Composable
 private fun WbuSyncActionButtonPreview() {
     ClassFlowTheme {
-        WbuSyncActionButton(onClick = {}, onLongClick = {})
+        WbuSyncActionButton(onClick = {})
     }
 }
