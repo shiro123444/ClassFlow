@@ -5,9 +5,12 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.QrScanEngine
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.CampusShowerEntryResolver
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.CampusShowerLink
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.CasQrLink
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.QrConfirmOutcome
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.QrScanOutcome
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.ShowerQrLink
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,6 +28,15 @@ import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 private const val TAG = "QrScanViewModel"
+
+/** 普通一次性提示的显示时长。 */
+private const val NOTICE_DURATION_MS = 2000L
+
+/** 跟码提示存活时间：相机持续回调同一条码即续期，停止回调超过这个时间就认定「码已移开」。 */
+private const val STICKY_NOTICE_TIMEOUT_MS = 2000L
+
+/** 跟码提示的续期检查间隔。 */
+private const val STICKY_NOTICE_POLL_MS = 200L
 
 /** 扫码失败类型。 */
 enum class QrScanError {
@@ -60,7 +72,19 @@ sealed interface QrScanUiState {
 }
 
 /** 取景期间的一次性提示（含相册选图路径）。 */
-enum class QrTransientNotice { NOT_CAS_QR, PHOTO_NO_CODE }
+enum class QrTransientNotice {
+    /** 扫到的码不是统一认证登录二维码，也不属于任何已支持的分流。 */
+    NOT_CAS_QR,
+
+    /** 相册选图里没解出二维码。 */
+    PHOTO_NO_CODE,
+
+    /** 洗浴设备号经服务端确认无效（如控水器编号不存在）。跟码提示：码不离开取景框就一直显示。 */
+    SHOWER_INVALID,
+
+    /** 洗浴校验过程本身失败（网络 / 服务异常），移开重扫可再试。跟码提示。 */
+    SHOWER_UNAVAILABLE
+}
 
 sealed interface QrScanEvent {
     data class NavigateToWater(val cd: String) : QrScanEvent
@@ -68,6 +92,14 @@ sealed interface QrScanEvent {
     data class OpenHairdryer(val cd: String, val scheme: String, val ulinkUrl: String) : QrScanEvent
     /** 通用链接节点（`/url/{code}`、短别名 `/u/{code}`）。 */
     data class OpenLinkHub(val code: String?, val inline: String?, val origin: String) : QrScanEvent
+
+    /**
+     * 洗浴控水设备（马影河 1 栋「智能控水」/ 2-3 栋 lifeService）。
+     *
+     * [initialUrl] 为带票据的深链；[pendingAutoScan] 非空时由 WebAppScreen
+     * 在页面就绪后自动执行（1 栋裸码），2-3 栋直接拼在 URL 的 `scanResult` 上。
+     */
+    data class NavigateToShower(val initialUrl: String?, val pendingAutoScan: String?) : QrScanEvent
 }
 
 /**
@@ -78,7 +110,8 @@ sealed interface QrScanEvent {
  */
 @HiltViewModel
 class QrScanViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val showerResolver: CampusShowerEntryResolver
 ) : ViewModel() {
 
     private var engine = createEngine()
@@ -120,9 +153,19 @@ class QrScanViewModel @Inject constructor(
     private val _washerOffline = MutableStateFlow(false)
     val washerOffline: StateFlow<Boolean> = _washerOffline.asStateFlow()
 
+    /** 洗浴设备核验中状态。 */
+    private val _showerChecking = MutableStateFlow(false)
+    val showerChecking: StateFlow<Boolean> = _showerChecking.asStateFlow()
+
     private var tlsDeferred: CompletableDeferred<Boolean>? = null
     private var transientJob: Job? = null
     private var lastRejectNoticeAt = 0L
+
+    /** 当前「跟码」提示的类型、对应原文，以及最后一次在取景框里看到它的时间。 */
+    private var stickyNotice: QrTransientNotice? = null
+    private var stickyRaw: String? = null
+    private var stickyLastSeenAt = 0L
+    private var stickyJob: Job? = null
 
     /** 已成功送入扫描流程的 uuid，避免相机高频回调重复触发。 */
     private var handledUuid: String? = null
@@ -132,6 +175,9 @@ class QrScanViewModel @Inject constructor(
 
     /** 已处理过的通用链接节点原文，避免相机高频回调重复触发。 */
     private var handledLinkHub: String? = null
+
+    /** 已处理过的洗浴设备二维码原文，避免相机高频回调重复触发。 */
+    private var handledShower: String? = null
 
     init {
         attachSslHandler(engine)
@@ -155,9 +201,13 @@ class QrScanViewModel @Inject constructor(
     /** 相机解码到一段二维码原文。 */
     fun onCodeDecoded(raw: String) {
         android.util.Log.i(TAG, "Decoded: ${raw.take(160)}")
-        // U净 设备码优先识别：不依赖统一认证登录态（登录由目标页自行处理），
+        // 同一条码还在取景框里：给「跟码」提示续期。相机对同一条码是每帧持续回调的，
+        // 所以只要不移开，提示就不会消失；一旦停止回调（码被移走）就由轮询收掉。
+        if (raw == stickyRaw) stickyLastSeenAt = System.currentTimeMillis()
+        // U净 / 洗浴设备码优先识别：不依赖统一认证登录态（登录由目标页自行处理），
         // 因此即使当前处于 NeedLogin 状态也能正常分流。
         if (handleUjingIfMatched(raw)) return
+        if (handleShowerIfMatched(raw)) return
         if (_state.value !is QrScanUiState.Scanning) return
         submitDecoded(raw)
     }
@@ -181,6 +231,7 @@ class QrScanViewModel @Inject constructor(
             handledUuid = null
             handledUjing = null
             handledLinkHub = null
+            handledShower = null
             if (raw.isNullOrBlank()) notifyPhotoNoCode() else submitDecoded(raw)
         }
     }
@@ -195,6 +246,7 @@ class QrScanViewModel @Inject constructor(
         }
         if (casUuid == handledUuid) return
         handledUuid = casUuid
+        clearStickyNotice()
 
         viewModelScope.launch {
             when (engine.scanPeerQrCode(casUuid)) {
@@ -207,10 +259,10 @@ class QrScanViewModel @Inject constructor(
     }
 
     /**
-     * 校园直达链接分流：U净 设备码 / 通用链接节点。命中返回 true。
+     * 校园直达链接分流：U净 设备码 / 通用链接节点 / 洗浴控水设备。命中返回 true。
      */
     private fun handleCampusLinkIfMatched(raw: String): Boolean =
-        handleUjingIfMatched(raw) || handleLinkHubIfMatched(raw)
+        handleUjingIfMatched(raw) || handleLinkHubIfMatched(raw) || handleShowerIfMatched(raw)
 
     /**
      * 通用链接节点（`/url/{code}`、短别名 `/u/{code}`）分流。命中返回 true。
@@ -219,6 +271,7 @@ class QrScanViewModel @Inject constructor(
         val node = com.xingheyuzhuan.shiguangschedule.data.network.link.LinkHubUrl.parse(raw) ?: return false
         if (raw == handledLinkHub) return true
         handledLinkHub = raw
+        clearStickyNotice()
         android.util.Log.i(TAG, "Link hub node matched: code=${node.code} inline=${node.inline != null}")
         _scanEvent.tryEmit(
             QrScanEvent.OpenLinkHub(code = node.code, inline = node.inline, origin = node.origin)
@@ -233,6 +286,7 @@ class QrScanViewModel @Inject constructor(
         val ujing = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.parse(raw) ?: return false
         if (raw == handledUjing) return true
         handledUjing = raw
+        clearStickyNotice()
         android.util.Log.i(TAG, "Ujing QR matched: $ujing")
 
         when (ujing) {
@@ -286,10 +340,75 @@ class QrScanViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 洗浴控水设备分流。命中返回 true。
+     *
+     * 三种输入：
+     * - 设备直达链接 `/s/{系统}/{设备号}[/{端口}]`：系统与设备号都在链接里，直接解析（见 [CampusShowerLink]）；
+     * - 2-3 栋（水表 51）原二维码：直接深链 lifeService，页面自己校验设备；
+     * - 1 栋（智能控水裸码）：先经服务端 `CheckKsPos` 正证，确认是真实设备后才深链，
+     *   避免把商品条码等 13 位数字码误分流。
+     */
+    private fun handleShowerIfMatched(raw: String): Boolean {
+        val direct = CampusShowerLink.parse(raw)
+        val shower = if (direct == null) ShowerQrLink.parse(raw) else null
+        if (direct == null && shower == null) return false
+        if (raw == handledShower) return true
+        handledShower = raw
+        clearStickyNotice()
+        android.util.Log.i(TAG, "Shower matched: ${direct ?: shower}")
+
+        when {
+            direct is CampusShowerLink.Direct.Ykt ->
+                resolveShower(raw) { showerResolver.resolveYktXyyy(direct.posno) }
+
+            direct is CampusShowerLink.Direct.Life ->
+                resolveShower(raw) { showerResolver.resolveLifeService(direct.imei, direct.port) }
+
+            shower is ShowerQrLink.Result.LifeService ->
+                resolveShower(raw) { showerResolver.resolveLifeServiceRaw(shower.raw) }
+
+            shower is ShowerQrLink.Result.YktXyyy ->
+                resolveShower(raw) { showerResolver.resolveYktXyyy(shower.posno) }
+        }
+        return true
+    }
+
+    /**
+     * 洗浴解析的公共收尾：转圈 → 结果分类 → 成功则交给网页应用容器
+     * （1 栋为 appId=62 + 合成原文自动执行，2-3 栋为 appId=65 + `scanResult`）。
+     */
+    private fun resolveShower(raw: String, block: suspend () -> CampusShowerEntryResolver.Result) {
+        viewModelScope.launch {
+            _showerChecking.value = true
+            try {
+                when (val result = block()) {
+                    is CampusShowerEntryResolver.Result.Ready ->
+                        _scanEvent.emit(
+                            QrScanEvent.NavigateToShower(
+                                initialUrl = result.initialUrl,
+                                pendingAutoScan = result.pendingAutoScan
+                            )
+                        )
+
+                    CampusShowerEntryResolver.Result.InvalidDevice -> notifyShowerInvalid(raw)
+
+                    CampusShowerEntryResolver.Result.NeedLogin ->
+                        _state.value = QrScanUiState.NeedLogin
+
+                    is CampusShowerEntryResolver.Result.Unavailable -> notifyShowerUnavailable(raw)
+                }
+            } finally {
+                _showerChecking.value = false
+            }
+        }
+    }
+
     fun dismissHairdryerDialog() {
         _hairdryerPrompt.value = false
         handledUjing = null
         handledLinkHub = null
+        handledShower = null
         handledUuid = null
     }
 
@@ -297,6 +416,7 @@ class QrScanViewModel @Inject constructor(
         _washerOffline.value = false
         handledUjing = null
         handledLinkHub = null
+        handledShower = null
         handledUuid = null
     }
 
@@ -321,8 +441,13 @@ class QrScanViewModel @Inject constructor(
         handledUuid = null
         handledUjing = null
         handledLinkHub = null
+        handledShower = null
         _transientNotice.value = null
         transientJob?.cancel()
+        stickyJob?.cancel()
+        stickyJob = null
+        stickyNotice = null
+        stickyRaw = null
         _state.value = if (engine.hasUnifiedAuthSession()) QrScanUiState.Scanning else QrScanUiState.NeedLogin
     }
 
@@ -356,16 +481,69 @@ class QrScanViewModel @Inject constructor(
         showNotice(QrTransientNotice.NOT_CAS_QR)
     }
 
+    /** 机号经服务端确认无效时提示（跟码：不把码移开就一直显示）。 */
+    private fun notifyShowerInvalid(raw: String) {
+        showStickyNotice(QrTransientNotice.SHOWER_INVALID, raw)
+    }
+
+    /** 洗浴校验过程本身失败时提示（跟码，移开重扫即可再试一次）。 */
+    private fun notifyShowerUnavailable(raw: String) {
+        showStickyNotice(QrTransientNotice.SHOWER_UNAVAILABLE, raw)
+    }
+
     private fun notifyPhotoNoCode() {
         showNotice(QrTransientNotice.PHOTO_NO_CODE)
     }
 
     private fun showNotice(notice: QrTransientNotice) {
+        // 新的普通提示直接接管画面，避免「跟码」任务过一会儿再把这条提示清掉
+        clearStickyNotice()
         _transientNotice.value = notice
         transientJob?.cancel()
         transientJob = viewModelScope.launch {
-            delay(2000)
+            delay(NOTICE_DURATION_MS)
             _transientNotice.value = null
         }
+    }
+
+    /**
+     * 显示「跟码」提示：只要相机还在回调同一条码（[raw]），提示就一直挂着不消失；
+     * 码被移开后相机停止回调，[STICKY_NOTICE_TIMEOUT_MS] 之后提示自动收起，
+     * 同时放开去重标记 —— 于是同一条码重新扫进来时会**重新走一遍校验**，
+     * 而不是被「已处理过」的短路吃掉。
+     */
+    private fun showStickyNotice(notice: QrTransientNotice, raw: String) {
+        if (stickyNotice == notice && stickyRaw == raw) {
+            stickyLastSeenAt = System.currentTimeMillis()
+            return
+        }
+        stickyJob?.cancel()
+        transientJob?.cancel()
+        stickyNotice = notice
+        stickyRaw = raw
+        stickyLastSeenAt = System.currentTimeMillis()
+        _transientNotice.value = notice
+        stickyJob = viewModelScope.launch {
+            while (System.currentTimeMillis() - stickyLastSeenAt < STICKY_NOTICE_TIMEOUT_MS) {
+                delay(STICKY_NOTICE_POLL_MS)
+            }
+            _transientNotice.value = null
+            stickyNotice = null
+            stickyRaw = null
+            // 码已经离开取景框：放开去重，重新扫到时重新校验
+            handledShower = null
+            handledUjing = null
+            handledLinkHub = null
+        }
+    }
+
+    /** 成功分流到别的功能后收掉跟码提示（去重标记保持不动，避免同一条码被反复处理）。 */
+    private fun clearStickyNotice() {
+        if (stickyNotice == null) return
+        stickyJob?.cancel()
+        stickyJob = null
+        stickyNotice = null
+        stickyRaw = null
+        _transientNotice.value = null
     }
 }

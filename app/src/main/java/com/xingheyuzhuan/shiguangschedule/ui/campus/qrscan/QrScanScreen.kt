@@ -1,8 +1,5 @@
 package com.xingheyuzhuan.shiguangschedule.ui.campus.qrscan
 
-import android.content.Intent
-import android.net.Uri
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -46,6 +43,7 @@ import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
+import com.xingheyuzhuan.shiguangschedule.ui.campus.ujing.launchUjingHairdryer
 import com.xingheyuzhuan.shiguangschedule.ui.components.LocalEntryOverlayController
 
 /**
@@ -67,6 +65,7 @@ fun QrScanScreen(
     val hairdryerPrompt by viewModel.hairdryerPrompt.collectAsState()
     val washerOffline by viewModel.washerOffline.collectAsState()
     val washerLoading by viewModel.washerLoading.collectAsState()
+    val showerChecking by viewModel.showerChecking.collectAsState()
 
     /** 应用级品牌过场：扫码 → 吹风机时本页会被 pop，动画挂在应用层才不会被销毁。 */
     val entryOverlay = LocalEntryOverlayController.current
@@ -88,6 +87,15 @@ fun QrScanScreen(
                         )
                     )
                 }
+                is QrScanEvent.NavigateToShower -> {
+                    navBridge.replace(
+                        com.xingheyuzhuan.shiguangschedule.Destination.WebApp(
+                            appId = com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId.CAMPUS_CARD.name,
+                            initialTargetUrl = event.initialUrl,
+                            pendingAutoScan = event.pendingAutoScan
+                        )
+                    )
+                }
                 is QrScanEvent.OpenLinkHub -> {
                     // 通用链接节点：本页是过渡页，直接替换栈顶（不带品牌过场，节点页自行展示确认卡片）
                     navBridge.replace(
@@ -99,55 +107,10 @@ fun QrScanScreen(
                     )
                 }
                 is QrScanEvent.OpenHairdryer -> {
-                    val schemeUri = Uri.parse(event.scheme)
                     // 先请求应用层品牌过场：本页随后会 pop，动画不受影响，正好盖住支付宝冷启动空白期
                     entryOverlay.show(1800)
-                    // 1. 优先使用标准 alipays:// Scheme 显式调起支付宝官方客户端（经实测可直接唤起吹风机原生小程序）
-                    val explicitIntent = Intent(Intent.ACTION_VIEW, schemeUri).apply {
-                        setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    val launched = runCatching {
-                        context.startActivity(explicitIntent)
-                        true
-                    }.getOrElse {
-                        // 2. 兜底：通用 alipays Scheme（适配分身等）
-                        val genericIntent = Intent(Intent.ACTION_VIEW, schemeUri).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        runCatching {
-                            context.startActivity(genericIntent)
-                            true
-                        }.getOrElse {
-                            // 3. 兜底：尝试 NFC Action 调起 alipay://nfc/app
-                            val nfcScheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerNfcScheme(event.cd)
-                            val nfcIntent = Intent(android.nfc.NfcAdapter.ACTION_NDEF_DISCOVERED, Uri.parse(nfcScheme)).apply {
-                                setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            runCatching {
-                                context.startActivity(nfcIntent)
-                                true
-                            }.getOrElse {
-                                // 4. 降级：Universal Link 网页或浏览器调起
-                                val ulinkIntent = Intent(Intent.ACTION_VIEW, Uri.parse(event.ulinkUrl)).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                runCatching {
-                                    context.startActivity(ulinkIntent)
-                                    true
-                                }.getOrDefault(false)
-                            }
-                        }
-                    }
-                    if (launched) {
+                    if (launchUjingHairdryer(context, event.cd, event.scheme, event.ulinkUrl)) {
                         navBridge.popBackStack()
-                    } else {
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.ujing_alipay_not_installed),
-                            Toast.LENGTH_SHORT
-                        ).show()
                     }
                 }
             }
@@ -163,8 +126,11 @@ fun QrScanScreen(
     // 统一认证二维码在 NeedLogin 下会被 ViewModel 忽略。
     val scanning = state is QrScanUiState.Scanning || state is QrScanUiState.NeedLogin
     val notice = transientNotice
+    // 「正在核验…」是进行中状态，用绿色；其余（不属于本 App 的码、设备无效等）用错误色
+    val noticeTone = if (washerLoading || showerChecking) QrNoticeTone.PROGRESS else QrNoticeTone.ERROR
     val noticeString = when {
         washerLoading -> stringResource(R.string.ujing_washer_checking)
+        showerChecking -> stringResource(R.string.qr_scan_shower_checking)
         notice != null -> noticeText(notice)
         else -> null
     }
@@ -183,6 +149,7 @@ fun QrScanScreen(
         },
         galleryBusy = photoBusy,
         notice = noticeString,
+        noticeTone = noticeTone,
         bottomContent = {
             // 相册选图 / 登录 / 确认都不依赖相机，权限被拒时也要能看到状态卡。
             // 取景框会按本卡实测高度避让，横竖屏都不会重叠。
@@ -405,6 +372,8 @@ private fun PanelCard(
 private fun noticeText(notice: QrTransientNotice): String = when (notice) {
     QrTransientNotice.NOT_CAS_QR -> stringResource(R.string.qr_scan_err_not_cas)
     QrTransientNotice.PHOTO_NO_CODE -> stringResource(R.string.qr_scan_photo_no_code)
+    QrTransientNotice.SHOWER_INVALID -> stringResource(R.string.qr_scan_err_shower_invalid)
+    QrTransientNotice.SHOWER_UNAVAILABLE -> stringResource(R.string.qr_scan_err_shower_unavailable)
 }
 
 @Composable

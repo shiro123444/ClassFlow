@@ -118,6 +118,22 @@ private val TOP_SCRIM_HEIGHT = 148.dp
 private val TOP_CHROME_RESERVED = 84.dp
 
 /**
+ * 「进行中」提示的底色（绿色）。
+ *
+ * 提示浮层压在相机预览上，所以不能用跟随主题的浅色容器（会看不清），
+ * 直接用一块不透明绿底 + 白字，浅色/深色主题、任何画面下都清晰。
+ */
+private val PROGRESS_NOTICE_CONTAINER = Color(0xFF2E7D32)
+
+/**
+ * 顶部一次性提示的语气。
+ *
+ * [PROGRESS] 表示「正在进行中」（如正在核验设备状态）：用绿色，让用户知道程序在干活而不是报错；
+ * [ERROR] 表示「这次没成」（码不属于本 App、设备无效、网络异常等）：用主题错误色。
+ */
+internal enum class QrNoticeTone { PROGRESS, ERROR }
+
+/**
  * 通用扫码取景脚手架：统一「扫一扫」与网页应用扫码的圆图标 UI。
  *
  * 内部负责相机权限、屏幕常亮、顶部渐变遮罩、圆形关闭/相册/引擎按钮、取景框避让，
@@ -131,6 +147,7 @@ private val TOP_CHROME_RESERVED = 84.dp
  * @param onGallery 相册识别入口（null 则不显示按钮）
  * @param galleryBusy 相册解码中（按钮显示进度）
  * @param notice 顶部一次性提示
+ * @param noticeTone 提示语气（决定配色），见 [QrNoticeTone]
  * @param bottomContent 底部内容（提示文案 / 状态卡）
  */
 @Composable
@@ -143,6 +160,7 @@ internal fun QrScannerScaffold(
     onGallery: (() -> Unit)? = null,
     galleryBusy: Boolean = false,
     notice: String? = null,
+    noticeTone: QrNoticeTone = QrNoticeTone.ERROR,
     showGallery: Boolean = true,
     showEngineSwitch: Boolean = true,
     modifier: Modifier = Modifier,
@@ -309,11 +327,16 @@ internal fun QrScannerScaffold(
             }
         }
 
-        // 一次性提示（如相册未识别到二维码）
+        // 一次性提示（相册未识别到二维码 / 正在核验设备状态 / 设备无效等）
         notice?.let { text ->
+            val (container, content) = when (noticeTone) {
+                QrNoticeTone.PROGRESS -> PROGRESS_NOTICE_CONTAINER to Color.White
+                QrNoticeTone.ERROR ->
+                    MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+            }
             Surface(
                 shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.errorContainer,
+                color = container,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
@@ -321,7 +344,7 @@ internal fun QrScannerScaffold(
             ) {
                 Text(
                     text = text,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    color = content,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
                 )

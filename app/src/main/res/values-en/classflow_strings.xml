@@ -731,7 +731,7 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="desc_qr_scan">Scan the unified-auth login QR code to confirm sign-in on your computer</string>
     <string name="title_qr_scan">Scan</string>
     <string name="a11y_qr_scan_photo">Read a QR code from an image</string>
-    <string name="qr_scan_photo_no_code">No QR code found in the image</string>
+    <string name="qr_scan_photo_no_code">No QR code found in the image — try another one, or scan the code directly</string>
     <string name="a11y_qr_scan_engine">Scanning engine</string>
     <string name="qr_scan_engine_mlkit">ML Kit (default)</string>
     <string name="qr_scan_engine_zxing">ZXing (fallback)</string>
@@ -752,7 +752,10 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="qr_scan_need_login_title">Not signed in to unified auth</string>
     <string name="qr_scan_need_login_desc">This device must be signed in to unified auth before confirming</string>
     <string name="action_qr_scan_login">Sign in</string>
-    <string name="qr_scan_err_not_cas">Not a unified-auth login QR code. Keep scanning.</string>
+    <string name="qr_scan_err_not_cas">Not a unified-auth sign-in code — point at the QR code shown on the computer login page</string>
+    <string name="qr_scan_shower_checking">Verifying shower device...</string>
+    <string name="qr_scan_err_shower_invalid">Shower device not recognized. Make sure you scanned the QR code on the water controller.</string>
+    <string name="qr_scan_err_shower_unavailable">Could not verify the shower device. Check your network and try again.</string>
     <string name="qr_scan_err_expired">This QR code has expired. Refresh it on your computer.</string>
     <string name="qr_scan_err_network">Network error. Please try again.</string>
     <string name="action_qr_scan_retry">Retry</string>
