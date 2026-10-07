@@ -42,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -67,28 +68,39 @@ fun UjingWaterScreen(
     navBridge: NavBridge,
     viewModel: UjingWaterViewModel = viewModel()
 ) {
+    // 本进程有没有受理过这个页面（只在内存里，重建后一定是 false）。
+    // 它和「保存状态」里的那个标记配一起，才能区分「这次新打开」和「被系统恢复出来的旧页面」。
+    var handledInProcess by remember(cd) { mutableStateOf(false) }
+    var handledInSavedState by rememberSaveable(cd) { mutableStateOf(false) }
+
+    // 系统用保存状态恢复出来的旧取水页（进程被杀后回来、Activity 重建）：本进程已经没有进行中的
+    // 订单了（订单信息只在内存里，不落盘），这页面拿不到订单的任何信息，显示什么都是错的。
+    // 所以什么都不渲染，直接退回上一页 —— 不重新下单，也不挂在「正在连接饮水机…」上误导人。
+    val deadRestoredPage = handledInSavedState && !handledInProcess &&
+        !UjingWaterViewModel.hasResumableSession(cd)
+    if (deadRestoredPage) {
+        LaunchedEffect(cd) { navBridge.popBackStack() }
+        return
+    }
+
     // 本页自带 U净 品牌首屏（logo + 转圈），不再叠加 ClassFlow 过场动画：
     // 两段品牌动画先后出现反而割裂，只保留 U净 这一段。
     Box(modifier = Modifier.fillMaxSize()) {
         val uiState by viewModel.uiState.collectAsState()
         val authPrompt by viewModel.authPrompt.collectAsState()
-        var lastHandledScanId by rememberSaveable(cd) { mutableStateOf(-1L) }
 
-        LaunchedEffect(cd, scanId) {
+        LaunchedEffect(cd) {
             if (cd.isNotBlank()) {
-                if (scanId > 0L && scanId != lastHandledScanId) {
-                    lastHandledScanId = scanId
-                    // NFC 再次刷卡唤醒：直接重新进入出水流程
-                    viewModel.restart(cd)
-                } else if (lastHandledScanId == -1L) {
-                    lastHandledScanId = scanId
-                    viewModel.start(cd)
-                }
+                handledInProcess = true
+                handledInSavedState = true
+                // 这台设备还在出水就接着看那一单（绝不会再下一单），没有才开新一轮
+                viewModel.start(cd)
             }
         }
 
+        // 退出页面只是不看了，不等于订单结束：会话留在内存里，再碰 NFC 还能接着看这一单，
+        // 而不是把正在出水的订单丢掉、下次碰卡又去下一单（服务端会以「设备正在使用中」拒绝）。
         BackHandler {
-            UjingWaterViewModel.clearSession()
             navBridge.popBackStack()
         }
 
@@ -97,10 +109,7 @@ fun UjingWaterScreen(
                 TopAppBar(
                     title = { Text(stringResource(R.string.title_ujing_water)) },
                     navigationIcon = {
-                        IconButton(onClick = {
-                            UjingWaterViewModel.clearSession()
-                            navBridge.popBackStack()
-                        }) {
+                        IconButton(onClick = { navBridge.popBackStack() }) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                                 contentDescription = stringResource(R.string.action_exit)
@@ -134,10 +143,8 @@ fun UjingWaterScreen(
                     is UjingWaterUiStage.Active -> {
                         ActiveDispensingView(
                             stage = stage,
-                            onDone = {
-                                UjingWaterViewModel.clearSession()
-                                navBridge.popBackStack()
-                            }
+                            // 出水还在进行：只关页面，订单会话留着（见上面的 BackHandler 注释）
+                            onDone = { navBridge.popBackStack() }
                         )
                     }
 

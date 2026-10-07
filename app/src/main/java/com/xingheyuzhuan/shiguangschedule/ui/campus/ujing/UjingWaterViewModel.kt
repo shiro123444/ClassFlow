@@ -68,6 +68,22 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
         fun clearSession() {
             lastSession = null
         }
+
+        /**
+         * 本进程里这台设备是否还有**正在进行中**的取水订单（20 分钟内有效）。
+         *
+         * 取水会话只活在内存里（订单号、取水点都在其中），不落盘，所以：
+         * - 为 true：订单还在跑，订单信息也还拿得到。再碰 NFC / 再扫码都不要再开一单
+         *   （一个账号同时只有一个出水点），页面可以接着显示；
+         * - 为 false：本进程没有这张订单的任何信息 —— 那就别装出「正在取水」的样子：
+         *   重建出来的旧页面靠它判断自己该不该直接退掉。
+         */
+        fun hasResumableSession(cd: String): Boolean {
+            val session = lastSession ?: return false
+            return session.cd == cd.trim() &&
+                session.stage is UjingWaterUiStage.Active &&
+                System.currentTimeMillis() - session.timestamp < SESSION_VALID_DURATION_MS
+        }
     }
 
     private val cardClient = WbuCampusCardClient(application, useVpn = false)
@@ -257,9 +273,11 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
                 } catch (e: Exception) {
                     consecutiveFails++
                     Log.w(TAG, "Poll order detail fail ($consecutiveFails)", e)
+                    // 一直拉不到就放慢重试，但不彻底停：页面还开着，网络一恢复状态就能补上，
+                    // 不会卡在「正在取水」上再也不动（页面关掉后协程自己结束）
                     if (consecutiveFails > 8) {
-                        Log.e(TAG, "Poll failed too many times, stopping")
-                        break
+                        delay(10_000)
+                        continue
                     }
                 }
                 delay(2500)

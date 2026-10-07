@@ -8,6 +8,7 @@ import android.nfc.NfcAdapter
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.appcompat.app.AppCompatActivity
 import dagger.hilt.android.AndroidEntryPoint
@@ -529,7 +530,34 @@ fun AppNavigation(
     val navBridge: NavBridge = remember(backStack, context) {
         object : NavBridge {
             override val context = context.applicationContext
+
+            /**
+             * 同一台饮水机还在出水，而它的取水页又正开着：再碰 NFC / 再扫码**不再重进页面**
+             * （一个账号同时只有一个出水点，重进只会把正在跑的流程打断，看着像「又开始接水」），
+             * 只弹一句提示 —— 页面保持原样，看到的还是那一单的实时状态。
+             *
+             * 取水页不在前台时放行：那是把这一单重新打开接着看（[UjingWaterViewModel.start]
+             * 会接上内存里的会话，不会再下一单）。
+             */
+            private fun blockedByOngoingDispense(destination: Destination): Boolean {
+                val water = destination as? Destination.UjingWater ?: return false
+                val shown = backStack.lastOrNull() as? Destination.UjingWater ?: return false
+                if (shown.cd != water.cd) return false
+                if (!com.xingheyuzhuan.shiguangschedule.ui.campus.ujing.UjingWaterViewModel
+                        .hasResumableSession(water.cd)
+                ) {
+                    return false
+                }
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.toast_water_dispensing_in_progress),
+                    Toast.LENGTH_SHORT
+                ).show()
+                return true
+            }
+
             override fun navigate(destination: Destination) {
+                if (blockedByOngoingDispense(destination)) return
                 if (backStack.lastOrNull() != destination) {
                     backStack.add(destination)
                 }
@@ -541,6 +569,7 @@ fun AppNavigation(
             }
 
             override fun replace(destination: Destination) {
+                if (blockedByOngoingDispense(destination)) return
                 if (backStack.isEmpty()) {
                     backStack.add(destination)
                     return

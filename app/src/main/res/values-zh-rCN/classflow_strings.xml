@@ -854,6 +854,7 @@
     <string name="label_campus_card_quick_pay">一卡通免密</string>
     <string name="status_login_saved_credentials">正在使用已保存凭据登录...</string>
     <string name="err_login_required_water">需要登录统一认证以使用饮水机服务</string>
+    <string name="toast_water_dispensing_in_progress">正在取水中，请稍候…</string>
     <string name="label_wechat">微信</string>
     <string name="label_alipay">支付宝</string>
     <string name="label_unionpay">云闪付</string>

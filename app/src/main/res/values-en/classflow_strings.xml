@@ -854,6 +854,7 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="label_campus_card_quick_pay">Campus card quick pay</string>
     <string name="status_login_saved_credentials">Logging in with saved credentials...</string>
     <string name="err_login_required_water">Sign in to unified authentication to use the water dispenser</string>
+    <string name="toast_water_dispensing_in_progress">Water is dispensing, please wait.</string>
     <string name="label_wechat">WeChat</string>
     <string name="label_alipay">Alipay</string>
     <string name="label_unionpay">UnionPay</string>
