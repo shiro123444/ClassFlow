@@ -57,7 +57,7 @@
 | 图书馆 | 馆藏检索、借阅记录、续借 |
 | 一卡通 | 余额、明细账单、生活缴费入口 |
 | 付款码 | 原生取码页（校园码）：进入即出码、自动换码、余额显示、屏幕常亮提亮；二维码 / 条码 / 数字码三种呈现，失败可回落官方页面 |
-| 扫一扫 | 本机替电脑完成统一认证扫码登录（置 2 → 置 1），并按码内容分流 U净 设备码 / 洗浴控水器 / 通用链接节点；ML Kit / ZXing 双引擎可切换，支持相册选图识别 |
+| 扫一扫 | 本机替电脑完成统一认证扫码登录（置 2 → 置 1），并按码内容分流 U净 设备码 / 洗浴控水器 / 通用链接节点；ZXing-C++ / ZXing 双引擎可切换（默认 zxing-cpp），支持相册选图识别 |
 | U净设备 | 饮水机 / 吹风机 / 洗衣机烘干机二维码直达（含支付宝 NFC 与 U净） |
 | 桌面快捷方式 | 长按图标「扫一扫」「一卡通」「付款码」直达 |
 
@@ -171,7 +171,7 @@ Android 需要你手动允许「安装未知应用」：设置 → 应用 → �
 | 架构 | MVVM + Hilt 依赖注入、Coroutines / Flow |
 | 数据 | Room、Proto DataStore、kotlinx.serialization、Wire（protobuf） |
 | 网络 | OkHttp、Ktor、Jsoup（教务 / 校园页面解析） |
-| 硬件 | CameraX、ML Kit Barcode / ZXing（扫码）、WorkManager（后台任务） |
+| 硬件 | CameraX、ZXing-C++ / ZXing（扫码）、WorkManager（后台任务） |
 | 其它 | JGit、AppCompat DayNight（语言切换）、Apache-2.0 许可合规插件 |
 
 ## 构建与开发

@@ -7,11 +7,6 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.util.Log
-import com.google.android.gms.tasks.Tasks
-import com.google.mlkit.vision.barcode.BarcodeScannerOptions
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.common.InputImage
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.DecodeHintType
@@ -20,7 +15,7 @@ import com.google.zxing.NotFoundException
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.HybridBinarizer
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.QrScanEngine
-import java.util.concurrent.TimeUnit
+import zxingcpp.BarcodeReader
 
 /**
  * 从相册图片里解出二维码原文，按当前选择 [QrScanEngine] 走对应实现。
@@ -34,33 +29,14 @@ internal object QrImageDecoder {
     /** 超过该边长先降采样：ZXing 在超大图上很慢，且对识别率没有帮助。 */
     private const val MAX_SIDE = 1600
 
-    private const val DECODE_TIMEOUT_SECONDS = 10L
-
     fun decode(context: Context, uri: Uri, engine: QrScanEngine): String? = try {
         when (engine) {
-            QrScanEngine.ML_KIT -> decodeWithMlKit(context, uri)
             QrScanEngine.ZXING -> decodeWithZxing(context, uri)
+            QrScanEngine.ZXING_CPP -> decodeWithZxingCpp(context, uri)
         }
     } catch (e: Exception) {
         Log.w(TAG, "image decode failed", e)
         null
-    }
-
-    private fun decodeWithMlKit(context: Context, uri: Uri): String? {
-        // InputImage.fromFilePath 内部按 EXIF 转正
-        val image = InputImage.fromFilePath(context, uri)
-        val scanner = BarcodeScanning.getClient(
-            BarcodeScannerOptions.Builder()
-                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-                .build()
-        )
-        return try {
-            // 一次性任务：在 IO 线程等待即可，避免为此引入额外依赖
-            Tasks.await(scanner.process(image), DECODE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .firstNotNullOfOrNull { it.rawValue }
-        } finally {
-            scanner.close()
-        }
     }
 
     private fun decodeWithZxing(context: Context, uri: Uri): String? {
@@ -87,6 +63,21 @@ internal object QrImageDecoder {
             // 图片里没有可识别二维码
             null
         }
+    }
+
+    /** zxing-cpp 解图片（与相机那条路同一套解码器）。 */
+    private fun decodeWithZxingCpp(context: Context, uri: Uri): String? {
+        val bitmap = loadBitmap(context, uri) ?: return null
+        val scaled = downscale(bitmap)
+        val reader = BarcodeReader(
+            BarcodeReader.Options(
+                formats = setOf(BarcodeReader.Format.QR_CODE),
+                tryHarder = true,
+                tryRotate = true,
+                tryInvert = true
+            )
+        )
+        return reader.read(scaled).firstOrNull()?.text
     }
 
     private fun loadBitmap(context: Context, uri: Uri): Bitmap? {

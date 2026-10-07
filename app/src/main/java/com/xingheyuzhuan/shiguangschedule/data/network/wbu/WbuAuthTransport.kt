@@ -1054,7 +1054,8 @@ internal class WbuAuthTransport(
                 .edit().putBoolean(KEY_QR_VIA_WEBVPN, enabled).apply()
         }
 
-        /** 扫一扫使用的二维码解码引擎（默认 ML Kit，识别不理想时切 ZXing）。 */
+        /** 扫一扫使用的二维码解码引擎（默认 zxing-cpp，识别不理想时可切纯 Java 的 ZXing）。
+         *  旧版本存过 ML_KIT 的会在 valueOf 失败后回落到默认值，不需要额外迁移。 */
         fun getQrScanEngine(context: Context): QrScanEngine {
             val name = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .getString(KEY_QR_SCAN_ENGINE, null) ?: return QrScanEngine.DEFAULT

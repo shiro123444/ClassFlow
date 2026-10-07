@@ -11,16 +11,21 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +44,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.FlashlightOff
+import androidx.compose.material.icons.rounded.FlashlightOn
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.QrCodeScanner
@@ -74,6 +81,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -81,29 +89,30 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.google.mlkit.vision.barcode.BarcodeScannerOptions
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.common.InputImage
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.DecodeHintType
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.NotFoundException
 import com.google.zxing.PlanarYUVLuminanceSource
+import com.google.zxing.common.GlobalHistogramBinarizer
 import com.google.zxing.common.HybridBinarizer
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.QrScanEngine
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
+import zxingcpp.BarcodeReader
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 import java.util.concurrent.Executors
 
 private const val TAG = "QrScannerView"
@@ -116,6 +125,58 @@ private val TOP_SCRIM_HEIGHT = 148.dp
 
 /** 取景框上方为圆形按钮预留的高度。 */
 private val TOP_CHROME_RESERVED = 84.dp
+
+/** 预览流分辨率：16:9 的 1080p。 */
+private val PREVIEW_SIZE = android.util.Size(1920, 1080)
+
+/**
+ * 分析流目标分辨率。
+ *
+ * 两个引擎都只解取景框那一块（zxing-cpp 把 cropRect 交给库，纯 Java 的 ZXing 自己裁 Y 平面），
+ * 代价与帧大小解耦，所以统一提到 1080p：取景框内的像素多 2.25 倍，远处/偏小的码才有细节可解。
+ */
+private val ANALYSIS_SIZE = android.util.Size(1920, 1080)
+
+/**
+ * 预览与分析共用 16:9：两边裁切一致，取景框才能按「所见即所得」映射成 ROI。
+ * （宽高比不一致时预览看到的范围比分析流多/少一截，ROI 会偏。）
+ */
+private val RESOLUTION_ASPECT = AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY
+
+private val PREVIEW_RESOLUTION_SELECTOR: ResolutionSelector = ResolutionSelector.Builder()
+    .setResolutionStrategy(
+        ResolutionStrategy(PREVIEW_SIZE, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)
+    )
+    .setAspectRatioStrategy(RESOLUTION_ASPECT)
+    .build()
+
+/**
+ * 分析流分辨率：按引擎选。
+ *
+ * zxing-cpp 按 Binary Eye 的做法直接要相机能给的最高分辨率（它只解取景框那块，代价可控）；
+ * 纯 Java 的 ZXing 取 1080p。
+ */
+private fun analysisResolutionSelector(engine: QrScanEngine): ResolutionSelector {
+    val builder = ResolutionSelector.Builder().setAspectRatioStrategy(RESOLUTION_ASPECT)
+    return when (engine) {
+        QrScanEngine.ZXING_CPP -> builder
+            .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+            .setAllowedResolutionMode(ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE)
+            .build()
+
+        else -> builder
+            .setResolutionStrategy(
+                ResolutionStrategy(ANALYSIS_SIZE, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)
+            )
+            .build()
+    }
+}
+
+/** 取景框外再放宽的比例：吸收手抖，以及预览流/分析流裁切略有差异带来的偏差。 */
+private const val ROI_PADDING = 0.15f
+
+/** 每隔多少帧退回一次整帧解码：保证「没对准取景框也能扫到」的老行为还在。 */
+private const val FULL_FRAME_EVERY = 8
 
 /**
  * 「进行中」提示的底色（绿色）。
@@ -182,6 +243,9 @@ internal fun QrScannerScaffold(
     }
     var showEngineMenu by remember { mutableStateOf(false) }
     var bottomHeightPx by remember { mutableStateOf(0f) }
+    var torchOn by remember { mutableStateOf(false) }
+    var flashAvailable by remember { mutableStateOf(false) }
+    var viewSize by remember { mutableStateOf(IntSize.Zero) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -213,23 +277,34 @@ internal fun QrScannerScaffold(
     }
 
     val reservedTopPx = with(density) { TOP_CHROME_RESERVED.toPx() }
+    // 取景框的几何只在这里算一次：画框和解码 ROI 用的是同一份，避免两边算歪
+    val scanFrame = scanFrameRect(
+        viewWidth = viewSize.width.toFloat(),
+        viewHeight = viewSize.height.toFloat(),
+        reservedTop = reservedTopPx,
+        reservedBottom = bottomHeightPx,
+        maxSide = with(density) { MAX_FRAME_SIDE.toPx() }
+    )
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
+            .onSizeChanged { viewSize = it }
     ) {
         if (hasCameraPermission) {
             QrCameraPreview(
                 engine = engine,
                 scanning = scanning,
                 onQrCode = onQrCode,
+                scanFrame = scanFrame,
+                viewWidthPx = viewSize.width,
+                viewHeightPx = viewSize.height,
+                torchOn = torchOn,
+                onFlashAvailable = { flashAvailable = it },
                 modifier = Modifier.fillMaxSize()
             )
-            ScanFrameOverlay(
-                reservedTop = reservedTopPx,
-                reservedBottom = bottomHeightPx
-            )
+            ScanFrameOverlay(frame = scanFrame)
         }
 
         // 顶部渐变遮罩：让状态栏与圆形按钮在横竖屏、浅色背景下都清晰可读
@@ -272,6 +347,25 @@ internal fun QrScannerScaffold(
                 .padding(12.dp)
                 .align(Alignment.TopEnd)
         ) {
+            if (flashAvailable) {
+                IconButton(
+                    onClick = { torchOn = !torchOn },
+                    modifier = Modifier.background(Color.Black.copy(alpha = 0.35f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = if (torchOn) {
+                            Icons.Rounded.FlashlightOn
+                        } else {
+                            Icons.Rounded.FlashlightOff
+                        },
+                        contentDescription = stringResource(
+                            if (torchOn) R.string.a11y_qr_scan_torch_off else R.string.a11y_qr_scan_torch_on
+                        ),
+                        tint = if (torchOn) Color(0xFFFFD54F) else Color.White
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+            }
             if (showGallery && onGallery != null) {
                 IconButton(
                     onClick = onGallery,
@@ -311,19 +405,19 @@ internal fun QrScannerScaffold(
                         onDismissRequest = { showEngineMenu = false }
                     ) {
                         ScanEngineMenuItem(
-                            engine = QrScanEngine.ML_KIT,
-                            selected = engine == QrScanEngine.ML_KIT,
-                            onSelect = {
-                                showEngineMenu = false
-                                onSelectEngine(QrScanEngine.ML_KIT)
-                            }
-                        )
-                        ScanEngineMenuItem(
                             engine = QrScanEngine.ZXING,
                             selected = engine == QrScanEngine.ZXING,
                             onSelect = {
                                 showEngineMenu = false
                                 onSelectEngine(QrScanEngine.ZXING)
+                            }
+                        )
+                        ScanEngineMenuItem(
+                            engine = QrScanEngine.ZXING_CPP,
+                            selected = engine == QrScanEngine.ZXING_CPP,
+                            onSelect = {
+                                showEngineMenu = false
+                                onSelectEngine(QrScanEngine.ZXING_CPP)
                             }
                         )
                     }
@@ -464,22 +558,78 @@ internal fun QrScannerOverlay(
     }
 }
 
-/** 相机预览 + 二维码解码；[scanning] 为 false 时保留预览但停止分析（画面即冻结在最后一帧）。 */
+/**
+ * 相机预览 + 二维码解码；[scanning] 为 false 时保留预览但停止分析（画面即冻结在最后一帧）。
+ *
+ * 流水线要点（对齐 Binary Eye 那套经验）：
+ * - 分析流分辨率按引擎给（见 [ANALYSIS_SIZE_ZXING]）；
+ * - 解码区域 = 屏幕上的取景框 [scanFrame]，ZXing 只解这一块，等于给取景框做数字变焦；
+ * - 手电筒（[torchOn]）、捏合变焦、点击对焦。
+ */
 @Composable
 internal fun QrCameraPreview(
     engine: QrScanEngine,
     scanning: Boolean,
     onQrCode: (String) -> Unit,
+    scanFrame: ScanFrameRect,
+    viewWidthPx: Int,
+    viewHeightPx: Int,
+    torchOn: Boolean,
+    onFlashAvailable: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewView = remember {
-        PreviewView(context).apply { implementationMode = PreviewView.ImplementationMode.COMPATIBLE }
+        PreviewView(context).apply {
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            // ROI 映射按「等比铺满 + 居中裁剪」算，这里必须与之一致
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+        }
     }
     val executor = remember { Executors.newSingleThreadExecutor() }
     val currentOnQrCode by rememberUpdatedState(onQrCode)
-    val analyzer = remember(engine) { createQrAnalyzer(engine) { raw -> currentOnQrCode(raw) } }
+    val currentOnFlashAvailable by rememberUpdatedState(onFlashAvailable)
+
+    var camera by remember { mutableStateOf<Camera?>(null) }
+    var hasFlash by remember { mutableStateOf(false) }
+    var zoomRatio by remember { mutableStateOf(1f) }
+    var zoomTouched by remember { mutableStateOf(false) }
+    var showZoomChip by remember { mutableStateOf(false) }
+    var zoomChipText by remember { mutableStateOf("") }
+    // 预览流裁切宽高比：与分析流不一致时不能按「所见即所得」映射 ROI，退回整帧
+    var previewAspect by remember { mutableStateOf(0f) }
+    val currentPreviewAspect by rememberUpdatedState(previewAspect)
+
+    // ROI 每帧现算：视图尺寸、上下预留、引擎都可能变
+    val roiProvider by rememberUpdatedState(
+        { frameWidth: Int, frameHeight: Int, rotationDegrees: Int ->
+            val aspect = currentPreviewAspect
+            if (aspect > 0f && !aspectClose(aspect, frameAspect(frameWidth, frameHeight))) {
+                null
+            } else {
+                mapViewRectToFrame(
+                    rect = scanFrame,
+                    viewWidth = viewWidthPx,
+                    viewHeight = viewHeightPx,
+                    frameWidth = frameWidth,
+                    frameHeight = frameHeight,
+                    rotationDegrees = rotationDegrees,
+                    padding = ROI_PADDING
+                )
+            }
+        }
+    )
+
+    val analyzer = remember(engine) {
+        createQrAnalyzer(
+            engine = engine,
+            onQrCode = { raw -> currentOnQrCode(raw) },
+            roi = { frameWidth, frameHeight, rotationDegrees ->
+                roiProvider(frameWidth, frameHeight, rotationDegrees)
+            }
+        )
+    }
 
     // 换引擎即换分析器：释放上一个（ML Kit 的 client 需要 close）
     DisposableEffect(analyzer) {
@@ -495,27 +645,84 @@ internal fun QrCameraPreview(
         )
     }
 
-    AndroidView(factory = { previewView }, modifier = modifier)
+    Box(modifier = modifier) {
+        AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
 
-    DisposableEffect(cameraProvider, lifecycleOwner, scanning, analyzer) {
+        // 手势层：触摸交给盖在预览上的一层 Compose 节点，不去跟嵌进去的 PreviewView 抢事件
+        //（它重写过 onTouchEvent）。点击对焦、捏合变焦都走这里。
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(camera) {
+                    detectTapGestures { offset ->
+                        val cam = camera ?: return@detectTapGestures
+                        val point = previewView.meteringPointFactory
+                            .createPoint(offset.x, offset.y)
+                        cam.cameraControl.startFocusAndMetering(
+                            FocusMeteringAction.Builder(point).build()
+                        )
+                    }
+                }
+                .pointerInput(camera) {
+                    detectTransformGestures { _, _, zoom, _ ->
+                        val state = camera?.cameraInfo?.zoomState?.value
+                            ?: return@detectTransformGestures
+                        // 诊断用：确认手势事件到底有没有到达这一层（只打第一条）
+                        if (!zoomTouched) Log.w(TAG, "捏合手势到达，zoom=" + zoom)
+                        zoomTouched = true
+                        // 手势给的 zoom 是「相对上一次事件的倍数」，倍率要按当前倍率累乘。
+                        // 注意别拿 linearZoom 累乘：它的初值是 0，0 乘任何数还是 0，捏了也没反应。
+                        zoomRatio = (zoomRatio * zoom)
+                            .coerceIn(state.minZoomRatio, state.maxZoomRatio)
+                    }
+                }
+        )
+
+        // 变焦反馈：捏合时露一下当前倍数，看不出反应时至少能确认手势到底有没有生效
+        if (showZoomChip) {
+            Surface(
+                shape = RoundedCornerShape(percent = 50),
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 24.dp)
+            ) {
+                Text(
+                    text = zoomChipText,
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+            }
+        }
+    }
+
+    LaunchedEffect(zoomRatio, camera) {
+        val cam = camera ?: return@LaunchedEffect
+        cam.cameraControl.setZoomRatio(zoomRatio)
+        if (!zoomTouched) return@LaunchedEffect
+        zoomChipText = String.format(Locale.US, "%.1f×", zoomRatio)
+        showZoomChip = true
+        // 这 1 秒会随手势不断续期，松手后自己消失
+        delay(1100)
+        showZoomChip = false
+    }
+
+    LaunchedEffect(torchOn, hasFlash, camera) {
+        if (hasFlash) camera?.cameraControl?.enableTorch(torchOn)
+    }
+
+    DisposableEffect(cameraProvider, lifecycleOwner, scanning, analyzer, engine) {
         val provider = cameraProvider
         if (provider != null) {
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(previewView.surfaceProvider)
-            }
+            val preview = Preview.Builder()
+                .setResolutionSelector(PREVIEW_RESOLUTION_SELECTOR)
+                .build()
+                .also { it.setSurfaceProvider(previewView.surfaceProvider) }
             provider.unbindAll()
-            if (scanning) {
+            camera = if (scanning) {
                 val analysis = ImageAnalysis.Builder()
-                    .setResolutionSelector(
-                        ResolutionSelector.Builder()
-                            .setResolutionStrategy(
-                                ResolutionStrategy(
-                                    android.util.Size(1280, 720),
-                                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                                )
-                            )
-                            .build()
-                    )
+                    .setResolutionSelector(analysisResolutionSelector(engine))
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
                     .also { it.setAnalyzer(executor, analyzer) }
@@ -528,8 +735,25 @@ internal fun QrCameraPreview(
             } else {
                 provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview)
             }
+            // 预览流实际尺寸只用来判断与分析流的裁切是否一致（同宽高比时 ROI 映射才成立）
+            previewAspect = preview.resolutionInfo?.resolution
+                ?.let { frameAspect(it.width, it.height) }
+                ?: 0f
+            camera?.let { cam ->
+                hasFlash = cam.cameraInfo.hasFlashUnit()
+                currentOnFlashAvailable(hasFlash)
+                cam.cameraControl.enableTorch(torchOn)
+                cam.cameraControl.setZoomRatio(zoomRatio)
+            }
         }
-        onDispose { cameraProvider?.unbindAll() }
+        onDispose {
+            // 离开扫码页要把手电筒关掉，否则会一直亮着
+            camera?.cameraControl?.enableTorch(false)
+            camera = null
+            hasFlash = false
+            currentOnFlashAvailable(false)
+            cameraProvider?.unbindAll()
+        }
     }
 
     DisposableEffect(Unit) {
@@ -542,45 +766,94 @@ private interface QrAnalyzer : ImageAnalysis.Analyzer {
     fun close() {}
 }
 
-private fun createQrAnalyzer(engine: QrScanEngine, onQrCode: (String) -> Unit): QrAnalyzer =
-    when (engine) {
-        QrScanEngine.ML_KIT -> MlKitQrAnalyzer(onQrCode)
-        QrScanEngine.ZXING -> ZxingQrAnalyzer(onQrCode)
-    }
+/**
+ * 每帧现算的解码 ROI（帧缓冲坐标）。
+ *
+ * 返回 null 表示这一帧按整帧解码。
+ */
+private fun interface RoiProvider {
+    operator fun invoke(frameWidth: Int, frameHeight: Int, rotationDegrees: Int): FrameRect?
+}
 
-/** ML Kit 解码；每帧处理完必须 close，否则前端会停止出帧。 */
-private class MlKitQrAnalyzer(
-    private val onQrCode: (String) -> Unit
-) : QrAnalyzer {
-
-    private val scanner = BarcodeScanning.getClient(
-        BarcodeScannerOptions.Builder()
-            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-            .build()
-    )
-
-    override fun analyze(imageProxy: ImageProxy) {
-        val mediaImage = imageProxy.image
-        if (mediaImage == null) {
-            imageProxy.close()
-            return
-        }
-        val input = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-        scanner.process(input)
-            .addOnSuccessListener { barcodes ->
-                barcodes.firstNotNullOfOrNull { it.rawValue }?.let(onQrCode)
-            }
-            .addOnCompleteListener { imageProxy.close() }
-    }
-
-    override fun close() = scanner.close()
+private fun createQrAnalyzer(
+    engine: QrScanEngine,
+    onQrCode: (String) -> Unit,
+    roi: RoiProvider
+): QrAnalyzer = when (engine) {
+    QrScanEngine.ZXING -> ZxingQrAnalyzer(roi, onQrCode)
+    QrScanEngine.ZXING_CPP -> ZxingCppQrAnalyzer(roi, onQrCode)
 }
 
 /**
- * ZXing 解码（备用引擎）：Y 平面 → 亮度矩阵 → 转正 → 二值化 → QR 解码。
+ * zxing-cpp 解码（默认引擎，跟 Binary Eye 同一套解码器）。
+ *
+ * 与 [ZxingQrAnalyzer] 的差别：ROI 直接写进 [ImageProxy.cropRect]，由库按它裁（并自己处理旋转），
+ * 我们不用拷 Y 平面；原生实现也快得多。参数对齐 Binary Eye：高分辨率 + 取景框 + 局部均值二值化。
+ */
+private class ZxingCppQrAnalyzer(
+    private val roi: RoiProvider,
+    private val onQrCode: (String) -> Unit
+) : QrAnalyzer {
+
+    private val reader = BarcodeReader(
+        BarcodeReader.Options(
+            formats = setOf(BarcodeReader.Format.QR_CODE),
+            tryHarder = true,
+            tryRotate = true,
+            tryInvert = true,
+            binarizer = BarcodeReader.Binarizer.LOCAL_AVERAGE
+        )
+    )
+    private var frames = 0
+    private var cropWarned = false
+
+    private fun warnCropOnce(e: Throwable) {
+        if (cropWarned) return
+        cropWarned = true
+        Log.w(TAG, "zxing-cpp 取景框裁剪失败，本帧整帧解码", e)
+    }
+
+    override fun analyze(imageProxy: ImageProxy) {
+        try {
+            frames++
+            val full = FrameRect(0, 0, imageProxy.width, imageProxy.height)
+            val region = if (frames % FULL_FRAME_EVERY == 0) {
+                full
+            } else {
+                roi(imageProxy.width, imageProxy.height, imageProxy.imageInfo.rotationDegrees)
+                    ?: full
+            }
+            // 官方封装就是按 ImageProxy.cropRect 裁的，把取景框写进去即可
+            //（getCropRect 是 @NonNull、setCropRect 参数是 @Nullable，Kotlin 不认成属性，只能显式调）
+            // 设不上（越界之类）就当这帧整帧解，别让整个扫码卡死
+            runCatching {
+                imageProxy.setCropRect(
+                    android.graphics.Rect(region.left, region.top, region.right, region.bottom)
+                )
+            }.onFailure { warnCropOnce(it) }
+            val text = reader.read(imageProxy).firstOrNull()?.text
+            if (!text.isNullOrBlank()) onQrCode(text)
+        } catch (e: Exception) {
+            Log.w(TAG, "zxing-cpp 解码异常", e)
+        } finally {
+            imageProxy.close()
+        }
+    }
+}
+
+/**
+ * ZXing 解码（备用引擎）：Y 平面 → 取景框那一块 → 二值化 → QR 解码。
  * 每帧处理完必须 close，否则前端会停止出帧。
+ *
+ * 和 ML Kit 那条路的差别都在「喂什么进去」：
+ * - 只拷取景框内的像素，代价不随帧大小涨，所以分辨率敢要到 [ANALYSIS_SIZE]；
+ * - 不做整帧旋转：二维码四个方向都能解，转正纯属白拷一份内存；
+ * - 局部均值 / 全局直方图两种二值化隔帧轮换，兼顾反光与低对比度；
+ * - ALSO_INVERTED 覆盖屏幕翻拍、深底白码这类反色场景；
+ * - 每 [FULL_FRAME_EVERY] 帧退回整帧，保住「没对准取景框也能扫到」的老行为。
  */
 private class ZxingQrAnalyzer(
+    private val roi: RoiProvider,
     private val onQrCode: (String) -> Unit
 ) : QrAnalyzer {
 
@@ -588,29 +861,38 @@ private class ZxingQrAnalyzer(
     private val hints = mapOf(
         DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE),
         // 备用引擎按「宁可慢也要认出」取舍
-        DecodeHintType.TRY_HARDER to true
+        DecodeHintType.TRY_HARDER to true,
+        DecodeHintType.ALSO_INVERTED to true
     )
+    private var frames = 0
 
     override fun analyze(imageProxy: ImageProxy) {
         try {
             val plane = imageProxy.planes.firstOrNull() ?: return
-            val y = QrLuminance.copyPlane(
+            val width = imageProxy.width
+            val height = imageProxy.height
+            frames++
+            val full = FrameRect(0, 0, width, height)
+            val region = if (frames % FULL_FRAME_EVERY == 0) {
+                full
+            } else {
+                roi(width, height, imageProxy.imageInfo.rotationDegrees) ?: full
+            }
+            val luma = QrLuminance.copyRect(
                 buffer = plane.buffer,
-                width = imageProxy.width,
-                height = imageProxy.height,
+                width = width,
+                height = height,
                 rowStride = plane.rowStride,
-                pixelStride = plane.pixelStride
+                pixelStride = plane.pixelStride,
+                rect = region
             )
-            val luma = QrLuminance.rotate(
-                data = y,
-                width = imageProxy.width,
-                height = imageProxy.height,
-                degrees = imageProxy.imageInfo.rotationDegrees
-            )
+            if (luma.width <= 0 || luma.height <= 0) return
             val source = PlanarYUVLuminanceSource(
                 luma.data, luma.width, luma.height, 0, 0, luma.width, luma.height, false
             )
-            val bitmap = BinaryBitmap(HybridBinarizer(source))
+            val bitmap = BinaryBitmap(
+                if (frames % 2 == 0) HybridBinarizer(source) else GlobalHistogramBinarizer(source)
+            )
             reader.decode(bitmap, hints)?.text?.takeIf { it.isNotBlank() }?.let(onQrCode)
         } catch (e: NotFoundException) {
             // 本帧没有可识别的二维码：正常情况
@@ -634,8 +916,8 @@ internal fun ScanEngineMenuItem(
             Text(
                 stringResource(
                     when (engine) {
-                        QrScanEngine.ML_KIT -> R.string.qr_scan_engine_mlkit
                         QrScanEngine.ZXING -> R.string.qr_scan_engine_zxing
+                        QrScanEngine.ZXING_CPP -> R.string.qr_scan_engine_zxing_cpp
                     }
                 )
             )
@@ -648,32 +930,36 @@ internal fun ScanEngineMenuItem(
 /**
  * 取景框：遮罩挖空 + 白色描边。
  *
- * [reservedTop] / [reservedBottom] 是顶部圆形按钮与底部提示/状态卡占用的空间（px），
- * 据此把取景框排进中间剩余区域并居中，避免与它们重叠。
+ * 位置由 [scanFrame] 给（`QrScannerScaffold` 算一次，画框与解码 ROI 共用同一份几何），
+ * 这里只负责画。
  */
 @Composable
 internal fun ScanFrameOverlay(
-    reservedTop: Float = 0f,
-    reservedBottom: Float = 0f,
+    frame: ScanFrameRect,
     modifier: Modifier = Modifier
 ) {
     Canvas(modifier = modifier.fillMaxSize()) {
-        val freeHeight = (size.height - reservedTop - reservedBottom).coerceAtLeast(0f)
-        val side = (minOf(size.width, freeHeight) * 0.68f).coerceAtMost(MAX_FRAME_SIDE.toPx())
-        val left = (size.width - side) / 2f
-        val top = reservedTop + (freeHeight - side) / 2f
+        if (frame.side <= 0f) return@Canvas
         val corner = CornerRadius(24.dp.toPx(), 24.dp.toPx())
 
         val mask = Path().apply {
             fillType = PathFillType.EvenOdd
             addRect(Rect(0f, 0f, size.width, size.height))
-            addRoundRect(RoundRect(left, top, left + side, top + side, corner))
+            addRoundRect(
+                RoundRect(
+                    frame.left,
+                    frame.top,
+                    frame.left + frame.side,
+                    frame.top + frame.side,
+                    corner
+                )
+            )
         }
         drawPath(mask, Color.Black.copy(alpha = 0.45f))
         drawRoundRect(
             color = Color.White.copy(alpha = 0.9f),
-            topLeft = Offset(left, top),
-            size = Size(side, side),
+            topLeft = Offset(frame.left, frame.top),
+            size = Size(frame.side, frame.side),
             cornerRadius = corner,
             style = Stroke(width = 3.dp.toPx())
         )

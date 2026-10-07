@@ -733,8 +733,10 @@
     <string name="a11y_qr_scan_photo">从图片中识别二维码</string>
     <string name="qr_scan_photo_no_code">图片里没找到二维码，换一张或直接对着二维码扫描</string>
     <string name="a11y_qr_scan_engine">扫描引擎</string>
-    <string name="qr_scan_engine_mlkit">ML Kit（默认）</string>
     <string name="qr_scan_engine_zxing">ZXing（备用）</string>
+    <string name="qr_scan_engine_zxing_cpp">ZXing-C++（默认）</string>
+    <string name="a11y_qr_scan_torch_on">打开手电筒</string>
+    <string name="a11y_qr_scan_torch_off">关闭手电筒</string>
     <string name="qr_scan_hint_align">将二维码放入取景框内</string>
     <string name="qr_scan_permission_title">需要相机权限</string>
     <string name="qr_scan_permission_desc">扫码需要使用相机，请在系统设置中授予相机权限</string>

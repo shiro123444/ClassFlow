@@ -47,7 +47,7 @@
 | Library | Search the catalogue, view loans, renew books |
 | Campus card | Balance, transactions, utility payments |
 | Payment code | Native campus-code screen: code on entry, auto-rotation, balance, screen kept on at full brightness; QR, CODE128 barcode and a digits view, with an official-page fallback |
-| Scan | Let your phone complete the unified-auth QR login for a PC (status 2 → 1) and route Ujing device codes / shower controllers / generic link nodes; ML Kit / ZXing engines, gallery import supported |
+| Scan | Let your phone complete the unified-auth QR login for a PC (status 2 → 1) and route Ujing device codes / shower controllers / generic link nodes; ZXing-C++ / ZXing engines (zxing-cpp by default), gallery import supported |
 | Ujing devices | Jump straight to water dispensers, hair dryers, washers and dryers from their QR codes |
 | Desktop shortcuts | Long-press the app icon for "Scan", "Campus Card" and "Payment Code" |
 
@@ -148,7 +148,7 @@ Open an [issue on GitHub](https://github.com/shiro123444/ClassFlow/issues) or jo
 | Architecture | MVVM with Hilt, Coroutines / Flow |
 | Data | Room, Proto DataStore, kotlinx.serialization, Wire (protobuf) |
 | Networking | OkHttp, Ktor, Jsoup (academic / campus page parsing) |
-| Hardware | CameraX, ML Kit Barcode / ZXing, WorkManager |
+| Hardware | CameraX, ZXing-C++ / ZXing, WorkManager |
 | Other | JGit, AppCompat DayNight, Apache-2.0 license-compliance plugin |
 
 ## Build & development

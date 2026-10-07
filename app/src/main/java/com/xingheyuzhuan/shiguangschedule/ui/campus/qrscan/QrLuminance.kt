@@ -14,33 +14,63 @@ internal data class Luminance(val data: ByteArray, val width: Int, val height: I
 }
 
 /**
- * ZXing 解码所需的灰度处理：按行跨距拷出 Y 平面，再按相机旋转角转正。
+ * ZXing 解码所需的灰度处理：按行跨距从 Y 平面里拷出指定的一块。
+ *
+ * [rotate] 当前解码路径已经不调用（二维码四个方向都能解，转正只是白拷一份内存），
+ * 保留它是因为 ROI 的方向约定需要一个独立的参照：它自己有逐角度锁定的单测，
+ * QrScanRoiTest 用它来交叉验证 [mapViewRectToFrame] 的旋转方向。
  *
  * 只依赖 java.nio，不碰 Android API，可直接单测。
  */
 internal object QrLuminance {
 
-    /** 按 [rowStride] / [pixelStride] 把 Y 平面拷成紧密排列的 width×height 数组。 */
-    fun copyPlane(buffer: ByteBuffer, width: Int, height: Int, rowStride: Int, pixelStride: Int): ByteArray {
-        val out = ByteArray(width * height)
-        val src = buffer.duplicate()
-        if (pixelStride == 1 && rowStride == width) {
-            src.position(0)
-            src.get(out, 0, minOf(out.size, src.remaining()))
-            return out
+    /** 按 [rowStride] / [pixelStride] 把整帧 Y 平面拷成紧密排列的 width×height 数组。 */
+    fun copyPlane(buffer: ByteBuffer, width: Int, height: Int, rowStride: Int, pixelStride: Int): ByteArray =
+        copyRect(buffer, width, height, rowStride, pixelStride, FrameRect(0, 0, width, height)).data
+
+    /**
+     * 只拷 [rect] 这一块，并按 [rowStride] / [pixelStride] 压成紧密排列的数组。
+     *
+     * 取景框 ROI 解码靠它：分辨率再高也只读取景框内的像素，代价与帧大小无关。
+     * 行跨距异常导致读越界时提前收尾（剩下的保持 0），不抛异常——分析线程不该因为坏帧挂掉。
+     */
+    fun copyRect(
+        buffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        pixelStride: Int,
+        rect: FrameRect
+    ): Luminance {
+        val outWidth = rect.width
+        val outHeight = rect.height
+        if (outWidth <= 0 || outHeight <= 0 || width <= 0 || height <= 0) {
+            return Luminance(ByteArray(0), 0, 0)
         }
-        val row = ByteArray(maxOf(rowStride, width * pixelStride))
-        for (y in 0 until height) {
-            src.position(y * rowStride)
-            val len = minOf(row.size, src.remaining())
-            if (len <= 0) break
-            src.get(row, 0, len)
-            for (x in 0 until width) {
-                val idx = x * pixelStride
-                out[y * width + x] = if (idx < len) row[idx] else 0
+        val stride = if (pixelStride > 0) pixelStride else 1
+        val rowStrideSafe = if (rowStride > 0) rowStride else width * stride
+        val out = ByteArray(outWidth * outHeight)
+        val src = buffer.duplicate()
+
+        if (stride == 1) {
+            for (y in 0 until outHeight) {
+                val start = (rect.top + y) * rowStrideSafe + rect.left
+                if (start < 0 || start + outWidth > src.limit()) break
+                src.position(start)
+                src.get(out, y * outWidth, outWidth)
+            }
+        } else {
+            val row = ByteArray(outWidth * stride)
+            for (y in 0 until outHeight) {
+                val start = (rect.top + y) * rowStrideSafe + rect.left * stride
+                if (start < 0 || start + row.size > src.limit()) break
+                src.position(start)
+                src.get(row, 0, row.size)
+                val base = y * outWidth
+                for (x in 0 until outWidth) out[base + x] = row[x * stride]
             }
         }
-        return out
+        return Luminance(out, outWidth, outHeight)
     }
 
     /**
