@@ -5,13 +5,17 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessAction
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessLayer
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.CampusChannelDecision
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuFailureDetector
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.replanCampusChannel
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.resolveCampusChannel
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.resolveCampusUseVpn
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuQueryClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.confirmedPasswordRejectionLayer
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.suggestedAction
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.unreachableOnDirectChannel
 import kotlinx.coroutines.CancellationException
 
 /**
@@ -37,8 +41,10 @@ sealed interface CampusAccessResult<out T> {
  *
  * 1. 本地没有任何会话凭据 → 先用保存的凭据**静默重建一次**（缺密码、缺验证码就地弹小窗补齐）；
  * 2. 发请求；
- * 3. 如果失败原因是「登录态失效」→ 再静默重建一次并重试一遍（用户无感）；
- * 4. 仍失败就把**结构化的失败原因**交给页面：需要重新登录的弹 Sheet，网络类的给内联重试 +
+ * 3. 直连**一个响应都没拿到**、而这条通道又是探测定的 → 作废探测缓存**重算通道**（判据可能已经过期：
+ *    刚走出校园网 WiFi、或者这条链路根本到不了学校），翻成 WebVPN 就按新通道再走一遍；
+ * 4. 如果失败原因是「登录态失效」→ 再静默重建一次并重试一遍（用户无感）；
+ * 5. 仍失败就把**结构化的失败原因**交给页面：需要重新登录的弹 Sheet，网络类的给内联重试 +
  *    「改用 WebVPN」。
  *
  * 这样就不会再出现「开了 WebVPN 却说检查开关」「会话失效却显示没有数据」这类含糊状态。
@@ -55,7 +61,12 @@ suspend fun <T> campusAccess(
     val savedUseVpn = WbuSyncEngine.getSavedUseVpn(context)
     // 需要校园网：开了「自动校园网探测」就先快速探一次 —— 人在校园网里就直连，不绕 WebVPN。
     // 「本次改用 WebVPN」是用户的显式指定，不再探测。
-    val useVpn = useWebVpnOnce || resolveCampusUseVpn(context, savedUseVpn)
+    val decision = if (useWebVpnOnce) {
+        CampusChannelDecision(useVpn = true, decidedByProbe = false)
+    } else {
+        resolveCampusChannel(context, savedUseVpn)
+    }
+    var useVpn = decision.useVpn
 
     suspend fun attempt(): CampusAccessResult<T> = try {
         CampusAccessResult.Ok(block(useVpn), useVpn)
@@ -67,17 +78,34 @@ suspend fun <T> campusAccess(
         CampusAccessResult.Failed(WbuFailureDetector.fromThrowable(e, layer), useVpn)
     }
 
-    // 1) 本地完全没有凭据：先静默重建（缺密码/验证码就地弹小窗，用户取消则视为 Cancelled）
-    if (!WbuAuthTransport.hasLocalSession(context, service, useVpn = useVpn)) {
-        val failure = silentUnifiedAuthLogin(context, flowTag, useVpn, service = service)
-        if (failure != null) return CampusAccessResult.Failed(failure, useVpn)
-    }
+    /** 本地没有该通道的会话就先静默重建（缺密码/验证码就地弹小窗，用户取消则视为 Cancelled）。 */
+    suspend fun ensureLocalSession(): AccessFailure? =
+        if (WbuAuthTransport.hasLocalSession(context, service, useVpn = useVpn)) {
+            null
+        } else {
+            silentUnifiedAuthLogin(context, flowTag, useVpn, service = service)
+        }
+
+    // 1) 本地完全没有凭据：先静默重建
+    ensureLocalSession()?.let { return CampusAccessResult.Failed(it, useVpn) }
 
     // 2) 正常请求
-    val first = attempt()
+    var first = attempt()
     if (first !is CampusAccessResult.Failed) return first
 
-    // 3) 只有「登录态失效」才值得静默重建后重试；网络类问题重试一次也没有意义
+    // 3) 直连连一个响应都没拿到，而通道是探测定的：重算一次通道，翻成 WebVPN 就按新通道再走一遍。
+    //    这一步专治「判据过期」：短缓存里可能还写着「在校园网」，人却已经走出了 WiFi 范围。
+    if (decision.decidedByProbe && first.failure.unreachableOnDirectChannel) {
+        val replanned = replanCampusChannel(context, savedUseVpn)
+        if (replanned.useVpn != useVpn) {
+            useVpn = replanned.useVpn
+            ensureLocalSession()?.let { return CampusAccessResult.Failed(it, useVpn) }
+            first = attempt()
+            if (first !is CampusAccessResult.Failed) return first
+        }
+    }
+
+    // 4) 只有「登录态失效」才值得静默重建后重试；网络类问题重试一次也没有意义
     if (first.failure !is AccessFailure.SessionExpired) return first
 
     val failure = silentUnifiedAuthLogin(context, flowTag, useVpn, service = service)
@@ -243,10 +271,31 @@ suspend fun prepareWbuImportWithSavedPassword(
     flowTag: String,
     onLoginStart: suspend () -> Unit = {}
 ): AccessFailure? {
+    // 开关关着 / 本机没存统一认证密码：这条路径本来就不会登录，连校园网探测都不该做
     if (!shouldAttemptSavedPasswordLogin(context)) return null
-    // 课表同步 / 导入是需要校园网的：同 [campusAccess]，先在校园网内优先直连再决定通道，
-    // 否则会出现「明明在校园网，却先绕 WebVPN 建了一遍会话」。
-    val useVpn = resolveCampusUseVpn(context, WbuSyncEngine.getSavedUseVpn(context))
+    return prepareImportLoginWithChannel(
+        context = context,
+        flowTag = flowTag,
+        // 课表同步 / 导入是需要校园网的：同 [campusAccess]，先在校园网内优先直连再决定通道，
+        // 否则会出现「明明在校园网，却先绕 WebVPN 建了一遍会话」。
+        useVpn = resolveCampusUseVpn(context, WbuSyncEngine.getSavedUseVpn(context)),
+        onLoginStart = onLoginStart
+    )
+}
+
+/**
+ * 同 [prepareWbuImportWithSavedPassword]，但通道由调用方给定。
+ *
+ * 单击同步 / 单击导入这条路径上「通道」与「会话」必须出自同一个结论（见 [prepareWbuSyncSession]）：
+ * 各探一次不只是白多花时间，还可能得出两个不同答案，于是「按直连建的会话被拿去走 WebVPN」。
+ */
+private suspend fun prepareImportLoginWithChannel(
+    context: Context,
+    flowTag: String,
+    useVpn: Boolean,
+    onLoginStart: suspend () -> Unit
+): AccessFailure? {
+    if (!shouldAttemptSavedPasswordLogin(context)) return null
     val hasLocalSession = WbuAuthTransport.hasLocalSession(context, CredentialService.JIAOWU, useVpn = useVpn) ||
         WbuAuthTransport.hasLocalSession(context, CredentialService.UNIFIED_AUTH, useVpn = useVpn)
     if (hasLocalSession) return null
@@ -292,6 +341,60 @@ suspend fun prepareJiaowuSessionForSync(
     if (failure != null) return failure
     // 静默登录已经把该建的会话建好了（含 WebVPN 门禁），直接放行 —— 不再多打一次探活请求
     return null
+}
+
+/** [prepareWbuSyncSession] 的结果：会话就绪、可以发请求，或者为什么没准备好。 */
+sealed interface WbuSyncSession {
+
+    /** 会话已就绪；[engine] 的通道就是**最终**（可能重算过）的那一条，直接拿它发请求。 */
+    data class Ready(val engine: WbuSyncEngine) : WbuSyncSession
+
+    /** 没准备好：需要重新登录 / 网络不通 / 用户取消。 */
+    data class Failed(val failure: AccessFailure) : WbuSyncSession
+}
+
+/**
+ * 「一键同步 / 单击导入」发请求前的统一准备：把**通道**和**教务会话**一次办齐。
+ *
+ * 顺序是刻意的，每一步都对应一类真实故障：
+ * 1. 本地登录态缺失 → 先用保存的密码静默登录一次（缺门禁密码 / 短信 / 滑块就地弹小窗）；
+ * 2. 需要校园网的流程先决定通道：开了「自动校园网探测」且人在校园网内就直接连，不绕 WebVPN；
+ * 3. 现有会话可能只是「看着还在」（WebVPN 门禁 TWFID 过期尤其常见）→ 不行就用保存的密码再登一次；
+ * 4. 直连**一个响应都没拿到**、而通道又是探测定的 → 判定「在校园网内」的那次探测多半已经过期
+ *    （刚走出 WiFi 范围，短缓存里还写着在校内），作废缓存**重算通道**，翻成 WebVPN 就重来一遍。
+ *
+ * 第 4 步是单击同步 / 导入特有的：这两条路径没有登录面板兜底，一次假失败就直接变成
+ * 「操作没成功」的提示，而用户其实什么都没做错。**重算只做一次**，不会来回换通道。
+ *
+ * @param onLoginStart 真的要发起静默登录前回调一次（调用方用来提示「正在用保存的凭据登录…」）；
+ *   重算通道后重试时可能再回调一次，调用方按「再提示一遍同样的状态」处理即可。
+ */
+suspend fun prepareWbuSyncSession(
+    context: Context,
+    flowTag: String,
+    onLoginStart: suspend () -> Unit = {}
+): WbuSyncSession {
+    val savedUseVpn = WbuSyncEngine.getSavedUseVpn(context)
+    var decision = resolveCampusChannel(context, savedUseVpn)
+
+    suspend fun prepare(): Pair<WbuSyncEngine, AccessFailure?> {
+        val engine = WbuSyncEngine(context = context, useVpn = decision.useVpn)
+        val failure = prepareImportLoginWithChannel(context, flowTag, decision.useVpn, onLoginStart)
+            ?: prepareJiaowuSessionForSync(context, engine, flowTag)
+        return engine to failure
+    }
+
+    var (engine, failure) = prepare()
+    if (failure != null && decision.decidedByProbe && failure.unreachableOnDirectChannel) {
+        val replanned = replanCampusChannel(context, savedUseVpn)
+        if (replanned.useVpn != decision.useVpn) {
+            decision = replanned
+            val retried = prepare()
+            engine = retried.first
+            failure = retried.second
+        }
+    }
+    return if (failure == null) WbuSyncSession.Ready(engine) else WbuSyncSession.Failed(failure)
 }
 
 /** 失败原因是否应该给一个「改用 WebVPN」按钮。 */

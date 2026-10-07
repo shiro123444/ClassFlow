@@ -12,8 +12,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.net.InetSocketAddress
-import java.net.Socket
 import java.util.concurrent.TimeUnit
 
 /**
@@ -22,8 +20,8 @@ import java.util.concurrent.TimeUnit
  * 通过访问校园网认证页（仅校内可达、响应快且压力小）判断是否处于校园网，
  * 避免探测 jwxt（可能卡顿）或依赖 SSID（需权限）/网段（不可靠）。
  *
- * 探测语义：能连上/收到任意 HTTP 响应（登录页 200 / 跳转 3xx 等）即视为校园网；
- * 连不上 / 超时 / 连接被拒 / DNS 失败视为非校园网。
+ * 探测语义：认证页真回了一个正常响应（登录页 200 / 跳转 3xx）即视为校园网；
+ * 连不上 / 超时 / 连接被拒 / DNS 失败 / 只拿到网关自己的错误页视为非校园网。
  *
  * 两种探测：
  * - [refresh]：**用户正在等着看结果**的那次探测（登录面板里切直连 / 切 WebVPN、WebView 首屏），
@@ -31,24 +29,27 @@ import java.util.concurrent.TimeUnit
  * - [fastRefresh]：**站在请求路径上**的探测（「自动校园网探测」给成绩 / 选课 / 同步这类
  *   需要校园网的流程选通道），短超时 + 短缓存 —— 用户点开页面后是看着 Loading 等它的。
  *
- * 校外的连接是**黑洞**（SYN 直接丢包，不回 RST 也不报不可达），所以校外失败只能靠超时收场：
- * 快速探测因此刻意只做一次 TCP 连接（比 HTTP GET 少一个来回、超时更短），
- * 并且在「不在 WiFi 上」时直接判定校外 —— 校内认证页是私网地址，蜂窝网络根本到不了，
- * 这一条把校外用流量时最长的那次等待直接变成 0。
+ * 两种探测都必须**真的发一个 HTTP 请求**：tun 模式的本机代理 / VPN 会自己接管 TCP，
+ * 「连得上」在它那里是假象（实测：代理在跑时连 `10.255.255.1:80` 都是 10ms 就成功），
+ * 只有让请求真的走一趟、拿回一个像样的响应，才能证明「人在校园网里」。
+ *
+ * 另外：**只可能是校外**的链路（纯蜂窝 / 无网）直接判校外 —— 校内认证页是私网地址，
+ * 蜂窝链路路由不到它，没必要白等一次超时（带 VPN / 网络共享 / 有线时不算，见
+ * [mightBeOnCampusNetwork]）：校外用流量时最长的那次等待就这样变成 0。
  */
 object WbuNetworkProbe {
 
     // 校园网认证页，校内专用、外部不可达；作为「是否处于校园网」的轻量探测目标
-    private const val CAMPUS_PORTAL_HOST = "172.16.90.162"
-    private const val CAMPUS_PORTAL_PORT = 80
     private const val CAMPUS_PORTAL_URL = "http://172.16.90.162/"
 
     private const val CONNECT_TIMEOUT_MS = 4000L
     private const val READ_TIMEOUT_MS = 4000L
     private const val CALL_TIMEOUT_MS = 6000L
 
-    // 快速探测：只连一下 TCP（不发 HTTP），超时也压到毫秒级
-    private const val FAST_TCP_TIMEOUT_MS = 700
+    // 快速探测：一次「尽量短」的 HTTP（校内一个来回就够；校外/被代理捣乱时按这个超时收场）
+    private const val FAST_CONNECT_TIMEOUT_MS = 500L
+    private const val FAST_READ_TIMEOUT_MS = 500L
+    private const val FAST_CALL_TIMEOUT_MS = 700L
 
     /**
      * 快速探测结果的短缓存时长。
@@ -69,6 +70,16 @@ object WbuNetworkProbe {
             .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .readTimeout(READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .callTimeout(CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+    }
+
+    private val fastProbeClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(FAST_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .readTimeout(FAST_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .callTimeout(FAST_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .followRedirects(false)
             .followSslRedirects(false)
             .build()
@@ -103,7 +114,8 @@ object WbuNetworkProbe {
      * - 在**只可能是校外**的网络上（纯蜂窝 / 无网）直接判定「不在校园网」：校园认证页是私网地址，
      *   蜂窝链路路由不到它，没必要白等一次超时（带 VPN / 网络共享 / 有线时不算，见
      *   [mightBeOnCampusNetwork]）；
-     * - 只做一次 TCP 连接（700ms），不发 HTTP 请求；
+     * - 只发一次**短超时 HTTP**（700ms 内必须拿回响应）。不能只连 TCP：本机 tun 代理会假装连上，
+     *   于是人在校外也会被误判成「在校园网」、反而去走直连；
      * - 结果缓存 60s，且网络一变立刻作废（[watchNetworkChanges]）；
      * - **不把 [campusState] 置成「检测中」**：它是给后台流程选通道用的，
      *   不该让正在看的登录面板提示闪一下。
@@ -120,7 +132,7 @@ object WbuNetworkProbe {
         fastCacheValue?.let { cached ->
             if (now - fastCacheAtMs < FAST_CACHE_TTL_MS) return@withContext cached
         }
-        publishFast(probeTcp())
+        publishFast(probeHttp(fastProbeClient))
     }
 
     /**
@@ -203,17 +215,23 @@ object WbuNetworkProbe {
             )
     }.getOrDefault(true)
 
-    /** 只连一下 TCP：能建立连接即视为在校内（少一个 HTTP 来回，超时也更短）。 */
-    private fun probeTcp(): Boolean = runCatching {
-        Socket().use { socket ->
-            socket.connect(InetSocketAddress(CAMPUS_PORTAL_HOST, CAMPUS_PORTAL_PORT), FAST_TCP_TIMEOUT_MS)
-        }
-        true
-    }.getOrDefault(false)
-
+    /**
+     * 认证页回一个正常响应（登录页 200 / 跳转 3xx）即视为在校内。
+     *
+     * 只认 2xx/3xx：代理 / 网关自己的 4xx、5xx 错误页不是校园网的证据（把它当成「在校园网」
+     * 会让流程白白跑去直连，然后失败）。判据本身由 [isCampusPortalResponseCode] 决定并被单测钉住。
+     */
     private fun probeHttp(client: OkHttpClient): Boolean = runCatching {
         client.newCall(Request.Builder().url(CAMPUS_PORTAL_URL).get().build())
             .execute()
-            .use { true } // 能拿到任意响应即在校内
+            .use { response -> isCampusPortalResponseCode(response.code) }
     }.getOrDefault(false)
 }
+
+/**
+ * 认证页的响应码算不算「人在校园网内」的证据。
+ *
+ * 宁可判错也要往「不在校园网」的方向错：判成校外只会让流程改走 WebVPN（本来就是给校外用的那条路），
+ * 判成校内却会让人在校外时去直连一个根本到不了的地址、最后硬失败。
+ */
+internal fun isCampusPortalResponseCode(code: Int): Boolean = code in 200..399

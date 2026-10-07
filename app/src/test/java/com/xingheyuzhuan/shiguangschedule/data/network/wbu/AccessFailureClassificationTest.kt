@@ -193,4 +193,34 @@ class AccessFailureClassificationTest {
         )
         assertEquals(AccessAction.None, AccessFailure.Cancelled.suggestedAction(false))
     }
+
+    // ---------- 直连失败：值不值得重算通道 / 要不要提登录面板 ----------
+
+    @Test
+    fun onlyNoResponseOnTheDirectChannelCountsAsChannelTrouble() {
+        // 直连上一个响应都没拿到（DNS / 连接 / TLS / 超时）→ 最可能的解释是「其实不在校园网」
+        assertTrue(AccessFailure.Unreachable(AccessLayer.CampusDirect).unreachableOnDirectChannel)
+        assertTrue(AccessFailure.Unreachable(AccessLayer.UnifiedAuth).unreachableOnDirectChannel)
+        assertTrue(AccessFailure.Unreachable(AccessLayer.Service).unreachableOnDirectChannel)
+        // 绕行通道自己断了：跟「人在不在校园网」无关，不能据此改道
+        assertFalse(AccessFailure.Unreachable(AccessLayer.WebVpnPortal).unreachableOnDirectChannel)
+        // 拿到了响应（哪怕是错误页）说明网络是通的，不是通道问题
+        assertFalse(AccessFailure.SessionExpired(AccessLayer.CampusDirect).unreachableOnDirectChannel)
+        assertFalse(AccessFailure.Unexpected(AccessLayer.CampusDirect, "x").unreachableOnDirectChannel)
+    }
+
+    @Test
+    fun networkFailuresNeverCountAsNeedRelogin() {
+        // 契约：网络类 / 内容不符预期 / 用户取消都不该把人推去登录面板
+        for (layer in AccessLayer.values()) {
+            assertFalse("$layer 的网络不通不该要求重新登录", AccessFailure.Unreachable(layer).needsRelogin)
+        }
+        assertFalse(AccessFailure.Unexpected(AccessLayer.WebVpnPortal, "x").needsRelogin)
+        assertFalse(AccessFailure.Cancelled.needsRelogin)
+        // WebVPN 门户的登录态失效 / 凭据被拒才算「要重新登录」
+        assertTrue(AccessFailure.SessionExpired(AccessLayer.WebVpnPortal).needsRelogin)
+        assertTrue(
+            AccessFailure.CredentialRejected(AccessLayer.WebVpnPortal, CredentialKind.Password).needsRelogin
+        )
+    }
 }

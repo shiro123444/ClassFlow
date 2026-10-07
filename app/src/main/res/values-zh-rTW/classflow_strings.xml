@@ -997,7 +997,7 @@
     <string name="fail_network_unreachable">網路連線失敗，請檢查網路後重試</string>
     <string name="fail_webvpn_unreachable">連不上 WebVPN，請檢查網路後重試</string>
     <string name="fail_unified_auth_unreachable">連不上統一身份認證，請檢查網路後重試</string>
-    <string name="fail_unexpected">操作未成功，可能是學校系統有變動，請稍後重試</string>
+    <string name="fail_unexpected">操作未成功，學校系統回傳的內容不符預期，請稍後重試</string>
     <string name="desc_enter_unified_auth_password">本機沒有儲存統一認證密碼，輸入後繼續</string>
     <string name="action_use_webvpn_once">改用 WebVPN</string>
 

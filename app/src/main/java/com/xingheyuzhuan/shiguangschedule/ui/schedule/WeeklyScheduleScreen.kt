@@ -113,10 +113,10 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
 import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
+import com.xingheyuzhuan.shiguangschedule.ui.components.WbuSyncSession
 import com.xingheyuzhuan.shiguangschedule.ui.components.needLoginHintText
-import com.xingheyuzhuan.shiguangschedule.ui.components.prepareJiaowuSessionForSync
 import com.xingheyuzhuan.shiguangschedule.ui.components.prepareWbuImportWithSavedPassword
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.resolveCampusUseVpn
+import com.xingheyuzhuan.shiguangschedule.ui.components.prepareWbuSyncSession
 import com.xingheyuzhuan.shiguangschedule.ui.components.silentUnifiedAuthLogin
 
 /**
@@ -495,8 +495,9 @@ fun WeeklyScheduleScreen(
     /**
      * 单击同步：**全程不打开登录面板**。
      *
-     * 1. 先用保存的密码 / 现有会话把登录态静默准备好（缺门禁密码、短信验证码、滑块校验就地弹小窗）；
+     * 1. 用保存的密码 / 现有会话把登录态静默准备好（缺门禁密码、短信验证码、滑块校验就地弹小窗）；
      * 2. 需要校园网：开了「自动校园网探测」且人就在校园网内时直接连，不绕 WebVPN；
+     *    判据过期导致直连白跑一趟时（刚走出 WiFi 范围最常见）重算一次通道再试，不把这次失败甩给用户；
      * 3. 直接跑导入管线；真需要用户重新登录时只提示一句 —— 登录面板的入口是**长按**按钮。
      */
     suspend fun performDirectSync() {
@@ -513,32 +514,23 @@ fun WeeklyScheduleScreen(
         }
 
         try {
-            val prepareFailure = prepareWbuImportWithSavedPassword(appContext, "SCHEDULE") {
+            // 通道 + 教务会话一次办齐：这一步内部会按需静默登录、必要时重算一次通道
+            val session = prepareWbuSyncSession(appContext, "SCHEDULE") {
                 coroutineScope.launch {
                     showWbuSnackbar(appContext.getString(R.string.status_login_saved_credentials))
                 }
             }
-            if (prepareFailure != null) {
-                stopLoading()
-                showWbuSnackbar(needLoginHintText(appContext, prepareFailure))
-                return
+            when (session) {
+                is WbuSyncSession.Failed -> {
+                    stopLoading()
+                    showWbuSnackbar(needLoginHintText(appContext, session.failure))
+                }
+
+                is WbuSyncSession.Ready -> performCourseImportPipeline(
+                    session.engine,
+                    WbuSyncEngine.getSavedStudentId(appContext)
+                )
             }
-
-            val userUseVpn = WbuSyncEngine.getSavedUseVpn(appContext)
-            // 需要校园网：开了「自动校园网探测」且人在校园网内就直连，不绕 WebVPN
-            val useVpn = resolveCampusUseVpn(appContext, userUseVpn)
-            val engine = WbuSyncEngine(context = appContext, useVpn = useVpn)
-
-            // 现有会话可能只是「看着还在」（WebVPN 门禁 TWFID 过期尤其常见）：不行就用保存的密码
-            // 静默登录一次，而不是等上几秒之后把用户叫去登录面板。
-            val sessionFailure = prepareJiaowuSessionForSync(appContext, engine, "SCHEDULE")
-            if (sessionFailure != null) {
-                stopLoading()
-                showWbuSnackbar(needLoginHintText(appContext, sessionFailure))
-                return
-            }
-
-            performCourseImportPipeline(engine, WbuSyncEngine.getSavedStudentId(appContext))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

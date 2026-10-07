@@ -8,6 +8,9 @@ import android.content.Context
  * 放在数据层是有意的：它既服务 UI 的校园服务流水线（`ui/components/WbuCampusAccess.kt`），
  * 也服务数据层自己的探针（[CredentialVerifier] 验证各服务会话是否有效）。**判定标准只能有一份** ——
  * 否则又会出现「自动探测说人在校内该直连，另一条路径却还在绕 WebVPN」这种自相矛盾。
+ *
+ * 另外提供 [replanCampusChannel]：直连失败之后作废探测缓存、重算一次通道 ——
+ * 「判据过期」（最常见的是刚走出校园网 WiFi，而短缓存里还写着「在校园网」）不该变成一次硬失败。
  */
 
 /**
@@ -38,19 +41,65 @@ fun useVpnAfterCampusProbe(onCampus: Boolean): Boolean = !onCampus
  * 它们本来就不该做任何探测。
  *
  * @param savedUseVpn 设置里的「WebVPN 模式」；默认现场读一次。
- * @return 本次实际使用的通道（`true` = WebVPN）。
+ * @param useVpn 本次实际使用的通道（`true` = WebVPN）。
+ * @param decidedByProbe 这个结论是不是**探测**定的。用户自己把「WebVPN 模式」关掉（也就是
+ *   明确要求直连）、或者「不检测校园网环境」开着时它为 false —— 那时直连失败就是失败，
+ *   不该背着用户偷偷改道。
  */
-suspend fun resolveCampusUseVpn(
+data class CampusChannelDecision(
+    val useVpn: Boolean,
+    val decidedByProbe: Boolean
+)
+
+/**
+ * 同 [resolveCampusUseVpn]，但把「这个结论是不是探测定的」也一并带出来。
+ *
+ * 需要它的地方只有一类：**直连失败之后**的重算（见 [replanCampusChannel]）——
+ * 只有探测定的通道才值得重算，用户自己选的通道要尊重。
+ */
+suspend fun resolveCampusChannel(
     context: Context,
     savedUseVpn: Boolean = WbuSyncEngine.getSavedUseVpn(context)
-): Boolean {
+): CampusChannelDecision {
     if (!shouldProbeCampusForAccess(
             savedUseVpn = savedUseVpn,
             autoProbeEnabled = WbuAuthTransport.isAutoCampusProbeEnabled(context),
             skipCampusCheck = WbuSyncEngine.getSkipCampusCheck(context)
         )
     ) {
-        return savedUseVpn
+        return CampusChannelDecision(useVpn = savedUseVpn, decidedByProbe = false)
     }
-    return useVpnAfterCampusProbe(WbuNetworkProbe.probeForCampusFlow(context))
+    return CampusChannelDecision(
+        useVpn = useVpnAfterCampusProbe(WbuNetworkProbe.probeForCampusFlow(context)),
+        decidedByProbe = true
+    )
+}
+
+/**
+ * 通道决策：在校园网内直连、不在校园网才走 WebVPN；设置没开「自动校园网探测」时就是设置值本身。
+ *
+ * @param savedUseVpn 设置里的「WebVPN 模式」；默认现场读一次。
+ * @return 本次实际使用的通道（`true` = WebVPN）。
+ */
+suspend fun resolveCampusUseVpn(
+    context: Context,
+    savedUseVpn: Boolean = WbuSyncEngine.getSavedUseVpn(context)
+): Boolean = resolveCampusChannel(context, savedUseVpn).useVpn
+
+/**
+ * 直连失败之后的**重算通道**：先把快速探测的短缓存作废，再重新真探一次。
+ *
+ * 为什么要作废缓存：失败本身就说明刚才那条判据不可信（最典型的是「探测说人在校园网，
+ * 可刚走出楼门 WiFi 已经掉了」—— 60s 的短缓存里，这个结论还留着）。
+ * 重新真探一次才可能得到「其实不在校园网」，从而翻到 WebVPN 上再试。
+ *
+ * 只在「通道是探测定的」（[CampusChannelDecision.decidedByProbe]）时调用：用户自己选直连时，
+ * 直连失败就是失败，不替他改道。
+ */
+suspend fun replanCampusChannel(
+    context: Context,
+    savedUseVpn: Boolean = WbuSyncEngine.getSavedUseVpn(context)
+): CampusChannelDecision {
+    WbuNetworkProbe.invalidateFastCache()
+    return resolveCampusChannel(context, savedUseVpn)
 }

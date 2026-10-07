@@ -471,14 +471,11 @@ class WbuSyncEngine(
                     portal.removeTwfidCookie()
                 }
                 TwfidState.UNKNOWN -> {
-                    // 探活没做成（网络/门户不可达）：保留本地会话，不白烧一次登录机会
+                    // 探活没做成（网络/门户不可达）：保留本地会话，不白烧一次登录机会。
+                    // 归类为**网络不通**而不是「系统有变动」：探活失败只说明这次请求没拿到响应，
+                    // 与学校系统改了什么都无关，用户要做的也只是检查网络后重试。
                     Log.w("WbuSyncEngine", "ensureVpnTunnelReady: 无法确认 TWFID 状态，保留本地会话并报错")
-                    return@withContext fail(
-                        AccessFailure.Unexpected(
-                            AccessLayer.WebVpnPortal,
-                            "无法确认 WebVPN 会话状态，请检查网络后重试"
-                        )
-                    )
+                    return@withContext fail(AccessFailure.Unreachable(AccessLayer.WebVpnPortal))
                 }
             }
         }
@@ -552,10 +549,8 @@ class WbuSyncEngine(
                     portal.removeTwfidCookie()
                 }
                 TwfidState.UNKNOWN -> {
-                    lastFailure = AccessFailure.Unexpected(
-                        AccessLayer.WebVpnPortal,
-                        "无法确认 WebVPN 会话状态，请检查网络后重试"
-                    )
+                    // 同 ensureVpnTunnelReady：探活没做成 = 网络问题，不是「系统有变动」
+                    lastFailure = AccessFailure.Unreachable(AccessLayer.WebVpnPortal)
                     return@withContext false
                 }
             }

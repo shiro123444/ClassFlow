@@ -32,7 +32,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.resolveCampusUseVpn
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import com.xingheyuzhuan.shiguangschedule.ui.settings.coursetables.ManageCourseTablesViewModel
@@ -197,44 +196,37 @@ fun WbuCourseImportSheet(
         // 「单击导入」：**不显示登录面板**，直接用保存的凭据 / 现有会话导入一遍。
         // 需要重新登录时只回调一句（登录面板的入口是长按），不把用户直接推到面板前。
         LaunchedEffect(Unit) {
-            val failure = prepareWbuImportWithSavedPassword(context, "COURSE_IMPORT")
-            if (failure != null) {
-                onNeedLogin?.invoke(failure)
-                onDismissRequest()
-                return@LaunchedEffect
-            }
-            // 需要校园网：开了「自动校园网探测」且人在校园网内就直连
-            val useVpn = resolveCampusUseVpn(context, WbuSyncEngine.getSavedUseVpn(context))
-            val engine = WbuSyncEngine(context = context, useVpn = useVpn)
-            val completed = try {
-                // 现有会话可能只是「看着还在」（WebVPN 门禁 TWFID 过期尤其常见）：不行就用保存的密码
-                // 静默登录一次，而不是等上几秒之后把用户叫去登录面板。
-                val sessionFailure = prepareJiaowuSessionForSync(context, engine, "COURSE_IMPORT")
-                if (sessionFailure != null) {
-                    onNeedLogin?.invoke(sessionFailure)
+            // 通道 + 教务会话一次办齐：内部会按需静默登录，判据过期导致直连白跑时还会重算一次通道
+            when (val session = prepareWbuSyncSession(context, "COURSE_IMPORT")) {
+                is WbuSyncSession.Failed -> {
+                    onNeedLogin?.invoke(session.failure)
                     onDismissRequest()
-                    return@LaunchedEffect
                 }
-                isImporting = true
-                importStatusMessage = context.getString(R.string.status_fetching_schedule)
-                importErrorMessage = ""
-                runDirectImportPipeline(engine, WbuSyncEngine.getSavedStudentId(context))
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                importErrorMessage = context.getString(R.string.format_err_import_exception, e.message ?: "")
-                false
-            } finally {
-                isImporting = false
-                importStatusMessage = ""
-            }
-            // 没有面板可以显示过程与错误：失败原因用一条 Toast 说清楚再收工
-            if (!completed) {
-                if (importErrorMessage.isNotBlank()) {
-                    Toast.makeText(context, importErrorMessage, Toast.LENGTH_LONG).show()
-                    importErrorMessage = ""
+
+                is WbuSyncSession.Ready -> {
+                    val completed = try {
+                        isImporting = true
+                        importStatusMessage = context.getString(R.string.status_fetching_schedule)
+                        importErrorMessage = ""
+                        runDirectImportPipeline(session.engine, WbuSyncEngine.getSavedStudentId(context))
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        importErrorMessage = context.getString(R.string.format_err_import_exception, e.message ?: "")
+                        false
+                    } finally {
+                        isImporting = false
+                        importStatusMessage = ""
+                    }
+                    // 没有面板可以显示过程与错误：失败原因用一条 Toast 说清楚再收工
+                    if (!completed) {
+                        if (importErrorMessage.isNotBlank()) {
+                            Toast.makeText(context, importErrorMessage, Toast.LENGTH_LONG).show()
+                            importErrorMessage = ""
+                        }
+                        onDismissRequest()
+                    }
                 }
-                onDismissRequest()
             }
         }
     } else {

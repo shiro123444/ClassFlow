@@ -108,6 +108,18 @@ val AccessFailure.needsRelogin: Boolean
     get() = this is AccessFailure.SessionExpired || this is AccessFailure.CredentialRejected
 
 /**
+ * 这次失败能不能当作「直连通道本身走不通」的证据。
+ *
+ * 只有两个条件：是 [AccessFailure.Unreachable]（一个响应都没拿到），且**不是**发生在 WebVPN 门户层 ——
+ * 门户层的「连不上」说明绕行通道自己也断了，跟「人在不在校园网」没有关系。
+ *
+ * 用途：走直连时它是「这次『在校园网内』的判据可能已经过期」最直接的证据（校园网内的链路
+ * 不该连认证页都到不了）。调用方据此作废探测缓存、重算一次通道再试（见 `replanCampusChannel`）。
+ */
+val AccessFailure.unreachableOnDirectChannel: Boolean
+    get() = this is AccessFailure.Unreachable && layer != AccessLayer.WebVpnPortal
+
+/**
  * 这次失败是否**确认**「某个保存的密码不对」—— 是则返回该密码所在的层，否则 null。
  *
  * 只有它为真时才允许清掉本地保存的密码：

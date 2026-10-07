@@ -87,6 +87,33 @@ class CampusChannelDecisionTest {
         assertFalse(resolve(savedUseVpn = false, autoProbe = true, skipCampusCheck = false, onCampus = false))
     }
 
+    // ---------- 直连失败之后：值不值得重算通道 ----------
+
+    @Test
+    fun onlyProbeChosenChannelsAreWorthReplanning() {
+        // 通道是探测定的 → 直连白跑一趟时值得作废缓存重算一次（判据可能刚过期：人已经走出校园网了）
+        assertTrue(decidedByProbe(savedUseVpn = true, autoProbe = true, skipCampusCheck = false))
+        // 用户自己选了直连 / 自己关了探测 / 明确说了「不检测校园网环境」→ 尊重用户，不偷偷改道
+        assertFalse(decidedByProbe(savedUseVpn = false, autoProbe = true, skipCampusCheck = false))
+        assertFalse(decidedByProbe(savedUseVpn = true, autoProbe = false, skipCampusCheck = false))
+        assertFalse(decidedByProbe(savedUseVpn = true, autoProbe = true, skipCampusCheck = true))
+    }
+
+    @Test
+    fun replanOnlySwitchesTheChannelWhenTheFreshProbeSaysOffCampus() {
+        // 重算的用处全在这一条：过期的「在校园网」被重新探成「其实不在」→ 翻到 WebVPN 再试
+        assertTrue(useVpnAfterCampusProbe(onCampus = false))
+        // 重新探一次仍然说「在校园网」→ 通道不变，别硬把用户改道
+        assertFalse(useVpnAfterCampusProbe(onCampus = true))
+    }
+
+    /**
+     * 与 [resolveCampusChannel] 里 `decidedByProbe` 同构的纯函数：
+     * 「这次通道是探测定的吗」就是「这次该探测吗」。
+     */
+    private fun decidedByProbe(savedUseVpn: Boolean, autoProbe: Boolean, skipCampusCheck: Boolean): Boolean =
+        shouldProbeCampusForAccess(savedUseVpn, autoProbe, skipCampusCheck)
+
     /**
      * 与 `resolveCampusUseVpn` 同构的纯函数：先问「要不要探测」，再按结果选通道。
      * 真实实现只是把这两个判据接到了设置项与快速探测上。

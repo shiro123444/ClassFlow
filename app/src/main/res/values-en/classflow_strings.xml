@@ -997,7 +997,7 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="fail_network_unreachable">Network connection failed. Please check your network and retry</string>
     <string name="fail_webvpn_unreachable">Cannot reach WebVPN. Please check your network and retry</string>
     <string name="fail_unified_auth_unreachable">Cannot reach unified authentication. Please check your network and retry</string>
-    <string name="fail_unexpected">The operation did not succeed. The school system may have changed; please retry later</string>
+    <string name="fail_unexpected">The operation did not succeed. The school system returned an unexpected response; please retry later</string>
     <string name="desc_enter_unified_auth_password">No unified-authentication password is saved on this device. Enter it to continue</string>
     <string name="action_use_webvpn_once">Use WebVPN for this try</string>
 

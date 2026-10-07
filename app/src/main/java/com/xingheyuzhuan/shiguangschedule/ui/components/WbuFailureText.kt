@@ -6,6 +6,7 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessLayer
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.CredentialKind
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuFailureDetector
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.needsRelogin
 
 /**
  * 把结构化的 [AccessFailure] 渲染成用户看得懂的文案。
@@ -45,7 +46,9 @@ fun accessFailureText(context: Context, failure: AccessFailure): String? = when 
         AccessLayer.Service -> context.getString(R.string.fail_network_unreachable)
     }
 
-    // 有响应但内容不对：不把技术细节甩给用户，只给「重试」
+    // 有响应但内容不对：不把技术细节甩给用户，只给「重试」。
+    // 措辞刻意只说「返回的内容不符预期」，不替服务端编原因 —— 曾经这里写的是「可能是学校系统有变动」，
+    // 结果代理 / VPN 出问题时也弹这一句，用户照着「等学校修好」去等，永远等不到。
     is AccessFailure.Unexpected -> context.getString(R.string.fail_unexpected)
 }
 
@@ -70,14 +73,24 @@ private fun webVpnOrGeneralCredentialText(context: Context, layer: AccessLayer):
  * 单击同步 / 单击导入**不再弹登录面板**，所以必须在提示里说清楚面板的入口挪到了长按上，
  * 否则用户只会看到「登录已过期」，却不知道该去哪里登录。
  *
- * @param failure null 表示「只知道需要登录、不知道原因」→ 用兜底文案；
+ * 但这句话只对**[AccessFailure.needsRelogin]**（登录态失效 / 凭据被拒）成立：
+ * 网络不通、学校返回的内容不对、用户自己取消这些情况，把人引到登录面板前解决不了任何问题
+ * （还会顺手再走一遍没用的登录）。这类失败只报原因，不附「长按」的指引。
+ *
+ * @param failure null 表示「只知道需要登录、不知道原因」→ 用兜底文案 + 长按指引；
  *   用户自己取消（[accessFailureText] 返回 null）时同样返回 null，让调用方安静收场、不报错。
  */
 fun needLoginHintText(context: Context, failure: AccessFailure?): String? {
-    val reason = if (failure == null) {
-        context.getString(R.string.err_need_unified_auth_session)
-    } else {
-        accessFailureText(context, failure) ?: return null
+    if (failure == null) {
+        return context.getString(
+            R.string.format_need_login_long_press,
+            context.getString(R.string.err_need_unified_auth_session)
+        )
     }
-    return context.getString(R.string.format_need_login_long_press, reason)
+    val reason = accessFailureText(context, failure) ?: return null
+    return if (failure.needsRelogin) {
+        context.getString(R.string.format_need_login_long_press, reason)
+    } else {
+        reason
+    }
 }
