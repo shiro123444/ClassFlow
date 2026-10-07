@@ -565,6 +565,10 @@ internal fun QrScannerOverlay(
  * - 分析流分辨率按引擎给（见 [ANALYSIS_SIZE_ZXING]）；
  * - 解码区域 = 屏幕上的取景框 [scanFrame]，ZXing 只解这一块，等于给取景框做数字变焦；
  * - 手电筒（[torchOn]）、捏合变焦、点击对焦。
+ *
+ * [onQrCode] **一律在主线程回调**：分析器跑在自建的单线程 executor 上，
+ * 而调用方（Compose 状态、WebView 的 `evaluateJavascript` / `loadUrl`）都要求主线程，
+ * 详见 [analyzer] 处的说明。
  */
 @Composable
 internal fun QrCameraPreview(
@@ -588,6 +592,10 @@ internal fun QrCameraPreview(
         }
     }
     val executor = remember { Executors.newSingleThreadExecutor() }
+    // 解码回调统一切回主线程：分析器在 [executor] 这个后台线程上跑，而调用方大多是
+    // Compose 回调 / WebView API（`WebView.checkThread` 会在非主线程直接抛异常），
+    // 这里换线程，调用方就不必各自记得再 post 一次。
+    val mainExecutor = remember(context) { ContextCompat.getMainExecutor(context) }
     val currentOnQrCode by rememberUpdatedState(onQrCode)
     val currentOnFlashAvailable by rememberUpdatedState(onFlashAvailable)
 
@@ -624,7 +632,11 @@ internal fun QrCameraPreview(
     val analyzer = remember(engine) {
         createQrAnalyzer(
             engine = engine,
-            onQrCode = { raw -> currentOnQrCode(raw) },
+            // 分析器线程 → 主线程：见 [QrCameraPreview] 的说明。
+            // 这里若不换线程，网页应用扫码浮层回填结果时会在 `WebView.evaluateJavascript`
+            // 上抛 "A WebView method was called on thread ..."（异常又被分析器的 catch 吞掉），
+            // 表现为「扫到码却毫无反应」。
+            onQrCode = { raw -> mainExecutor.execute { currentOnQrCode(raw) } },
             roi = { frameWidth, frameHeight, rotationDegrees ->
                 roiProvider(frameWidth, frameHeight, rotationDegrees)
             }

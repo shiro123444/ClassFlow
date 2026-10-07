@@ -344,6 +344,8 @@ fun WebAppScreen(
     Box(modifier = Modifier.fillMaxSize()) {
         val context = LocalContext.current
         val coroutineScope = rememberCoroutineScope()
+        /** 回填页面结果用：WebView 的方法只能在它自己的线程（主线程）上调用，见 [postToWebViewThread]。 */
+        val mainHandler = remember { Handler(Looper.getMainLooper()) }
         val uiState by viewModel.uiState.collectAsState()
 
         var showAuthSheet by remember { mutableStateOf(false) }
@@ -404,44 +406,52 @@ fun WebAppScreen(
                     when (request) {
                         is ScanRequest.Bridge -> {
                             // 取消：回调 null 触发 U净 的 fail 分支
-                            webView.evaluateJavascript(
-                                "window.__cfScanResolve(${JSONObject.quote(request.callbackId)}, null);",
-                                null
-                            )
+                            postToWebViewThread(mainHandler) {
+                                webView.evaluateJavascript(
+                                    "window.__cfScanResolve(${JSONObject.quote(request.callbackId)}, null);",
+                                    null
+                                )
+                            }
                         }
                         is ScanRequest.EmBridge -> {
-                            webView.evaluateJavascript(
-                                "window.__cfEmScanResolve(${JSONObject.quote(request.callbackId)}, null);",
-                                null
-                            )
+                            postToWebViewThread(mainHandler) {
+                                webView.evaluateJavascript(
+                                    "window.__cfEmScanResolve(${JSONObject.quote(request.callbackId)}, null);",
+                                    null
+                                )
+                            }
                         }
                         is ScanRequest.JsAgent -> {
                             val callback = request.callbackName.ifBlank { "scanCallback" }
-                            webView.evaluateJavascript(
-                                """
-                                (function() {
-                                    var cb = window[${JSONObject.quote(callback)}];
-                                    if (typeof cb === 'function') {
-                                        try { cb({ code: 500, msg: '用户取消' }); } catch (e) {}
-                                    }
-                                })();
-                                """.trimIndent(),
-                                null
-                            )
+                            postToWebViewThread(mainHandler) {
+                                webView.evaluateJavascript(
+                                    """
+                                    (function() {
+                                        var cb = window[${JSONObject.quote(callback)}];
+                                        if (typeof cb === 'function') {
+                                            try { cb({ code: 500, msg: '用户取消' }); } catch (e) {}
+                                        }
+                                    })();
+                                    """.trimIndent(),
+                                    null
+                                )
+                            }
                         }
                         is ScanRequest.AndroidFunc -> {
                             val callback = request.callbackName.ifBlank { "scanCallback" }
-                            webView.evaluateJavascript(
-                                """
-                                (function() {
-                                    var cb = window[${JSONObject.quote(callback)}];
-                                    if (typeof cb === 'function') {
-                                        try { cb(null); } catch (e) {}
-                                    }
-                                })();
-                                """.trimIndent(),
-                                null
-                            )
+                            postToWebViewThread(mainHandler) {
+                                webView.evaluateJavascript(
+                                    """
+                                    (function() {
+                                        var cb = window[${JSONObject.quote(callback)}];
+                                        if (typeof cb === 'function') {
+                                            try { cb(null); } catch (e) {}
+                                        }
+                                    })();
+                                    """.trimIndent(),
+                                    null
+                                )
+                            }
                         }
                         is ScanRequest.Redirect -> { /* 页面跳转类取消无需主动注入 */ }
                     }
@@ -704,25 +714,27 @@ fun WebAppScreen(
                             return@QrScannerOverlay
                         }
                         if (webView != null && rawResult.isNotBlank()) {
+                            // 相机解码回调可能不在主线程，而 WebView 的 loadUrl / evaluateJavascript
+                            // 都必须在主线程调用（见 [postToWebViewThread]），这里统一兜一层。
                             when (request) {
                                 is ScanRequest.Redirect -> {
                                     val separator = if (request.redirectUrl.contains("?")) "&" else "?"
                                     val encoded = java.net.URLEncoder.encode(rawResult, "UTF-8")
                                     val finalCallbackUrl = "${request.redirectUrl}${separator}scanResult=$encoded"
                                     Log.i("WebAppScreen", "Loading scan callback URL: $finalCallbackUrl")
-                                    webView.loadUrl(finalCallbackUrl)
+                                    postToWebViewThread(mainHandler) { webView.loadUrl(finalCallbackUrl) }
                                 }
 
                                 is ScanRequest.Bridge -> {
                                     val js = "window.__cfScanResolve(${JSONObject.quote(request.callbackId)}, ${JSONObject.quote(rawResult)});"
                                     Log.i("WebAppScreen", "Resolving wx stub scan result")
-                                    webView.evaluateJavascript(js, null)
+                                    postToWebViewThread(mainHandler) { webView.evaluateJavascript(js, null) }
                                 }
 
                                 is ScanRequest.EmBridge -> {
                                     val js = "window.__cfEmScanResolve(${JSONObject.quote(request.callbackId)}, ${JSONObject.quote(rawResult)});"
                                     Log.i("WebAppScreen", "Resolving em stub scan result")
-                                    webView.evaluateJavascript(js, null)
+                                    postToWebViewThread(mainHandler) { webView.evaluateJavascript(js, null) }
                                 }
 
                                 is ScanRequest.JsAgent -> {
@@ -738,7 +750,7 @@ fun WebAppScreen(
                                         })();
                                     """.trimIndent()
                                     Log.i("WebAppScreen", "Resolving JsAgent scan result: $callback")
-                                    webView.evaluateJavascript(js, null)
+                                    postToWebViewThread(mainHandler) { webView.evaluateJavascript(js, null) }
                                 }
 
                                 is ScanRequest.AndroidFunc -> {
@@ -754,7 +766,7 @@ fun WebAppScreen(
                                         })();
                                     """.trimIndent()
                                     Log.i("WebAppScreen", "Resolving AndroidFunc scan result: $callback")
-                                    webView.evaluateJavascript(js, null)
+                                    postToWebViewThread(mainHandler) { webView.evaluateJavascript(js, null) }
                                 }
                             }
                         }
@@ -766,6 +778,23 @@ fun WebAppScreen(
     }
 }
 
+
+/**
+ * 在主线程执行一段调用 [WebView] 的代码。
+ *
+ * [WebView] 的每个公开方法都带线程检查（`WebView.checkThread`）：只要不是创建它的那个线程
+ * （本类里恒为主线程）调用，就会直接抛出
+ * `Throwable: A WebView method was called on thread ...`。
+ * 扫码结果回填可能来自相机分析线程（见 [QrScannerView] 的说明），异常一旦被上层的
+ * `try/catch` 吃掉，页面就永远收不到结果，表现为「扫了没反应」——所以这里统一兜一层。
+ */
+private fun postToWebViewThread(handler: Handler, block: () -> Unit) {
+    if (Looper.myLooper() == Looper.getMainLooper()) {
+        block()
+    } else {
+        handler.post(block)
+    }
+}
 
 /**
  * 判断是否是一卡通缴费页（需要切换为桌面/H5 UA）。
