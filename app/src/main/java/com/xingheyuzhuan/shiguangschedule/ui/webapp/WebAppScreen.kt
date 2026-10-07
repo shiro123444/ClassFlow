@@ -369,6 +369,19 @@ fun WebAppScreen(
          */
         var vmStarted by rememberSaveable(pendingAutoScan) { mutableStateOf(false) }
 
+        /**
+         * 深链的一次性自启（地址里的 `scanResult` 载体 / [pendingAutoScan] 注入）是否已经执行过。
+         *
+         * 这类自启都是「页面一挂载就直接开一单」的动作（2-3 栋淋浴 `prices` 为空时直接开用水、
+         * 洗衣机直接下单、1 栋洗浴直接 `useWater`），可它躺在导航参数里：进程被系统回收后重建、
+         * 或转屏重建，地址与原样都会重放一遍 —— 现场表现就是「切后台过一会儿回来又重新开始订单」。
+         *
+         * 标记放保存状态：同一个导航条目重建时会以 true 回来，于是只把页面本身打开
+         * （页面自己会读设备状态：还在用水就显示「使用中」），不再自动开单；
+         * 重新扫码进入的是新的导航条目，标记是全新的 false，自启照旧。
+         */
+        var deepLinkAutoStarted by rememberSaveable(pendingAutoScan) { mutableStateOf(false) }
+
         LaunchedEffect(pendingAutoScan) {
             if (isWasherDeepLink) {
                 // /wm/{uuid}：先解析洗衣机 H5 真实入口，避免只停在一卡通首页
@@ -570,11 +583,14 @@ fun WebAppScreen(
 
                 stage is WebAppStage.ContentReady -> {
                     FullScreenWebContent(
-                        targetUrl = stage.url,
+                        // 深链自启已经执行过的条目（重建场景）：把地址里的一次性载体摘掉再加载，
+                        // 否则页面重新挂载就会再开一单（见 [deepLinkAutoStarted]）
+                        targetUrl = if (deepLinkAutoStarted) stripDeepLinkAutoTrigger(stage.url) else stage.url,
                         useVpn = stage.useVpn,
                         definition = uiState.definition,
                         platformToken = stage.token,
-                        pendingAutoScan = pendingAutoScan,
+                        // 同理：重建时不再把自启载荷交给页面
+                        pendingAutoScan = if (deepLinkAutoStarted) null else pendingAutoScan,
                         onSslError = { handler, error -> sslErrorState = Pair(handler, error) },
                         onSessionExpired = { showAuthSheet = true },
                         onInterceptScan = { redirectUrl -> scanRequest = ScanRequest.Redirect(redirectUrl) },
@@ -582,6 +598,7 @@ fun WebAppScreen(
                         onEmScan = { callbackId -> scanRequest = ScanRequest.EmBridge(callbackId) },
                         onJsAgentScan = { callbackName -> scanRequest = ScanRequest.JsAgent(callbackName) },
                         onAndroidFuncScan = { callbackName -> scanRequest = ScanRequest.AndroidFunc(callbackName) },
+                        onDeepLinkAutoStartHandedOff = { deepLinkAutoStarted = true },
                         onWebViewReady = { webViewInstance = it }
                     )
                 }
@@ -797,6 +814,45 @@ private fun postToWebViewThread(handler: Handler, block: () -> Unit) {
 }
 
 /**
+ * 深链里的一次性「自启」载体：`CampusShowerEntryResolver` 把扫码原文拼在地址最后
+ * （`…&scanResult=<URLEncoder 原文>`），lifeService 页面在 `mounted` 里读它就直接开单。
+ */
+private const val DEEP_LINK_AUTO_START_PARAM = "scanResult="
+
+/**
+ * 摘掉地址里的一次性自启载体 [DEEP_LINK_AUTO_START_PARAM]。
+ *
+ * 页面 `urlCallBackhandle()` 只要在地址里读到 `scanResult`，就会拿它去 `getDevicesType`；
+ * 2-3 栋淋浴在没有档位价格时紧接着 `deviceStatus(1)` 开单 —— 也就是说**地址每被重新加载一次
+ * 就多开一单**（切后台被系统回收 → 回来自动重建 → 页面重新挂载）。已经自启过的条目重建时
+ * 用它把参数摘掉，页面就只打开设备页、显示服务端当前状态。
+ *
+ * `scanResult` 的值经 `URLEncoder.encode`，内部不含裸 `&`/`#`，所以按 `&` 切段丢弃即可，
+ * 其余参数（`_dt` / `_implid` / `feeitemid` / `appId` / `synjones-auth`…）原样保留。
+ */
+internal fun stripDeepLinkAutoTrigger(url: String): String {
+    val hashAt = url.indexOf('#')
+    val fragment = if (hashAt >= 0) url.substring(hashAt) else ""
+    val head = if (hashAt >= 0) url.substring(0, hashAt) else url
+    val queryAt = head.indexOf('?')
+    if (queryAt < 0) return url
+
+    val prefix = head.substring(0, queryAt)
+    val segments = head.substring(queryAt + 1).split('&')
+    val kept = segments.filterNot { it.startsWith(DEEP_LINK_AUTO_START_PARAM) }
+    if (kept.size == segments.size) return url
+
+    val rebuilt = if (kept.isEmpty()) prefix else "$prefix?" + kept.joinToString("&")
+    return rebuilt + fragment
+}
+
+/**
+ * 判断当前加载的地址是不是带一次性自启载体的深链（含 `scanResult` 参数）。
+ */
+private fun hasDeepLinkAutoTrigger(url: String?): Boolean =
+    !url.isNullOrBlank() && url.contains(DEEP_LINK_AUTO_START_PARAM)
+
+/**
  * 判断是否是一卡通缴费页（需要切换为桌面/H5 UA）。
  *
  * 一卡通支付网关会按 UA 判定「官方移动端模块」：Android UA 返回 4030
@@ -945,6 +1001,8 @@ private fun FullScreenWebContent(
     onEmScan: (callbackId: String) -> Unit,
     onJsAgentScan: (callbackName: String) -> Unit,
     onAndroidFuncScan: (callbackName: String) -> Unit,
+    /** 深链的一次性自启已经交给页面（见 [WebAppScreen] 的 [deepLinkAutoStarted] 说明）。 */
+    onDeepLinkAutoStartHandedOff: () -> Unit = {},
     onWebViewReady: (WebView) -> Unit
 ) {
     val context = LocalContext.current
@@ -1247,11 +1305,14 @@ private fun FullScreenWebContent(
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     applyCampusCardUserAgent(view, url)
+                    // 本次加载是否把「一次性自启」交给了页面
+                    var autoStartHandedOff = false
                     // 兜底再注入一次（部分机型 onPageStarted 时 JS 上下文尚未就绪）
                     if (enableScanBridge) {
                         view?.evaluateJavascript(WX_STUB_JS, null)
                         if (!pendingAutoScan.isNullOrBlank() && !autoScanConsumed) {
                             autoScanConsumed = true
+                            autoStartHandedOff = true
                             val autoJs = """
                                 (function() {
                                     window.__cfAutoScan = ${JSONObject.quote(pendingAutoScan)};
@@ -1265,7 +1326,13 @@ private fun FullScreenWebContent(
                         // 智能控水（1 栋洗浴）：深链已带票据，页面就绪后自动进入设备页
                         if (!pendingAutoScan.isNullOrBlank() && isYktXyyyUrl(url)) {
                             view?.evaluateJavascript(buildYktShowerAutoUseJs(pendingAutoScan), null)
+                            autoStartHandedOff = true
                         }
+                    }
+                    // 通知外层「这个条目的深链自启已经用完」：它存进保存状态，
+                    // 于是进程被回收后重建时不再重放（页面重新挂载就会再开一单）
+                    if (autoStartHandedOff || hasDeepLinkAutoTrigger(url)) {
+                        onDeepLinkAutoStartHandedOff()
                     }
                 }
 
