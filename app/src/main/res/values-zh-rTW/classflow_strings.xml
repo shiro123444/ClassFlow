@@ -788,6 +788,20 @@
     <string name="dialog_ujing_hairdryer_message">當前吹風機設備不支援一卡通掃碼，請使用微信、支付寶、雲閃付等掃碼\n若資訊有誤請提交開發者</string>
     <string name="dialog_ujing_washer_offline_title">設備離線</string>
     <string name="dialog_ujing_washer_offline_message">該洗衣機設備當前已離線，暫無法下單使用。</string>
+    <!-- 洗衣機不可下單的具體原因：服務端只回「能不能下單」，靠 status 才區分得出原因 -->
+    <string name="dialog_ujing_washer_running_title">設備使用中</string>
+    <string name="dialog_ujing_washer_running_message">此設備正在運轉中，請使用其他設備。</string>
+    <string name="dialog_ujing_washer_reserved_title">設備已被預約</string>
+    <string name="dialog_ujing_washer_reserved_message">他人已搶先一步預約此設備，請嘗試掃描其他設備。</string>
+    <string name="dialog_ujing_washer_fault_title">設備故障中</string>
+    <string name="dialog_ujing_washer_fault_message">當前設備故障，請聯繫商家處理。</string>
+    <string name="dialog_ujing_washer_disabled_title">設備未開通或已停用</string>
+    <string name="dialog_ujing_washer_disabled_message">該設備未開通或已被商家停用，請選擇其他設備。</string>
+    <string name="dialog_ujing_washer_unknown_title">未識別到洗衣機設備</string>
+    <string name="dialog_ujing_washer_unknown_message">未識別到該洗衣機設備，請確認掃描的是洗衣機機身上的二維碼（設備可能已拆除或停用）。</string>
+    <string name="dialog_ujing_washer_unavailable_title">暫不可下單</string>
+    <string name="dialog_ujing_washer_unavailable_message">該洗衣機目前無法下單，請稍後重試或換一台設備。</string>
+    <string name="dialog_ujing_washer_merchant_phone">聯繫商家：%1$s</string>
     <string name="ujing_washer_checking">正在核驗洗衣機狀態...</string>
     <string name="ujing_alipay_not_installed">未找到可處理支付寶請求的應用</string>
 

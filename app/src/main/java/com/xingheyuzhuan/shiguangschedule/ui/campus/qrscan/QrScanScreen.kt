@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.R
+import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WasherNoticeDialog
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import com.xingheyuzhuan.shiguangschedule.ui.campus.ujing.launchUjingHairdryer
@@ -63,7 +64,7 @@ fun QrScanScreen(
     val scanEngine by viewModel.scanEngine.collectAsState()
     val photoBusy by viewModel.photoBusy.collectAsState()
     val hairdryerPrompt by viewModel.hairdryerPrompt.collectAsState()
-    val washerOffline by viewModel.washerOffline.collectAsState()
+    val washerNotice by viewModel.washerNotice.collectAsState()
     val washerLoading by viewModel.washerLoading.collectAsState()
     val showerChecking by viewModel.showerChecking.collectAsState()
 
@@ -220,16 +221,10 @@ fun QrScanScreen(
         )
     }
 
-    if (washerOffline) {
-        AlertDialog(
-            onDismissRequest = { viewModel.dismissWasherOfflineDialog() },
-            title = { Text(stringResource(R.string.dialog_ujing_washer_offline_title)) },
-            text = { Text(stringResource(R.string.dialog_ujing_washer_offline_message)) },
-            confirmButton = {
-                TextButton(onClick = { viewModel.dismissWasherOfflineDialog() }) {
-                    Text(stringResource(R.string.action_confirm))
-                }
-            }
+    washerNotice?.let { notice ->
+        WasherNoticeDialog(
+            notice = notice,
+            onDismiss = { viewModel.dismissWasherNotice() }
         )
     }
 }

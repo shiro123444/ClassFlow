@@ -112,8 +112,18 @@ class WbuUjingClient(
         val isTerminal: Boolean
     )
 
+    /**
+     * 洗衣机设备码核验结果。
+     *
+     * [availability] 是唯一可靠的判定；[status] / [orderId] / [serverReason] / [merchantMobile]
+     * 是原始字段，用于展示更具体的原因（见 [WasherUnavailableReason]）。
+     */
     data class WasherScanResult(
-        val online: Boolean,
+        val availability: WasherAvailability,
+        val status: Int?,
+        val orderId: Long?,
+        val serverReason: String?,
+        val merchantMobile: String?,
         val lastUseDeviceId: String?,
         val rawData: JSONObject
     )
@@ -360,6 +370,9 @@ class WbuUjingClient(
     /**
      * 洗衣机设备码核验（扫描二维码原文）。
      * 对应 U净 washer-h5 的 devices/scanWasherCode 接口。
+     *
+     * `result.createOrderEnabled` 只是「现在能不能下单」，不能当成「设备在线」：
+     * 离线 / 被占用 / 故障 / 停用 / 码不存在都会是 false，具体原因由 [WasherAvailability] 给出。
      */
     suspend fun scanWasherCode(qrcode: String): WasherScanResult = withContext(Dispatchers.IO) {
         val body = JSONObject().apply {
@@ -377,15 +390,33 @@ class WbuUjingClient(
             val json = JSONObject(bodyStr)
             if (json.optInt("code") != 0) {
                 val msg = json.optString("message").ifBlank { "洗衣机扫码未成功 (code=${json.optInt("code")})" }
-                throw IOException(msg)
+                // 带业务码抛出：调用方可据此区分「服务端明确拒绝」与网络异常
+                throw UjingApiException(json.optInt("code"), msg)
             }
             val data = json.optJSONObject("data") ?: throw IOException("洗衣机扫码未返回数据: $bodyStr")
             val result = data.optJSONObject("result")
-            val online = result?.optBoolean("createOrderEnabled", true) ?: true
+
+            // 注意用 has() 区分「字段缺失」与「字段为 0/false」：缺失不能默认成可用
+            val createOrderEnabled =
+                if (result?.has("createOrderEnabled") == true) result.optBoolean("createOrderEnabled") else null
+            val status = if (result?.has("status") == true) result.optInt("status") else null
+            val orderId = if (result?.has("orderId") == true) result.optLong("orderId", 0L) else 0L
             val deviceId = result?.optString("deviceId").takeIf { !it.isNullOrBlank() }
+            val merchantMobile = result?.optString("mobile").takeIf { !it.isNullOrBlank() }
+            val availability = resolveWasherAvailability(
+                createOrderEnabled = createOrderEnabled,
+                status = status,
+                hasOrderId = orderId > 0L,
+                hasDeviceId = deviceId != null,
+                merchantMobile = merchantMobile
+            )
 
             WasherScanResult(
-                online = online,
+                availability = availability,
+                status = status,
+                orderId = orderId.takeIf { it > 0L },
+                serverReason = result?.optString("reason").takeIf { !it.isNullOrBlank() },
+                merchantMobile = merchantMobile,
                 lastUseDeviceId = deviceId,
                 rawData = data
             )

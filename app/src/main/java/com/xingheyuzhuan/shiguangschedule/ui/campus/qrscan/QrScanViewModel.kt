@@ -11,6 +11,7 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.CasQrLink
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.QrConfirmOutcome
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.QrScanOutcome
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.ShowerQrLink
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WasherAvailability
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -146,9 +147,12 @@ class QrScanViewModel @Inject constructor(
     private val _washerLoading = MutableStateFlow(false)
     val washerLoading: StateFlow<Boolean> = _washerLoading.asStateFlow()
 
-    /** 洗衣机设备离线提示。 */
-    private val _washerOffline = MutableStateFlow(false)
-    val washerOffline: StateFlow<Boolean> = _washerOffline.asStateFlow()
+    /**
+     * 洗衣机当前不可下单的提示（离线 / 他人占用 / 已被预约 / 故障 / 停用 / 码无效），
+     * null 表示不显示。文案见 `WasherNoticeDialog`。
+     */
+    private val _washerNotice = MutableStateFlow<WasherAvailability.Unavailable?>(null)
+    val washerNotice: StateFlow<WasherAvailability.Unavailable?> = _washerNotice.asStateFlow()
 
     /** 洗浴设备核验中状态。 */
     private val _showerChecking = MutableStateFlow(false)
@@ -316,13 +320,22 @@ class QrScanViewModel @Inject constructor(
                 val result = ujingClient.scanWasherCode(washer.raw)
                 _washerLoading.value = false
 
-                if (!result.online) {
-                    _washerOffline.value = true
-                } else {
-                    val launchUrl = cardClient.resolveAppLaunchUrl(com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuUjingClient.WASHER_APP_ID, token)
-                    val separator = if (launchUrl?.contains("?") == true) "&" else "?"
-                    val initialUrl = if (launchUrl != null) "${launchUrl}${separator}scanResult=$encodedRaw" else null
-                    _scanEvent.emit(QrScanEvent.NavigateToWasher(initialUrl = initialUrl, pendingAutoScan = washer.raw))
+                when (val availability = result.availability) {
+                    is WasherAvailability.Ready -> {
+                        val launchUrl = cardClient.resolveAppLaunchUrl(com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuUjingClient.WASHER_APP_ID, token)
+                        val separator = if (launchUrl?.contains("?") == true) "&" else "?"
+                        val initialUrl = if (launchUrl != null) "${launchUrl}${separator}scanResult=$encodedRaw" else null
+                        _scanEvent.emit(QrScanEvent.NavigateToWasher(initialUrl = initialUrl, pendingAutoScan = washer.raw))
+                    }
+
+                    is WasherAvailability.Unavailable -> {
+                        // 不能下单的原因不止「离线」：被占用 / 已预约 / 故障 / 停用 / 码无效各有文案
+                        android.util.Log.i(
+                            TAG,
+                            "Washer ${washer.uuid} 不可下单: ${availability.reason}, status=${result.status}, raw=${result.rawData}"
+                        )
+                        _washerNotice.value = availability
+                    }
                 }
             } catch (e: Exception) {
                 _washerLoading.value = false
@@ -409,8 +422,9 @@ class QrScanViewModel @Inject constructor(
         handledUuid = null
     }
 
-    fun dismissWasherOfflineDialog() {
-        _washerOffline.value = false
+    /** 关掉洗衣机「当前不可下单」提示，并允许重新扫同一条码。 */
+    fun dismissWasherNotice() {
+        _washerNotice.value = null
         handledUjing = null
         handledLinkHub = null
         handledShower = null

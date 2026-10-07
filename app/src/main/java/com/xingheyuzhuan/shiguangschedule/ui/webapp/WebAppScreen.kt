@@ -106,6 +106,7 @@ import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppDefinition
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
+import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WasherNoticeDialog
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import com.xingheyuzhuan.shiguangschedule.ui.components.WbuAuthPromptDialogs
@@ -116,6 +117,7 @@ import com.xingheyuzhuan.shiguangschedule.ui.components.WebJsDialogHost
 import com.xingheyuzhuan.shiguangschedule.ui.components.WebJsDialogRequest
 import com.xingheyuzhuan.shiguangschedule.ui.components.WebJsDialogState
 import com.xingheyuzhuan.shiguangschedule.ui.components.webDialogPageLabel
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WasherAvailability
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WasherEntryResolver
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.web.DESKTOP_USER_AGENT
 import kotlinx.coroutines.launch
@@ -354,13 +356,15 @@ fun WebAppScreen(
         /** 最终用于加载的入口地址（洗衣机深链解析完成后才有值；其余场景等于入参）。 */
         var resolvedInitialUrl by rememberSaveable(pendingAutoScan) { mutableStateOf(initialTargetUrl) }
         var washerResolving by rememberSaveable(pendingAutoScan) { mutableStateOf(isWasherDeepLink) }
-        var washerOffline by remember { mutableStateOf(false) }
+
+        /** 洗衣机不可下单提示（离线 / 占用 / 预约 / 故障 / 停用 / 码无效），null 表示无提示。 */
+        var washerNotice by remember { mutableStateOf<WasherAvailability.Unavailable?>(null) }
 
         /**
          * VM 是否已按应用定义开始流程。
          *
          * 未开始时 [WebAppUiState.stage] 只是默认占位值（ProbingNetwork）：
-         * 洗衣机深链解析中、设备离线（此时根本不会启动 VM）都属于这种情况，
+         * 洗衣机深链解析中、设备不可下单（此时根本不会启动 VM）都属于这种情况，
          * 若照常渲染就会露出「校园网环境检测」这一与洗衣机无关的页面。
          */
         var vmStarted by rememberSaveable(pendingAutoScan) { mutableStateOf(false) }
@@ -370,35 +374,26 @@ fun WebAppScreen(
                 // /wm/{uuid}：先解析洗衣机 H5 真实入口，避免只停在一卡通首页
                 when (val result = WasherEntryResolver.resolve(context, pendingAutoScan)) {
                     is WasherEntryResolver.Result.Ready -> resolvedInitialUrl = result.url
-                    WasherEntryResolver.Result.Offline -> washerOffline = true
+                    is WasherEntryResolver.Result.Unavailable -> washerNotice = result.availability
                     WasherEntryResolver.Result.Failed -> resolvedInitialUrl = null
                 }
                 washerResolving = false
             }
         }
 
-        LaunchedEffect(appId, resolvedInitialUrl, washerResolving, washerOffline) {
-            if (!washerResolving && !washerOffline) {
+        LaunchedEffect(appId, resolvedInitialUrl, washerResolving, washerNotice) {
+            if (!washerResolving && washerNotice == null) {
                 viewModel.start(appId, resolvedInitialUrl)
                 vmStarted = true
             }
         }
 
-        if (washerOffline) {
-            AlertDialog(
-                onDismissRequest = {
-                    washerOffline = false
+        washerNotice?.let { notice ->
+            WasherNoticeDialog(
+                notice = notice,
+                onDismiss = {
+                    washerNotice = null
                     navBridge.popBackStack()
-                },
-                title = { Text(stringResource(R.string.dialog_ujing_washer_offline_title)) },
-                text = { Text(stringResource(R.string.dialog_ujing_washer_offline_message)) },
-                confirmButton = {
-                    TextButton(onClick = {
-                        washerOffline = false
-                        navBridge.popBackStack()
-                    }) {
-                        Text(stringResource(R.string.action_confirm))
-                    }
                 }
             )
         }
@@ -536,9 +531,9 @@ fun WebAppScreen(
             val stage = uiState.stage
             when {
                 // 洗衣机（U净）：深链解析中 → 取 token 全程显示同一个 U净 品牌首屏，
-                // logo 不重播淡入；离线时不显示加载态，交由离线弹窗说明
+                // logo 不重播淡入；不可下单时不显示加载态，交由提示弹窗说明
                 isWasherEntry && (!vmStarted || stage is WebAppStage.LoadingToken) -> {
-                    if (!washerOffline) {
+                    if (washerNotice == null) {
                         UjingBrandLoading(
                             message = stringResource(R.string.ujing_washer_checking),
                             showSpinner = true

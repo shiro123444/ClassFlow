@@ -788,6 +788,20 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="dialog_ujing_hairdryer_message">The current hair dryer does not support campus card scan. Please use WeChat, Alipay, or UnionPay to scan.\nIf this is an error, please report to developer.</string>
     <string name="dialog_ujing_washer_offline_title">Device Offline</string>
     <string name="dialog_ujing_washer_offline_message">The washing machine is currently offline and unavailable.</string>
+    <!-- Washer unavailability: the server only returns "can order or not", status codes carry the reason -->
+    <string name="dialog_ujing_washer_running_title">Device In Use</string>
+    <string name="dialog_ujing_washer_running_message">This machine is currently running. Please use another one.</string>
+    <string name="dialog_ujing_washer_reserved_title">Device Reserved</string>
+    <string name="dialog_ujing_washer_reserved_message">Someone else has already reserved this machine. Please try another one.</string>
+    <string name="dialog_ujing_washer_fault_title">Device Fault</string>
+    <string name="dialog_ujing_washer_fault_message">This machine is out of order. Please contact the merchant.</string>
+    <string name="dialog_ujing_washer_disabled_title">Device Unavailable</string>
+    <string name="dialog_ujing_washer_disabled_message">This device is not activated or has been disabled by the merchant. Please use another one.</string>
+    <string name="dialog_ujing_washer_unknown_title">Washing Machine Not Recognized</string>
+    <string name="dialog_ujing_washer_unknown_message">This QR code does not match a washing machine. Please scan the code on the machine itself (the device may have been removed).</string>
+    <string name="dialog_ujing_washer_unavailable_title">Unavailable</string>
+    <string name="dialog_ujing_washer_unavailable_message">This washing machine is not available right now. Please try again later or use another one.</string>
+    <string name="dialog_ujing_washer_merchant_phone">Contact merchant: %1$s</string>
     <string name="ujing_washer_checking">Checking washing machine status...</string>
     <string name="ujing_alipay_not_installed">No app found to handle Alipay request</string>
 
