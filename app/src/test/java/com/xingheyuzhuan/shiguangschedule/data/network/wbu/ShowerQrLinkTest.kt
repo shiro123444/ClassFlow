@@ -27,6 +27,20 @@ class ShowerQrLinkTest {
     }
 
     @Test
+    fun parsesSchoolShowerEntryUrl() {
+        // 马影河 3 栋贴纸实测：学校自己的洗浴入口主机（yktxyyy1.wbu.edu.cn:50040），
+        // 与厂商域一样只是 ?id= 的载体，生命周期由 lifeService 页面自己取 id 当设备号
+        val raw = "http://yktxyyy1.wbu.edu.cn:50040?id=17010737"
+        val result = ShowerQrLink.parse(raw)
+        assertTrue(result is ShowerQrLink.Result.LifeService)
+        result as ShowerQrLink.Result.LifeService
+        assertEquals("17010737", result.imei)
+        assertNull(result.port)
+        // 原文必须原样交给 lifeService 页面：页面 handleImei 自己解析 ?id=
+        assertEquals(raw, result.raw)
+    }
+
+    @Test
     fun parsesImeiAndPortSeparator() {
         val result = ShowerQrLink.parse("861234567890123\$#\$2")
         assertTrue(result is ShowerQrLink.Result.LifeService)
@@ -89,6 +103,19 @@ class ShowerQrLinkTest {
     fun rejectsCasAndUjingUrls() {
         assertNull(ShowerQrLink.parse("http://cas.wbu.edu.cn/authserver/login?uuid=abc"))
         assertNull(ShowerQrLink.parse("http://q.ujing.com.cn/ed/index.html?cd=123456789"))
+    }
+
+    @Test
+    fun rejectsOtherCampusUrlsWithId() {
+        // 只放行洗浴码载体域名：一卡通平台 / CAS / 学校主页上带 ?id= 的链接都不是设备码
+        // （分流顺序里洗浴排在通用链接节点之前，放宽就会把这些链接抢走）
+        assertNull(ShowerQrLink.parse("http://yktfwpt.wbu.edu.cn/plat/index?id=17010737"))
+        assertNull(ShowerQrLink.parse("http://ids.wbu.edu.cn/authserver/login?id=17010737"))
+        assertNull(ShowerQrLink.parse("https://www.wbu.edu.cn/news?id=17010737"))
+        // 洗浴入口主机前缀的其它主机（精确到一个主机，不做前缀族放行）
+        assertNull(ShowerQrLink.parse("http://yktxyyy11.wbu.edu.cn:50040?id=17010737"))
+        // 同主机但没有 ?id=：不是设备码载体
+        assertNull(ShowerQrLink.parse("http://yktxyyy1.wbu.edu.cn:50040/devices"))
     }
 
     @Test
