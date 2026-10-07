@@ -795,6 +795,7 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="title_shower_water">Shower Water</string>
     <string name="shower_water_checking">Reading the water status…</string>
     <string name="shower_water_idle_hint">No unfinished water session — you can start one</string>
+    <string name="shower_water_device_id">ID: %1$s</string>
     <string name="shower_water_device">Device</string>
     <string name="shower_water_started_at">Started at</string>
     <string name="shower_water_elapsed">Elapsed</string>

@@ -795,9 +795,10 @@
     <string name="title_shower_water">淋浴用水</string>
     <string name="shower_water_checking">正在讀取用水狀態…</string>
     <string name="shower_water_idle_hint">目前沒有未結束的用水，可以開始</string>
+    <string name="shower_water_device_id">ID：%1$s</string>
     <string name="shower_water_device">設備號</string>
     <string name="shower_water_started_at">開始時間</string>
-    <string name="shower_water_elapsed">本次已用</string>
+    <string name="shower_water_elapsed">已用時間</string>
     <string name="shower_water_start">開始用水</string>
     <string name="shower_water_stop">結束用水</string>
     <string name="shower_water_starting">正在開啟…</string>
