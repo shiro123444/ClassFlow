@@ -787,6 +787,29 @@
     <string name="ujing_water_action_hint">请在饮水机按键接水，接水完毕后将自动结算</string>
     <string name="ujing_water_finished_title">取水已完成</string>
     <string name="ujing_water_repeat">再接一杯</string>
+
+    <!-- 马影河 2-3 栋淋浴（生活服务用水）：原生页面 -->
+    <string name="title_shower_water">淋浴用水</string>
+    <string name="shower_water_checking">正在读取用水状态…</string>
+    <string name="shower_water_idle_hint">当前没有未结束的用水，可以开始</string>
+    <string name="shower_water_device">设备号</string>
+    <string name="shower_water_started_at">开始时间</string>
+    <string name="shower_water_elapsed">本次已用</string>
+    <string name="shower_water_start">开始用水</string>
+    <string name="shower_water_stop">结束用水</string>
+    <string name="shower_water_starting">正在开启…</string>
+    <string name="shower_water_stopping">正在结束…</string>
+    <string name="shower_water_refresh">刷新状态</string>
+    <string name="shower_water_active">正在用水</string>
+    <string name="shower_water_active_other_device">另一台设备正在用水（%1$s），结束它之后再开始</string>
+    <string name="shower_water_live_connected">结算结果实时推送中</string>
+    <string name="shower_water_live_polling">实时推送未连接，正在每 5 秒查询状态</string>
+    <string name="shower_water_finished_title">用水已结束</string>
+    <string name="shower_water_cost">本次金额</string>
+    <string name="shower_water_minutes">本次耗时</string>
+    <string name="shower_water_cost_unknown">以平台扣费为准</string>
+    <string name="shower_water_open_web">改用网页打开</string>
+    <string name="shower_water_minutes_value">%1$d 分钟</string>
     <string name="dialog_ujing_hairdryer_title">提示</string>
     <string name="dialog_ujing_hairdryer_message">当前吹风机设备不支持一卡通扫码，请使用微信、支付宝、云闪付等扫码\n若信息有误请提交开发者</string>
     <string name="dialog_ujing_washer_offline_title">设备离线</string>

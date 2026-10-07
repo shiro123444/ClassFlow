@@ -99,7 +99,12 @@ sealed interface QrScanEvent {
      * [initialUrl] 为带票据的深链；[pendingAutoScan] 非空时由 WebAppScreen
      * 在页面就绪后自动执行（1 栋裸码），2-3 栋直接拼在 URL 的 `scanResult` 上。
      */
-    data class NavigateToShower(val initialUrl: String?, val pendingAutoScan: String?) : QrScanEvent
+    data class NavigateToShower(
+        val initialUrl: String?,
+        val pendingAutoScan: String?,
+        /** 非空表示已正证是 2-3 栋淋浴：直接进原生用水页，不加载网页。 */
+        val nativeShower: CampusShowerEntryResolver.NativeShower? = null
+    ) : QrScanEvent
 }
 
 /**
@@ -428,7 +433,8 @@ class QrScanViewModel @Inject constructor(
                         _scanEvent.emit(
                             QrScanEvent.NavigateToShower(
                                 initialUrl = result.initialUrl,
-                                pendingAutoScan = result.pendingAutoScan
+                                pendingAutoScan = result.pendingAutoScan,
+                                nativeShower = result.nativeShower
                             )
                         )
 

@@ -134,6 +134,35 @@ sealed interface Destination : NavKey {
         val port: String? = null,
         val scanId: Long = 0L
     ) : Destination
+
+    /**
+     * 马影河 2-3 栋淋浴**原生**用水页（生活服务 lifeService，`appId=65`）。
+     *
+     * 扫码 / `/s/l/{设备}` 深链 / 链接节点在入口处先做一次设备正证（`getDevicesType`），
+     * 确认是淋浴（101）就直接进这一页 —— 不再把一卡通那个「扩展应用」网页拽进来，
+     * 于是「切后台被回收后回来」「转屏」都不会再自动重开一单（页面每步都以服务端状态为准）。
+     * 其它设备类型（洗衣机 / 饮水机 / 电吹风…）仍走 [WebApp]。
+     *
+     * [implid] / [feeitemid] 是平台启动地址里给的计费上下文（换缴费项就是另一组值），
+     * 所以随参数带过来，页面不写死。
+     */
+    @Serializable
+    data class ShowerWater(
+        /** 2-3 栋水表设备号（imei）。 */
+        val deviceId: String,
+        /** 多路控水器端口，可空。 */
+        val port: String? = null,
+        val implid: String,
+        val feeitemid: String,
+        /**
+         * 平台那个生活服务页面的地址（带票据、**不含** `scanResult`）。
+         *
+         * 只作为逃生口：原生这一步只要用户觉得不对（或服务端行为例外），可以一键切回网页，
+         * 而因为不带一次性自启载体，切回去也不会顺手开一单。
+         */
+        val webFallbackUrl: String? = null,
+        val scanId: Long = 0L
+    ) : Destination
 }
 
 /**

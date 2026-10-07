@@ -66,6 +66,20 @@ fun ShowerDirectScreen(
     // 解析成功：交给网页应用容器（一卡通），由它完成取票与页面加载
     LaunchedEffect(Unit) {
         viewModel.openWebApp.collect { ready ->
+            // 已正证是淋浴：直接进原生用水页（其它设备类型保持原来的网页容器）
+            val native = ready.nativeShower
+            if (native != null) {
+                navBridge.replace(
+                    Destination.ShowerWater(
+                        deviceId = native.deviceId,
+                        port = native.port,
+                        implid = native.implid,
+                        feeitemid = native.feeitemid,
+                        webFallbackUrl = ready.initialUrl
+                    )
+                )
+                return@collect
+            }
             navBridge.replace(
                 Destination.WebApp(
                     appId = WebAppId.CAMPUS_CARD.name,

@@ -944,6 +944,15 @@ fun AppNavigation(
                                 port = destination.port
                             )
 
+                            is Destination.ShowerWater -> com.xingheyuzhuan.shiguangschedule.ui.campus.shower.ShowerWaterScreen(
+                                deviceId = destination.deviceId,
+                                port = destination.port,
+                                implid = destination.implid,
+                                feeitemid = destination.feeitemid,
+                                webFallbackUrl = destination.webFallbackUrl,
+                                navBridge = navBridge
+                            )
+
                             is Destination.AddEditCourse -> AddEditCourseScreen(
                                 onBack = navBridge::popBackStack,
                                 courseId = destination.courseId

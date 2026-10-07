@@ -1,6 +1,7 @@
 package com.xingheyuzhuan.shiguangschedule.data.network.wbu
 
 import android.content.Context
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.net.URLEncoder
 import javax.inject.Inject
@@ -21,8 +22,17 @@ class CampusShowerEntryResolver @Inject constructor(
 ) {
 
     sealed interface Result {
-        /** 已生成可直接加载的深链；[pendingAutoScan] 非空时交给 WebAppScreen 自动执行。 */
-        data class Ready(val initialUrl: String, val pendingAutoScan: String?) : Result
+        /**
+         * 已生成可直接加载的深链；[pendingAutoScan] 非空时交给 WebAppScreen 自动执行。
+         *
+         * [nativeShower] 非空表示这台设备已经正证过、确实是**淋浴**（`getDevicesType` = 101）：
+         * 调用方应改走原生页 `Destination.ShowerWater`（[initialUrl] 只作为备用地址）。
+         */
+        data class Ready(
+            val initialUrl: String,
+            val pendingAutoScan: String?,
+            val nativeShower: NativeShower? = null
+        ) : Result
 
         /** 服务端明确判定设备机号无效。 */
         data object InvalidDevice : Result
@@ -76,13 +86,67 @@ class CampusShowerEntryResolver @Inject constructor(
      */
     suspend fun resolveLifeService(imei: String, port: String? = null): Result {
         val raw = buildLifeServiceRaw(imei, port) ?: return Result.InvalidDevice
-        return resolveLifeServiceRaw(raw)
+        return resolveLifeServiceRaw(raw, port)
     }
 
     /**
-     * 马影河 2-3 栋：直接把扫码原文 / 服务端原文交给 lifeService 页面。
+     * 设备正证：这台设备在**这个缴费项**下是不是淋浴。
+     *
+     * 是 → 返回原生页参数；不是、或这一步本身失败（网络 / 启动地址里没有计费上下文）→ null，
+     * 调用方照旧走网页。判据取 `devicesType == 101`（页面 `deviceCodeDict` 里的淋浴）。
      */
-    suspend fun resolveLifeServiceRaw(raw: String): Result {
+    private suspend fun resolveNativeShower(
+        raw: String,
+        port: String?,
+        token: String,
+        launchUrl: String
+    ): NativeShower? {
+        val billing = WbuShowerWaterClient.parseBilling(launchUrl) ?: return null
+        val device = lifeServiceDeviceId(raw) ?: return null
+        return try {
+            val check = WbuShowerWaterClient(context).getDevicesType(token, device, billing)
+            if (!check.isShower) return null
+            // 服务端配了档位（prices 非空）时网页会先让用户选档位，原生页不接管这类设备
+            if (check.hasGears) {
+                Log.i(TAG, "lifeService device has gear prices, keeping the web page")
+                return null
+            }
+            NativeShower(
+                deviceId = device,
+                // 端口既可能由调用方给出（`/s/l/{设备}/{端口}`），也可能就在原文里（`<设备>$#$<端口>`）
+                port = port?.takeIf { it.isNotBlank() }
+                    ?: raw.substringAfter(ShowerQrLink.IMEI_PORT_SEPARATOR, "")
+                        .takeIf { it.isNotBlank() },
+                implid = billing.implid,
+                feeitemid = billing.feeitemid
+            )
+        } catch (e: Exception) {
+            // 正证这一步不该把整条链路带崩：拿不到结论就按老路走网页
+            Log.w(TAG, "lifeService device pre-check failed, falling back to the web page", e)
+            null
+        }
+    }
+
+    /**
+     * 2-3 栋淋浴原生页参数：设备身份 + 平台给的计费上下文。
+     *
+     * [implid] / [feeitemid] 由平台启动地址给出（`_implid=63_101&feeitemid=414`），
+     * 不是写死的常量 —— 换缴费项就是另一组值。
+     */
+    data class NativeShower(
+        val deviceId: String,
+        val port: String?,
+        val implid: String,
+        val feeitemid: String
+    )
+
+    /**
+     * 马影河 2-3 栋：直接把扫码原文 / 服务端原文交给 lifeService 页面。
+     *
+     * 先做一次设备正证：确认是淋浴就走原生页（[NativeShower]），其它设备类型（洗衣机 /
+     * 饮水机 / 电吹风…）与正证失败的情形都保持原样 —— 交给网页，网页自己那套 UI 覆盖全部类型。
+     */
+    suspend fun resolveLifeServiceRaw(raw: String, port: String? = null): Result {
         return try {
             val cardClient = WbuCampusCardClient(context, useVpn = false)
             val token = cardClient.ensureValidAccessToken()
@@ -90,6 +154,14 @@ class CampusShowerEntryResolver @Inject constructor(
             if (launchUrl.isNullOrBlank()) {
                 Result.Unavailable("未获取到生活服务入口")
             } else {
+                resolveNativeShower(raw, port, token, launchUrl)?.let { native ->
+                    Log.i(TAG, "lifeService device is a shower, opening the native screen")
+                    return Result.Ready(
+                        initialUrl = launchUrl,
+                        pendingAutoScan = null,
+                        nativeShower = native
+                    )
+                }
                 val separator = if (launchUrl.contains("?")) "&" else "?"
                 val encoded = URLEncoder.encode(raw, "UTF-8")
                 Result.Ready(
@@ -105,6 +177,22 @@ class CampusShowerEntryResolver @Inject constructor(
     }
 
     companion object {
+
+        private const val TAG = "CampusShowerEntryResolver"
+
+        /**
+         * 页面 `handleImei` 的等价取设备号规则：原文带 `$#$` 时取**第一段原文**（页面此时不再解析
+         * URL），否则取链接里的 `id` 查询参数。
+         */
+        fun lifeServiceDeviceId(raw: String): String? {
+            val text = raw.trim()
+            if (text.isEmpty()) return null
+            return if (text.contains(ShowerQrLink.IMEI_PORT_SEPARATOR)) {
+                text.substringBefore(ShowerQrLink.IMEI_PORT_SEPARATOR).trim().takeIf { it.isNotEmpty() }
+            } else {
+                text.toHttpUrlOrNull()?.queryParameter("id")?.trim()?.takeIf { it.isNotEmpty() }
+            }
+        }
 
         /** 水表 51 厂商链接基底（页面手输入口生成的原文形态）。 */
         private const val VENDOR_BASE = "http://4gsk.shuibiao51.com"

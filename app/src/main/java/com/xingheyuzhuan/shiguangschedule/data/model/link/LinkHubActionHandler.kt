@@ -28,6 +28,21 @@ sealed interface LinkHubApplyResult {
         val pendingAutoScan: String? = null
     ) : LinkHubApplyResult
 
+    /**
+     * 需要跳转到 2-3 栋淋浴**原生**用水页（已正证 `devicesType` = 淋浴）。
+     *
+     * 与 [OpenWebApp] 并列而不是塞进它：原生页不再是「某个网页应用容器」，
+     * 参数也不是 appId + URL，而是设备身份加平台给的计费上下文。
+     */
+    data class OpenShowerWater(
+        val deviceId: String,
+        val port: String?,
+        val implid: String,
+        val feeitemid: String,
+        /** 平台生活服务页面地址（逃生口，不带一次性自启载体），见 `Destination.ShowerWater`。 */
+        val webFallbackUrl: String? = null
+    ) : LinkHubApplyResult
+
     /** 落地失败。 */
     data class Failed(
         @StringRes val messageRes: Int,

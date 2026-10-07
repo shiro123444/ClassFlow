@@ -89,6 +89,20 @@ fun QrScanScreen(
                     )
                 }
                 is QrScanEvent.NavigateToShower -> {
+                    // 2-3 栋淋浴：已正证是淋浴设备，走原生用水页（不再加载那个一挂载就开单的网页）
+                    val native = event.nativeShower
+                    if (native != null) {
+                        navBridge.replace(
+                            com.xingheyuzhuan.shiguangschedule.Destination.ShowerWater(
+                                deviceId = native.deviceId,
+                                port = native.port,
+                                implid = native.implid,
+                                feeitemid = native.feeitemid,
+                                webFallbackUrl = event.initialUrl
+                            )
+                        )
+                        return@collect
+                    }
                     navBridge.replace(
                         com.xingheyuzhuan.shiguangschedule.Destination.WebApp(
                             appId = com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId.CAMPUS_CARD.name,

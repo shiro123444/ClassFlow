@@ -790,6 +790,29 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="ujing_water_action_hint">Please press button on dispenser to get water. Order will settle automatically when finished.</string>
     <string name="ujing_water_finished_title">Water Dispensing Finished</string>
     <string name="ujing_water_repeat">Dispense Again</string>
+
+    <!-- Mayinghe Building 2-3 shower (life-service water): native screen -->
+    <string name="title_shower_water">Shower Water</string>
+    <string name="shower_water_checking">Reading the water status…</string>
+    <string name="shower_water_idle_hint">No unfinished water session — you can start one</string>
+    <string name="shower_water_device">Device</string>
+    <string name="shower_water_started_at">Started at</string>
+    <string name="shower_water_elapsed">Elapsed</string>
+    <string name="shower_water_start">Start water</string>
+    <string name="shower_water_stop">End water</string>
+    <string name="shower_water_starting">Starting…</string>
+    <string name="shower_water_stopping">Ending…</string>
+    <string name="shower_water_refresh">Refresh status</string>
+    <string name="shower_water_active">Water running</string>
+    <string name="shower_water_active_other_device">Another device is in use (%1$s) — end it first</string>
+    <string name="shower_water_live_connected">Live settlement push connected</string>
+    <string name="shower_water_live_polling">Live push offline — querying the status every 5 s</string>
+    <string name="shower_water_finished_title">Water session finished</string>
+    <string name="shower_water_cost">Amount</string>
+    <string name="shower_water_minutes">Duration</string>
+    <string name="shower_water_cost_unknown">Billed by the platform</string>
+    <string name="shower_water_open_web">Open the web page instead</string>
+    <string name="shower_water_minutes_value">%1$d min</string>
     <string name="dialog_ujing_hairdryer_title">Notice</string>
     <string name="dialog_ujing_hairdryer_message">The current hair dryer does not support campus card scan. Please use WeChat, Alipay, or UnionPay to scan.\nIf this is an error, please report to developer.</string>
     <string name="dialog_ujing_washer_offline_title">Device Offline</string>

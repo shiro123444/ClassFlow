@@ -111,6 +111,21 @@ fun LinkHubScreen(
         }
     }
 
+    // 2-3 栋淋浴：已正证是淋浴设备 → 直接进原生用水页（网页那套一挂载就会开单）
+    LaunchedEffect(Unit) {
+        viewModel.openShowerWater.collect { request ->
+            navBridge.replace(
+                Destination.ShowerWater(
+                    deviceId = request.deviceId,
+                    port = request.port,
+                    implid = request.implid,
+                    feeitemid = request.feeitemid,
+                    webFallbackUrl = request.webFallbackUrl
+                )
+            )
+        }
+    }
+
     // 免确认类型（如 campus_shower）：解析成功即直接进入对应网页应用容器
     LaunchedEffect(Unit) {
         viewModel.openWebApp.collect { request ->

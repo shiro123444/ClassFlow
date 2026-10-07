@@ -112,11 +112,25 @@ class CampusShowerHandler @Inject constructor(
         }
 
         return when (result) {
-            is CampusShowerEntryResolver.Result.Ready -> LinkHubApplyResult.OpenWebApp(
-                appId = WebAppId.CAMPUS_CARD.name,
-                initialUrl = result.initialUrl,
-                pendingAutoScan = result.pendingAutoScan
-            )
+            is CampusShowerEntryResolver.Result.Ready -> {
+                // 已正证是淋浴：走原生用水页；其它设备类型继续交给网页容器
+                val native = result.nativeShower
+                if (native != null) {
+                    LinkHubApplyResult.OpenShowerWater(
+                        deviceId = native.deviceId,
+                        port = native.port,
+                        implid = native.implid,
+                        feeitemid = native.feeitemid,
+                        webFallbackUrl = result.initialUrl
+                    )
+                } else {
+                    LinkHubApplyResult.OpenWebApp(
+                        appId = WebAppId.CAMPUS_CARD.name,
+                        initialUrl = result.initialUrl,
+                        pendingAutoScan = result.pendingAutoScan
+                    )
+                }
+            }
 
             CampusShowerEntryResolver.Result.InvalidDevice ->
                 LinkHubApplyResult.Failed(R.string.link_hub_error_shower_invalid)

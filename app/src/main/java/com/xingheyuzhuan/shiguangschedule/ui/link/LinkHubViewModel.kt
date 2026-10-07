@@ -110,6 +110,10 @@ class LinkHubViewModel @Inject constructor(
     private val _openWebApp = MutableSharedFlow<LinkHubApplyResult.OpenWebApp>(extraBufferCapacity = 1)
     val openWebApp: SharedFlow<LinkHubApplyResult.OpenWebApp> = _openWebApp.asSharedFlow()
 
+    /** 2-3 栋淋浴原生用水页（一次性事件）。 */
+    private val _openShowerWater = MutableSharedFlow<LinkHubApplyResult.OpenShowerWater>(extraBufferCapacity = 1)
+    val openShowerWater: SharedFlow<LinkHubApplyResult.OpenShowerWater> = _openShowerWater.asSharedFlow()
+
     private var started = false
     private var pendingHandler: LinkHubActionHandler? = null
 
@@ -218,6 +222,11 @@ class LinkHubViewModel @Inject constructor(
                 is LinkHubApplyResult.OpenWebApp -> {
                     if (!auto) _state.value = LinkHubUiState.Applied(R.string.link_hub_applied_open)
                     _openWebApp.tryEmit(result)
+                }
+
+                is LinkHubApplyResult.OpenShowerWater -> {
+                    if (!auto) _state.value = LinkHubUiState.Applied(R.string.link_hub_applied_open)
+                    _openShowerWater.tryEmit(result)
                 }
             }
         }
