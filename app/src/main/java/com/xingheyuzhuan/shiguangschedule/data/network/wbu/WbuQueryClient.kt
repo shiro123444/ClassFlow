@@ -66,7 +66,7 @@ class WbuSessionExpiredException(
  */
 class WbuQueryClient(
     private val context: Context,
-    val useVpn: Boolean = WbuSyncEngine.getSavedUseVpn(context) ?: false
+    val useVpn: Boolean = WbuSyncEngine.getSavedUseVpn(context)
 ) {
     internal val transport: WbuAuthTransport = WbuAuthTransport.getShared(context, useVpn)
     private val baseUrl: String get() = transport.jwxtBase

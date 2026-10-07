@@ -97,7 +97,9 @@ import com.xingheyuzhuan.shiguangschedule.Destination
 import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.BuildConfig
 import com.xingheyuzhuan.shiguangschedule.R
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.CampusLinkRouter
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.repository.AppSettingsRepository
@@ -187,7 +189,9 @@ fun WebViewScreen(
 
     LaunchedEffect(isWbuFlow) {
         if (!isWbuFlow) return@LaunchedEffect
-        val onCampus = WbuNetworkProbe.refresh()
+        // 「自动校园网探测」开着时用快速探测（短超时 + 短缓存）：这里用户正盯着「正在探测校园网络环境…」
+        // 的提示等结果，探测慢一点就是白屏久一点；关掉则沿用原来的较长超时探测（只增不减）。
+        val onCampus = WbuNetworkProbe.probeForCampusFlow(context)
         if (!probeInterrupted) {
             if (onCampus) {
                 probeStatusText = context.getString(R.string.status_campus_detected_connecting)
@@ -322,7 +326,7 @@ fun WebViewScreen(
                     super.onPageFinished(view, url)
                     Log.d("WebViewScreen", "页面加载完成: $url")
                     view?.injectAllJavaScript(isDesktopMode)
-                    view?.let { maybeAutofillWbuCredentials(it, url) }
+                    view?.let { maybeAutofillWbuCredentials(context, it, url) }
 
                     // 检测到达 JWXT 后台后，自动提取 VPN cookies 供 OkHttp 复用
                     if (!vpnCookiesSaved && url != null) {
@@ -917,7 +921,7 @@ private fun isWbuTimetableUrl(uri: Uri): Boolean {
     return matched
 }
 
-private fun maybeAutofillWbuCredentials(webView: WebView, url: String?) {
+private fun maybeAutofillWbuCredentials(context: Context, webView: WebView, url: String?) {
         val currentUrl = url ?: return
         val uri = runCatching { Uri.parse(currentUrl) }.getOrNull() ?: return
         val host = uri.host?.lowercase() ?: return
@@ -937,7 +941,10 @@ private fun maybeAutofillWbuCredentials(webView: WebView, url: String?) {
 
         if (!shouldTryAutofill) return
 
-        val credentials = WbuWebLoginAutofillStore.getActiveOrNull() ?: return
+        // 一次性草稿优先（刚刚那次登录失败时放进去的）；没有就用**保存的凭据** ——
+        // 开了「自动使用保存的密码登录」后，WebView 里的手动登录页也应该是填好的，用户只需点提交。
+        val oneTime = WbuWebLoginAutofillStore.getActiveOrNull()
+        val credentials = oneTime ?: savedCredentialsForAutofill(context) ?: return
         val rawStudentId = credentials.studentId.trim()
         val rawPassword = credentials.password
 
@@ -991,11 +998,26 @@ private fun maybeAutofillWbuCredentials(webView: WebView, url: String?) {
         """.trimIndent()
 
         webView.evaluateJavascript(js) { result ->
-            if (result == "true") {
-                // 填充成功后立即清空一次性凭证，防止在后续其它页面反复误注入
+            // 只有一次性草稿要在填充成功后立即清空（防止在后续其它页面反复误注入）；
+            // 保存的凭据不是一次性的，留着下次继续用
+            if (result == "true" && oneTime != null) {
                 WbuWebLoginAutofillStore.clear()
             }
         }
+}
+
+/**
+ * 用**保存的**统一认证凭据做填充（仅在开了「自动使用保存的密码登录」时）。
+ *
+ * 与一次性草稿的区别：这份凭据是用户自己选择长期保存的，可以反复使用；
+ * 是否该填由调用方判定（页面确实是登录页、host 确实是我们自己的域）。
+ */
+private fun savedCredentialsForAutofill(context: Context): WbuWebLoginAutofillStore.Credentials? {
+    if (!WbuAuthTransport.isAutoLoginWithSavedPasswordEnabled(context)) return null
+    val studentId = WbuAuthTransport.getSavedStudentId(context).trim()
+    val password = WbuAuthTransport.getSavedPassword(context, CredentialService.UNIFIED_AUTH)?.trim().orEmpty()
+    if (studentId.isBlank() && password.isBlank()) return null
+    return WbuWebLoginAutofillStore.Credentials(studentId = studentId, password = password)
 }
 
 private fun jsQuote(raw: String): String {

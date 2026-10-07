@@ -115,7 +115,7 @@ class AcademicProgressViewModel @Inject constructor(
     private val queryClient
         get() = WbuQueryClient(
             getApplication(),
-            useVpn = lastUseVpn ?: (WbuSyncEngine.getSavedUseVpn(getApplication()) ?: false)
+            useVpn = lastUseVpn ?: (WbuSyncEngine.getSavedUseVpn(getApplication()))
         )
 
     private val _uiState = MutableStateFlow(AcademicProgressUiState())
@@ -178,8 +178,8 @@ class AcademicProgressViewModel @Inject constructor(
                             isLoading = false,
                             isRefreshing = false,
                             errorMessage = accessFailureText(getApplication(), access.failure),
-                            needLogin = access.failure.needsRelogin ||
-                                access.failure is AccessFailure.Cancelled,
+                            // 只有「会话失效 / 凭据被拒」才弹登录 Sheet；用户取消小窗安静回落
+                            needLogin = access.failure.needsRelogin,
                             offerWebVpnOnce = access.failure.shouldOfferWebVpnOnce(access.useVpn)
                         )
                     }

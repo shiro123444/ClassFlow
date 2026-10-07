@@ -5,7 +5,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -23,14 +25,17 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -63,7 +68,11 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.rememberCoroutineScope
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.needsRelogin
 import com.xingheyuzhuan.shiguangschedule.ui.components.WbuCourseImportSheet
+import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
+import com.xingheyuzhuan.shiguangschedule.ui.components.needLoginHintText
+import com.xingheyuzhuan.shiguangschedule.ui.components.prepareWbuImportWithSavedPassword
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -79,6 +88,7 @@ fun ManageCourseTablesScreen(
     viewModel: ManageCourseTablesViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val importScope = rememberCoroutineScope()
 
     val uiState by viewModel.uiState.collectAsState()
 
@@ -97,6 +107,11 @@ fun ManageCourseTablesScreen(
 
     // 教务导入相关状态
     var showImportSheet by remember { mutableStateOf(false) }
+
+    // 单击导入 = 不显示登录面板直接导（长按才打开登录面板）
+    var directImportWithoutLogin by remember { mutableStateOf(false) }
+    // 单击导入进行中（探测校园网 / 静默登录 / 抓取课表）：按钮上给个转圈
+    var directImportRunning by remember { mutableStateOf(false) }
 
     val titleManageTables = stringResource(R.string.title_manage_course_tables)
     val a11yBack = stringResource(R.string.a11y_back)
@@ -140,14 +155,50 @@ fun ManageCourseTablesScreen(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                FloatingActionButton(
-                    onClick = {
-                        showImportSheet = true
-                    },
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                // 单击 = 直接导入（不打开登录面板），长按 = 打开登录面板。
+                // 用 Surface + combinedClickable 而不是 FloatingActionButton：后者只吃单击事件。
+                Surface(
+                    shape = FloatingActionButtonDefaults.shape,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier
+                        .size(56.dp)
+                        .combinedClickable(
+                            onClick = {
+                                directImportWithoutLogin = true
+                                directImportRunning = true
+                                showImportSheet = true
+                            },
+                            onLongClickLabel = stringResource(R.string.a11y_long_press_login),
+                            onLongClick = {
+                                // 「自动使用保存的密码登录」：进导入面板前先用保存的密码把登录态建好
+                                importScope.launch {
+                                    val failure = prepareWbuImportWithSavedPassword(context, "COURSE_IMPORT")
+                                    if (failure != null && !failure.needsRelogin) {
+                                        Toast.makeText(
+                                            context,
+                                            accessFailureText(context, failure)
+                                                ?: context.getString(R.string.err_need_unified_auth_session),
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                        return@launch
+                                    }
+                                    directImportWithoutLogin = false
+                                    showImportSheet = true
+                                }
+                            }
+                        )
                 ) {
-                    Icon(Icons.Default.CloudDownload, contentDescription = a11yImportFromJwxt)
+                    Box(contentAlignment = Alignment.Center) {
+                        if (directImportRunning) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(Icons.Default.CloudDownload, contentDescription = a11yImportFromJwxt)
+                        }
+                    }
                 }
                 FloatingActionButton(onClick = { showAddTableDialog = true }) {
                     Icon(Icons.Default.Add, contentDescription = a11yAddNewTable)
@@ -385,7 +436,17 @@ fun ManageCourseTablesScreen(
         // 教务导入弹窗与认证
         if (showImportSheet) {
             WbuCourseImportSheet(
-                onDismissRequest = { showImportSheet = false },
+                onDismissRequest = {
+                    showImportSheet = false
+                    directImportRunning = false
+                },
+                startWithoutLogin = directImportWithoutLogin,
+                onNeedLogin = { failure ->
+                    importScope.launch {
+                        val message = needLoginHintText(context, failure) ?: return@launch
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    }
+                },
                 viewModel = viewModel
             )
         }

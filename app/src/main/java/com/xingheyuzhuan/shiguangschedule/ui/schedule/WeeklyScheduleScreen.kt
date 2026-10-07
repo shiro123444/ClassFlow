@@ -57,7 +57,10 @@ import com.xingheyuzhuan.shiguangschedule.ui.components.isWideScreen
 import com.xingheyuzhuan.shiguangschedule.ui.components.CourseTablePickerDialog
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.VpnFullLoginStatus
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthMode
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.needsRelogin
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.PortalCaptchaData
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.PortalCaptchaResult
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WebVpnClient
@@ -98,6 +101,7 @@ import dev.chrisbanes.haze.hazeSource
 import com.xingheyuzhuan.shiguangschedule.ui.theme.ClassFlowTheme
 import com.xingheyuzhuan.shiguangschedule.ui.theme.ThemeGradients
 import com.xingheyuzhuan.shiguangschedule.ui.schoolselection.web.WbuWebLoginAutofillStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -109,6 +113,11 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
 import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
+import com.xingheyuzhuan.shiguangschedule.ui.components.needLoginHintText
+import com.xingheyuzhuan.shiguangschedule.ui.components.prepareJiaowuSessionForSync
+import com.xingheyuzhuan.shiguangschedule.ui.components.prepareWbuImportWithSavedPassword
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.resolveCampusUseVpn
+import com.xingheyuzhuan.shiguangschedule.ui.components.silentUnifiedAuthLogin
 
 /**
  * 无限时间轴的中值锚点。
@@ -474,6 +483,82 @@ fun WeeklyScheduleScreen(
         return true
     }
 
+    /** 同步 / 导入的提示：先顶掉上一条，免得一秒钟弹出三条排队等着播的提示。null / 空 = 不提示。 */
+    suspend fun showWbuSnackbar(message: String?) {
+        if (message.isNullOrBlank()) return
+        withContext(Dispatchers.Main) {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    /**
+     * 单击同步：**全程不打开登录面板**。
+     *
+     * 1. 先用保存的密码 / 现有会话把登录态静默准备好（缺门禁密码、短信验证码、滑块校验就地弹小窗）；
+     * 2. 需要校园网：开了「自动校园网探测」且人就在校园网内时直接连，不绕 WebVPN；
+     * 3. 直接跑导入管线；真需要用户重新登录时只提示一句 —— 登录面板的入口是**长按**按钮。
+     */
+    suspend fun performDirectSync() {
+        if (isWbuSyncing) return
+        // 立刻进入加载态：探测 / 静默登录 / 换票这几秒里，按钮得看得出「正在干活」，
+        // 而不是像点了没反应（校外探测要等超时，用户最先抱怨的就是这个「没反应」）。
+        isWbuSyncing = true
+        wbuError = ""
+        wbuSyncStatus = appContext.getString(R.string.status_fetching_schedule)
+
+        fun stopLoading() {
+            wbuSyncStatus = ""
+            isWbuSyncing = false
+        }
+
+        try {
+            val prepareFailure = prepareWbuImportWithSavedPassword(appContext, "SCHEDULE") {
+                coroutineScope.launch {
+                    showWbuSnackbar(appContext.getString(R.string.status_login_saved_credentials))
+                }
+            }
+            if (prepareFailure != null) {
+                stopLoading()
+                showWbuSnackbar(needLoginHintText(appContext, prepareFailure))
+                return
+            }
+
+            val userUseVpn = WbuSyncEngine.getSavedUseVpn(appContext)
+            // 需要校园网：开了「自动校园网探测」且人在校园网内就直连，不绕 WebVPN
+            val useVpn = resolveCampusUseVpn(appContext, userUseVpn)
+            val engine = WbuSyncEngine(context = appContext, useVpn = useVpn)
+
+            // 现有会话可能只是「看着还在」（WebVPN 门禁 TWFID 过期尤其常见）：不行就用保存的密码
+            // 静默登录一次，而不是等上几秒之后把用户叫去登录面板。
+            val sessionFailure = prepareJiaowuSessionForSync(appContext, engine, "SCHEDULE")
+            if (sessionFailure != null) {
+                stopLoading()
+                showWbuSnackbar(needLoginHintText(appContext, sessionFailure))
+                return
+            }
+
+            performCourseImportPipeline(engine, WbuSyncEngine.getSavedStudentId(appContext))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("WbuSync", "单击同步发生错误", e)
+            showWbuSnackbar(
+                accessFailureText(appContext, e)
+                    ?: appContext.getString(R.string.format_err_sync_error, e.message ?: "")
+            )
+        } finally {
+            stopLoading()
+            // 导入管线把「为什么没导成」写在 wbuError 里（那是登录面板在显示的状态），
+            // 单击同步没有那个面板，所以在这里补一条提示，别让失败静默掉。
+            val pipelineError = wbuError
+            if (pipelineError.isNotBlank()) {
+                wbuError = ""
+                showWbuSnackbar(pipelineError)
+            }
+        }
+    }
+
     fun vpnStatusText(authMode: WbuAuthMode): (VpnFullLoginStatus) -> Unit = { status ->
         wbuSyncStatus = when (status) {
             VpnFullLoginStatus.SMS_REQUIRED -> appContext.getString(R.string.status_vpn_sms_required)
@@ -619,9 +704,12 @@ fun WeeklyScheduleScreen(
                                 modifier = syncButtonModifier,
                                 hazeState = hazeState,
                                 contentColor = composedStyle.pageTextColor ?: MaterialTheme.colorScheme.onSurface,
-                                onClick = {
-                            if (onSyncButtonClickIntercept?.invoke() == true) return@WbuSyncActionButton
-                            if (isWbuSyncing) return@WbuSyncActionButton
+                                loading = isWbuSyncing,
+                                onLongClickLabel = stringResource(R.string.a11y_long_press_login),
+                                // 长按 = 打开登录面板：需要重新登录 / 想换账号 / 想改导入偏好时走这里
+                                onLongClick = syncLongPress@{
+                            if (onSyncButtonClickIntercept?.invoke() == true) return@syncLongPress
+                            if (isWbuSyncing) return@syncLongPress
                             coroutineScope.launch {
                                 val activeTableId = viewModel.uiState.value.tableId
                                 if (activeTableId == null) {
@@ -632,7 +720,39 @@ fun WeeklyScheduleScreen(
                                 wbuInitialStudentId = WbuSyncEngine.getSavedStudentId(appContext)
                                 wbuSyncStatus = ""
                                 wbuError = ""
+
+                                // 「自动使用保存的密码登录」：本地登录态缺失时先用保存的密码静默建好，
+                                // 打开的面板就是一份「已经登录好、只差点确认」的状态 —— 用户不必再输一次密码。
+                                // 静默过程中需要门禁密码 / 短信 / 图形校验会就地弹小窗。
+                                val prepareFailure = prepareWbuImportWithSavedPassword(appContext, "SCHEDULE") {
+                                    snackbarHostState.showSnackbar(appContext.getString(R.string.status_login_saved_credentials))
+                                }
+                                if (prepareFailure != null && !prepareFailure.needsRelogin) {
+                                    // 网络类 / 协议类失败：不是「重新登录」能解决的，别把用户推到登录面板前
+                                    snackbarHostState.showSnackbar(
+                                        accessFailureText(appContext, prepareFailure)
+                                            ?: appContext.getString(R.string.err_need_unified_auth_session)
+                                    )
+                                    return@launch
+                                }
+                                // 会话失效 / 凭据被拒：照常打开面板（面板本身就是登录入口），并把原因写进去
+                                wbuError = prepareFailure?.let { accessFailureText(appContext, it).orEmpty() }.orEmpty()
                                 showWbuAuthDialog = true
+                            }
+                        },
+                                // 单击 = 直接同步：不打开登录面板（真要登录时提示一句「长按按钮」）
+                                onClick = syncTap@{
+                            if (onSyncButtonClickIntercept?.invoke() == true) return@syncTap
+                            if (isWbuSyncing) return@syncTap
+                            coroutineScope.launch {
+                                if (viewModel.uiState.value.tableId == null) {
+                                    snackbarHostState.showSnackbar(appContext.getString(R.string.snackbar_no_syncable_table))
+                                    return@launch
+                                }
+                                wbuInitialStudentId = WbuSyncEngine.getSavedStudentId(appContext)
+                                wbuSyncStatus = ""
+                                wbuError = ""
+                                performDirectSync()
                             }
                         })
                         }
@@ -972,7 +1092,7 @@ fun WeeklyScheduleScreen(
                             isWbuSyncing = false
                             return@launch
                         }
-                        val useVpn = WbuSyncEngine.getSavedUseVpn(appContext) ?: false
+                        val useVpn = WbuSyncEngine.getSavedUseVpn(appContext)
                         val sid = WbuSyncEngine.getSavedStudentId(appContext)
                         val engine = WbuSyncEngine(context = appContext, useVpn = useVpn)
                         performCourseImportPipeline(engine, sid)
@@ -1009,7 +1129,7 @@ fun WeeklyScheduleScreen(
                     wbuError = ""
                     coroutineScope.launch {
                         try {
-                            val useVpn = WbuSyncEngine.getSavedUseVpn(appContext) ?: false
+                            val useVpn = WbuSyncEngine.getSavedUseVpn(appContext)
                             val engine = WbuSyncEngine(context = appContext, useVpn = useVpn)
                             activeVpnEngine = engine
                             engine.sslIssueHandler = { msg ->

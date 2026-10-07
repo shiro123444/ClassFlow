@@ -1,5 +1,6 @@
 package com.xingheyuzhuan.shiguangschedule.ui.link
 
+import android.content.Context
 import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -17,7 +18,11 @@ import com.xingheyuzhuan.shiguangschedule.data.network.link.LinkHubCompactCodec
 import com.xingheyuzhuan.shiguangschedule.data.network.link.LinkHubFetchResult
 import com.xingheyuzhuan.shiguangschedule.data.network.link.LinkHubInlineResult
 import com.xingheyuzhuan.shiguangschedule.data.network.link.LinkHubUrl
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
+import com.xingheyuzhuan.shiguangschedule.ui.components.shouldAttemptSavedPasswordLogin
+import com.xingheyuzhuan.shiguangschedule.ui.components.silentUnifiedAuthLogin
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -67,7 +72,9 @@ sealed interface LinkHubUiState {
     data class Failed(
         @StringRes val messageRes: Int,
         val retryable: Boolean = false,
-        val openInBrowserUrl: String? = null
+        val openInBrowserUrl: String? = null,
+        /** 失败于「本机没有登录态」：页面据此多给一个「重新登录」入口。 */
+        val needsLogin: Boolean = false
     ) : LinkHubUiState
 
     data object Applying : LinkHubUiState
@@ -87,6 +94,7 @@ sealed interface LinkHubUiState {
  */
 @HiltViewModel
 class LinkHubViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val handlers: LinkHubHandlers,
     private val client: LinkHubClient
 ) : ViewModel() {
@@ -104,6 +112,9 @@ class LinkHubViewModel @Inject constructor(
 
     private var started = false
     private var pendingHandler: LinkHubActionHandler? = null
+
+    /** 最近一次落地失败的节点：用户重新登录成功后据此重试一次落地。 */
+    private var pendingAppliedNode: LinkHubNode? = null
 
     /** 当前待解析的服务端短码与来源（供「重试」复用）。 */
     private var pendingCode: String? = null
@@ -153,17 +164,51 @@ class LinkHubViewModel @Inject constructor(
      * 页面因此一直保持品牌过渡态，直到被目标页替换或被失败态取代 —— 避免「确认页闪一下再跳走」。
      * 失败仍然如实上报（[LinkHubUiState.Failed]），用户才有机会看到原因。
      */
+    /**
+     * 用户在「重新登录」面板里登录成功后调用：把刚才没落地的那个节点再走一遍。
+     *
+     * 只重试**落地**，不重试「解析」—— 节点内容是服务端给的，跟登录态无关。
+     */
+    fun onLoginSuccess() {
+        val node = pendingAppliedNode ?: return
+        val handler = pendingHandler ?: return
+        applyNode(node, handler, auto = false)
+    }
+
     private fun applyNode(node: LinkHubNode, handler: LinkHubActionHandler, auto: Boolean) {
+        pendingAppliedNode = node
         viewModelScope.launch {
             if (!auto) _state.value = LinkHubUiState.Applying
-            val result = runCatching { handler.apply(node.envelope) }
+            var result = runCatching { handler.apply(node.envelope) }
                 .getOrElse { LinkHubApplyResult.Failed(R.string.link_hub_error_invalid) }
+
+            // 落地失败于「本机没有统一认证会话」时，用保存的密码静默登一次再重来（只试一次）。
+            // 免确认节点（auto）也走这里：用户什么都没点，直接把登录面板推给他最唐突。
+            val failed = result as? LinkHubApplyResult.Failed
+            if (failed?.needsLogin == true && shouldAttemptSavedPasswordLogin(context)) {
+                val failure = silentUnifiedAuthLogin(
+                    context = context,
+                    flowTag = "LINK_HUB",
+                    viaWebVpn = WbuAuthTransport.getIdsViaWebVpn(context),
+                    // 上面已确认存着密码：绝不因为「缺密码」在落地页弹窗
+                    onlyWithSavedPassword = true
+                )
+                if (failure == null) {
+                    result = runCatching { handler.apply(node.envelope) }
+                        .getOrElse { LinkHubApplyResult.Failed(R.string.link_hub_error_invalid) }
+                }
+            }
+
             when (result) {
                 is LinkHubApplyResult.Done ->
                     _state.value = LinkHubUiState.Applied(result.messageRes)
 
                 is LinkHubApplyResult.Failed ->
-                    _state.value = LinkHubUiState.Failed(result.messageRes, retryable = result.retryable)
+                    _state.value = LinkHubUiState.Failed(
+                        messageRes = result.messageRes,
+                        retryable = result.retryable,
+                        needsLogin = result.needsLogin
+                    )
 
                 is LinkHubApplyResult.OpenUrl -> {
                     if (!auto) _state.value = LinkHubUiState.Applied(R.string.link_hub_applied_open)

@@ -301,7 +301,9 @@ fun WbuAuthBottomSheet(
     // 选择校园网直连（非 VPN）时实时探测校园网环境；结果经 campusState 更新提示。
     // 开启「不检测校园网环境」则跳过探测；仅登录统一认证时校园网与本次登录无关，一律不探测。
     LaunchedEffect(useVpn, skipCampusCheck, unifiedAuthOnly) {
-        if (!unifiedAuthOnly && !useVpn && !skipCampusCheck) WbuNetworkProbe.refresh()
+        // 开了「自动校园网探测」时走快速探测：面板多半刚被它判过一次通道，这里直接命中缓存，
+        // 不再让用户在「检测中」上白等 4 秒；开关关掉则仍是原来的较长超时探测（行为不变）。
+        if (!unifiedAuthOnly && !useVpn && !skipCampusCheck) WbuNetworkProbe.probeForCampusFlow(context)
     }
     // 动态码发送后倒计时；每次开始冷却（cooldownRun 变化）都会重跑（按钮显示重新发送 (Ns)）
     LaunchedEffect(cooldownRun) {

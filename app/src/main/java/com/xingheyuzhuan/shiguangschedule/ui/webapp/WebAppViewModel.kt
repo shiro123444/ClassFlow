@@ -5,25 +5,25 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.xingheyuzhuan.shiguangschedule.R
-import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppCatalog
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppDefinition
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSessionExpiredException
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuWebAppClient
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.needsRelogin
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.TwfidState
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WebVpnClient
-import com.xingheyuzhuan.shiguangschedule.ui.components.WbuAuthPromptRequest
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
+import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.resolveCampusUseVpn
+import com.xingheyuzhuan.shiguangschedule.ui.components.silentUnifiedAuthLogin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * 网页应用加载阶段。
@@ -71,12 +71,8 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
     private var currentAppId: String? = null
     private var overrideTargetUrl: String? = null
 
-    /** 静默登录时向 UI 索取的补充输入（WebVPN 密码 / 短信验证码），null 表示当前无需输入。 */
-    private val _authPrompt = MutableStateFlow<WbuAuthPromptRequest?>(null)
-    val authPrompt: StateFlow<WbuAuthPromptRequest?> = _authPrompt.asStateFlow()
-
-    private var authPromptDeferred: CompletableDeferred<String?>? = null
-    private var silentLoginEngine: WbuSyncEngine? = null
+    /** 本次流程上一次静默登录的失败原因（null = 成功或还没试过）。 */
+    private var lastSilentLoginFailure: AccessFailure? = null
 
     /**
      * 本次流程是否已经尝试过「用保存的密码静默登录」。
@@ -97,6 +93,7 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
         currentAppId = appId
         overrideTargetUrl = initialTargetUrl
         silentLoginAttempted = false
+        lastSilentLoginFailure = null
         val def = WebAppCatalog.findByIdString(appId)
         if (def == null) {
             _uiState.update { it.copy(stage = WebAppStage.Error(getApplication<Application>().getString(R.string.err_unknown_web_app, appId))) }
@@ -126,7 +123,7 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
                 return@launch
             }
 
-            val savedUseVpn = WbuSyncEngine.getSavedUseVpn(app) ?: false
+            val savedUseVpn = WbuSyncEngine.getSavedUseVpn(app)
 
             if (!savedUseVpn) {
                 // 1. 未开启 WebVPN：先探针校园网
@@ -136,7 +133,7 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
                         probeStatusText = app.getString(R.string.status_probing_campus_network)
                     )
                 }
-                val onCampus = WbuNetworkProbe.refresh()
+                val onCampus = WbuNetworkProbe.probeForCampusFlow(app)
                 if (onCampus) {
                     // 在校内，直接以校园网直连加载
                     proceedWithChannel(def, useVpn = false)
@@ -150,7 +147,14 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             } else {
-                // 2. 开启了 WebVPN：先核验当前 TWFID 是否仍有效（只读探活，不消耗登录尝试）
+                // 2. 开启了 WebVPN：但「自动校园网探测」开着时先快速探一次 ——
+                //    人就在校园网里就别绕 WebVPN 了（校园网里走代理更慢，也更容易掉线）。
+                //    探测关闭 / 「不检测校园网环境」开着时这一步不会探测，结果就是继续用 WebVPN。
+                if (!resolveCampusUseVpn(app, savedUseVpn = true)) {
+                    proceedWithChannel(def, useVpn = false)
+                    return@launch
+                }
+                // 2.1 不在校园网：核验当前 TWFID 是否仍有效（只读探活，不消耗登录尝试）
                 val twfid = WbuAuthTransport.getTwfid(app)
                 val transport = WbuAuthTransport.getShared(app, true)
                 transport.restoreCookieStore()
@@ -232,18 +236,12 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
                 val twfid = WbuAuthTransport.getTwfid(app)
                 if (twfid.isBlank()) {
                     // 内容本身必须走 WebVPN：静默重登也得经 WebVPN，才能把门禁 TWFID 建起来
-                    if (trySilentUnifiedAuthLogin(forceWebVpn = true)) {
+                    val failure = trySilentUnifiedAuthLogin(forceWebVpn = true)
+                    if (failure == null) {
                         proceedWithChannel(def, useVpn)
                         return@launch
                     }
-                    _uiState.update {
-                        it.copy(
-                            stage = WebAppStage.OffCampusChoice,
-                            needLogin = true,
-                            requireVpnForLogin = true,
-                            temporaryUseVpn = true
-                        )
-                    }
+                    settleSilentLoginFailure(failure, requireVpnForLogin = true, keepChoiceOverlay = true)
                     return@launch
                 }
 
@@ -255,18 +253,12 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
                         WbuAuthTransport.clearTwfid(app)
                         vpnClient.removeTwfidCookie()
                     }
-                    if (trySilentUnifiedAuthLogin(forceWebVpn = true)) {
+                    val failure = trySilentUnifiedAuthLogin(forceWebVpn = true)
+                    if (failure == null) {
                         proceedWithChannel(def, useVpn)
                         return@launch
                     }
-                    _uiState.update {
-                        it.copy(
-                            stage = WebAppStage.OffCampusChoice,
-                            needLogin = true,
-                            requireVpnForLogin = true,
-                            temporaryUseVpn = true
-                        )
-                    }
+                    settleSilentLoginFailure(failure, requireVpnForLogin = true, keepChoiceOverlay = true)
                     return@launch
                 }
                 vpnClient.injectTwfid(twfid)
@@ -276,15 +268,12 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
             //    没有也不立刻弹登录 Sheet：优先用保存的账号密码静默登录一次（与 /w/ U净出水、扫一扫入口一致），
             //    成功就直接继续换票；只有没保存密码 / 静默登录失败才弹 Sheet。
             val hasUnifiedSession = transport.cookieStore.any { it.name == "CASTGC" && it.value.isNotBlank() }
-            if (!hasUnifiedSession && !trySilentUnifiedAuthLogin()) {
-                _uiState.update {
-                    it.copy(
-                        needLogin = true,
-                        requireVpnForLogin = useVpn,
-                        temporaryUseVpn = useVpn
-                    )
+            if (!hasUnifiedSession) {
+                val failure = trySilentUnifiedAuthLogin()
+                if (failure != null) {
+                    settleSilentLoginFailure(failure, requireVpnForLogin = useVpn)
+                    return@launch
                 }
-                return@launch
             }
 
             _uiState.update {
@@ -330,34 +319,24 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
                 }
             } catch (e: WbuSessionExpiredException) {
                 // CASTGC / WebVPN 门禁过期：先用保存的密码静默重登一次，失败才弹登录 Sheet
-                if (trySilentUnifiedAuthLogin()) {
+                val failure = trySilentUnifiedAuthLogin()
+                if (failure == null) {
                     proceedWithChannel(def, useVpn)
                     return@launch
                 }
-                _uiState.update {
-                    it.copy(
-                        needLogin = true,
-                        requireVpnForLogin = useVpn,
-                        temporaryUseVpn = useVpn
-                    )
-                }
+                settleSilentLoginFailure(failure, requireVpnForLogin = useVpn)
             } catch (e: Exception) {
                 val msg = e.message.orEmpty()
                 if (e is WbuSessionExpiredException ||
                     msg.contains("失效") || msg.contains("过期") || msg.contains("登录") || msg.contains("WebVPN") || msg.contains("门禁") ||
                     msg.contains("expired", ignoreCase = true) || msg.contains("log in", ignoreCase = true) || msg.contains("login", ignoreCase = true)
                 ) {
-                    if (trySilentUnifiedAuthLogin()) {
+                    val failure = trySilentUnifiedAuthLogin()
+                    if (failure == null) {
                         proceedWithChannel(def, useVpn)
                         return@launch
                     }
-                    _uiState.update {
-                        it.copy(
-                            needLogin = true,
-                            requireVpnForLogin = useVpn,
-                            temporaryUseVpn = useVpn
-                        )
-                    }
+                    settleSilentLoginFailure(failure, requireVpnForLogin = useVpn)
                 } else {
                     _uiState.update {
                         it.copy(
@@ -380,93 +359,69 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
      * WebVPN）；只有在内容本身必须走 WebVPN（TWFID 门禁失效要重建）时才强制为 true。
      * 需要门禁密码时优先用本地保存的，没保存就弹小窗让用户补 WebVPN 密码 + 短信验证码，补不上才回落 Sheet。
      *
-     * 每次进入（[start] / [retry]）只尝试一次，避免失败后成环。
+     * 每次进入（[start] / [retry]）只尝试一次（[silentLoginAttempted]）：重试成环只会白烧服务端失败次数。
+     * 失败原因按 [AccessFailure] 结构化返回，调用方据此决定是弹 Sheet 还是只给一条可重试的错误。
      */
-    private suspend fun trySilentUnifiedAuthLogin(forceWebVpn: Boolean = false): Boolean {
-        val app = getApplication<Application>()
-        if (silentLoginAttempted) return false
+    private suspend fun trySilentUnifiedAuthLogin(forceWebVpn: Boolean = false): AccessFailure? {
+        // 本次流程已经试过：原样回报上次的原因，不再发起第二次登录
+        if (silentLoginAttempted) return lastSilentLoginFailure
         silentLoginAttempted = true
 
-        val studentId = WbuAuthTransport.getSavedStudentId(app)
-        val password = WbuAuthTransport.getSavedPassword(app, CredentialService.UNIFIED_AUTH)
-        if (studentId.isBlank() || password.isNullOrBlank()) {
-            Log.d(TAG, "没有保存的统一认证账号密码，跳过静默登录")
-            return false
+        val app = getApplication<Application>()
+        _uiState.update {
+            it.copy(
+                stage = WebAppStage.LoadingToken,
+                probeStatusText = app.getString(R.string.status_login_saved_credentials)
+            )
         }
+        // 弹窗（未保存的统一认证密码 / WebVPN 门禁密码 / 短信验证码 / 图形校验）统一走进程级小窗。
+        // onlyWithSavedPassword = true：本机没存密码就直接回落到登录 Sheet，保持这条路径的老行为
+        val failure = silentUnifiedAuthLogin(
+            context = app,
+            flowTag = "WEBAPP_AUTO_AUTH",
+            viaWebVpn = forceWebVpn || WbuAuthTransport.getIdsViaWebVpn(app),
+            onlyWithSavedPassword = true
+        )
+        lastSilentLoginFailure = failure
+        return failure
+    }
 
-        return try {
+    /**
+     * 静默登录失败后的收尾。
+     *
+     * **只有**「会话失效 / 凭据被拒」才把用户请去登录 Sheet；用户取消小窗、网络不通、服务端异常
+     * 只留一条可重试的错误 —— 以前这里任何失败都会弹 Sheet，用户在小窗上点个取消也会被顶一脸登录框。
+     *
+     * @param keepChoiceOverlay 从「内容必须走 WebVPN」的分支出来的失败：保留离校通道选择浮层，
+     *                          别把用户直接推进登录页。
+     */
+    private fun settleSilentLoginFailure(
+        failure: AccessFailure,
+        requireVpnForLogin: Boolean,
+        keepChoiceOverlay: Boolean = false
+    ) {
+        if (failure.needsRelogin) {
+            val vpn = requireVpnForLogin || keepChoiceOverlay
             _uiState.update {
                 it.copy(
-                    stage = WebAppStage.LoadingToken,
-                    probeStatusText = app.getString(R.string.status_login_saved_credentials)
+                    stage = if (keepChoiceOverlay) WebAppStage.OffCampusChoice else it.stage,
+                    needLogin = true,
+                    requireVpnForLogin = vpn,
+                    temporaryUseVpn = vpn
                 )
             }
-            val viaWebVpn = forceWebVpn || WbuAuthTransport.getIdsViaWebVpn(app)
-            val engine = WbuSyncEngine(app, useVpn = viaWebVpn)
-            silentLoginEngine = engine
-            val ok = engine.loginUnifiedAuthOnly(
-                studentId = studentId,
-                password = password,
-                viaWebVpn = viaWebVpn,
-                flowTag = "WEBAPP_AUTO_AUTH",
-                vpnPasswordProvider = {
-                    WbuAuthTransport.getSavedVpnPassword(app)?.takeIf { it.isNotBlank() }
-                        ?: requestAuthPrompt(WbuAuthPromptRequest.VpnPassword)
-                },
-                smsCodeProvider = { maskedPhone, isStillValid, sendInterval, promptText ->
-                    requestAuthPrompt(
-                        WbuAuthPromptRequest.SmsCode(
-                            maskedPhone = maskedPhone,
-                            isStillValid = isStillValid,
-                            sendInterval = sendInterval,
-                            promptText = promptText
-                        )
-                    )
-                }
+            return
+        }
+        val app = getApplication<Application>()
+        _uiState.update {
+            it.copy(
+                needLogin = false,
+                stage = WebAppStage.Error(
+                    accessFailureText(app, failure)
+                        ?: app.getString(R.string.err_need_unified_auth_session)
+                )
             )
-            Log.i(TAG, "静默统一认证登录结果: $ok")
-            ok
-        } catch (e: Exception) {
-            Log.w(TAG, "静默统一认证登录失败", e)
-            false
-        } finally {
-            silentLoginEngine = null
-            dismissAuthPrompt()
         }
-    }
-
-    /** UI 提交（传 null = 取消）当前补充输入弹窗。 */
-    fun submitAuthPrompt(value: String?) {
-        val deferred = authPromptDeferred
-        authPromptDeferred = null
-        _authPrompt.value = null
-        deferred?.complete(value)
-    }
-
-    /** 短信验证码「重新发送」。 */
-    /** 短信验证码「重新发送」：返回服务端要求的重发冷却秒数（0 = 不限制），失败返回 null。 */
-    suspend fun resendVpnSmsCode(): Int? {
-        val engine = silentLoginEngine ?: return null
-        return runCatching { engine.resendVpnSmsCode() }
-            .onFailure { Log.w(TAG, "重新发送短信验证码失败", it) }
-            .getOrNull()
-            ?.takeIf { it.success }
-            ?.cooldownSeconds
-    }
-
-    /** 向 UI 索取一次补充输入，挂起直到用户提交或取消。 */
-    private suspend fun requestAuthPrompt(request: WbuAuthPromptRequest): String? {
-        val deferred = CompletableDeferred<String?>()
-        withContext(Dispatchers.Main) {
-            authPromptDeferred = deferred
-            _authPrompt.value = request
-        }
-        return deferred.await()
-    }
-
-    private fun dismissAuthPrompt() {
-        authPromptDeferred = null
-        _authPrompt.value = null
     }
 
     fun onLoginSuccess() {
@@ -493,6 +448,7 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
 
     fun retry() {
         silentLoginAttempted = false
+        lastSilentLoginFailure = null
         val def = _uiState.value.definition
         if (def != null) {
             evaluateNetworkAndProceed(def)

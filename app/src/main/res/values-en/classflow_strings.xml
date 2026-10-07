@@ -663,6 +663,8 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="section_credential_verify">Verification</string>
     <string name="item_auto_verify">Auto-verify sessions</string>
     <string name="desc_auto_verify">Verify each service session online when entering; when off, only local status is shown</string>
+    <string name="item_auto_login_saved_password">Auto sign-in with saved password</string>
+    <string name="desc_auto_login_saved_password">Sign in silently with the saved password when a session expires instead of asking every time; when off, these flows stop signing in automatically</string>
     <string name="action_verify_now">Verify now</string>
     <string name="desc_verify_now">Manually verify all services\' sessions</string>
     <string name="service_unified_auth">Unified Auth</string>
@@ -707,11 +709,15 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="item_session_credentials">Session credentials</string>
     <string name="status_no_credentials">No credentials</string>
     <string name="item_webvpn_mode">Use WebVPN</string>
-    <string name="desc_webvpn_mode">Enable when off-campus; login and sync go through WebVPN</string>
+    <string name="desc_webvpn_mode">On by default; on campus the app connects directly, otherwise login and sync go through the WebVPN gate</string>
+    <string name="item_auto_campus_probe">Auto campus network detection</string>
+    <string name="a11y_long_press_login">Long-press to open the login panel</string>
+    <string name="desc_auto_campus_probe">With WebVPN on, campus-only features first run a quick check; when on campus they connect directly instead of going through WebVPN</string>
     <string name="item_login">Sign in</string>
     <string name="desc_login_service">Sign in again to refresh this service\'s authorization</string>
     <string name="err_no_valid_credentials">No valid credentials. Please use "Sign-in sync" to log in first.</string>
     <string name="err_need_unified_auth_session">No valid unified-auth session yet. Please sign in once with your unified-auth password.</string>
+    <string name="format_need_login_long_press">%1$s (long-press the button to open the login panel)</string>
     <string name="action_go_to_credential_management">Go to Account &amp; Credentials</string>
     <string name="action_sync_short">Sync</string>
 
@@ -844,6 +850,7 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="msg_retake_drop_success">Retake course dropped</string>
     <string name="msg_retake_select_success">Retake course selected</string>
     <string name="msg_retake_drop_failed">Retake course drop failed</string>
+    <string name="msg_session_restored_retry">Sign-in was restored automatically — please tap again</string>
     <string name="msg_retake_select_failed">Retake course selection failed</string>
     <string name="status_verifying_campus_card">Verifying campus card credentials...</string>
     <string name="status_connecting_ujing">Connecting to UJing campus water...</string>

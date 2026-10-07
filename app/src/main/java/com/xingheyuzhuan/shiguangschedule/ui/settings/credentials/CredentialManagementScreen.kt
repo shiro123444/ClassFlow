@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.VpnKey
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -177,6 +178,23 @@ fun CredentialManagementScreen(
                 )
                 SettingDivider()
                 SettingTile(
+                    icon = Icons.Rounded.Key,
+                    title = stringResource(R.string.item_auto_login_saved_password),
+                    subtitle = stringResource(R.string.desc_auto_login_saved_password),
+                    trailingContent = {
+                        Switch(
+                            checked = uiState.autoLoginWithSavedPassword,
+                            onCheckedChange = { viewModel.setAutoLoginWithSavedPassword(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color.White.copy(alpha = 0.28f),
+                                uncheckedThumbColor = Color.White.copy(alpha = 0.9f)
+                            )
+                        )
+                    }
+                )
+                SettingDivider()
+                SettingTile(
                     icon = Icons.Rounded.VpnKey,
                     title = stringResource(R.string.item_webvpn_mode),
                     subtitle = stringResource(R.string.desc_webvpn_mode),
@@ -192,6 +210,27 @@ fun CredentialManagementScreen(
                         )
                     }
                 )
+                // 「自动校园网探测」只在「使用 WebVPN」开启时才有意义：
+                // 直连模式下本来就是直连，不需要探测来决定走哪条通道。
+                if (uiState.useVpn) {
+                    SettingDivider()
+                    SettingTile(
+                        icon = Icons.Rounded.Wifi,
+                        title = stringResource(R.string.item_auto_campus_probe),
+                        subtitle = stringResource(R.string.desc_auto_campus_probe),
+                        trailingContent = {
+                            Switch(
+                                checked = uiState.autoCampusProbe,
+                                onCheckedChange = { viewModel.setAutoCampusProbe(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color.White.copy(alpha = 0.28f),
+                                    uncheckedThumbColor = Color.White.copy(alpha = 0.9f)
+                                )
+                            )
+                        }
+                    )
+                }
                 SettingDivider()
                 SettingTile(
                     icon = Icons.Rounded.Refresh,

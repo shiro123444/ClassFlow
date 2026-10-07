@@ -1,12 +1,18 @@
 package com.xingheyuzhuan.shiguangschedule.ui.campus.shower
 
+import android.content.Context
 import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.CampusShowerEntryResolver
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.CampusShowerLink
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.needsRelogin
+import com.xingheyuzhuan.shiguangschedule.ui.components.shouldAttemptSavedPasswordLogin
+import com.xingheyuzhuan.shiguangschedule.ui.components.silentUnifiedAuthLogin
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,11 +34,14 @@ sealed interface ShowerDirectUiState {
     /**
      * 解析失败。
      *
-     * [retryable] 为 true 时页面给出「重试」（网络类失败）；否则只有「退出」。
+     * [retryable] 为 true 时页面给出「重试」（网络类失败）；
+     * [needsLogin] 为 true 时页面再给一个「重新登录」入口 —— 登录态失效是这里唯一
+     * 用户自己动手就能解决的情况，以前只给「重试」，等于让用户对着同一个提示反复点。
      */
     data class Failed(
         @StringRes val messageRes: Int,
-        val retryable: Boolean = false
+        val retryable: Boolean = false,
+        val needsLogin: Boolean = false
     ) : ShowerDirectUiState
 }
 
@@ -44,6 +53,7 @@ sealed interface ShowerDirectUiState {
  */
 @HiltViewModel
 class ShowerDirectViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val resolver: CampusShowerEntryResolver
 ) : ViewModel() {
 
@@ -75,31 +85,67 @@ class ShowerDirectViewModel @Inject constructor(
         resolve()
     }
 
+    /** 用户在「重新登录」面板里登录成功后调用：会话已换新，重新解析一次。 */
+    fun onLoginSuccess() {
+        resolve()
+    }
+
     private fun resolve() {
         viewModelScope.launch {
             _state.value = ShowerDirectUiState.Resolving
-            val result = when (system.trim().lowercase()) {
-                CampusShowerLink.SYSTEM_YKT -> resolver.resolveYktXyyy(code)
-                CampusShowerLink.SYSTEM_LIFE -> resolver.resolveLifeService(code, port)
-                else -> CampusShowerEntryResolver.Result.InvalidDevice
-            }
-            when (result) {
-                is CampusShowerEntryResolver.Result.Ready -> {
-                    _state.value = ShowerDirectUiState.Opening
-                    _openWebApp.tryEmit(result)
+            // 登录态失效时最多再自动登一次，然后重新解析 —— 成环就白烧服务端失败次数
+            var autoLoginTried = false
+            while (true) {
+                val result = when (system.trim().lowercase()) {
+                    CampusShowerLink.SYSTEM_YKT -> resolver.resolveYktXyyy(code)
+                    CampusShowerLink.SYSTEM_LIFE -> resolver.resolveLifeService(code, port)
+                    else -> CampusShowerEntryResolver.Result.InvalidDevice
                 }
 
-                CampusShowerEntryResolver.Result.InvalidDevice ->
-                    _state.value = ShowerDirectUiState.Failed(R.string.link_hub_error_shower_invalid)
-
-                CampusShowerEntryResolver.Result.NeedLogin ->
+                if (result == CampusShowerEntryResolver.Result.NeedLogin &&
+                    !autoLoginTried &&
+                    shouldAttemptSavedPasswordLogin(context)
+                ) {
+                    autoLoginTried = true
+                    _state.value = ShowerDirectUiState.Resolving
+                    val failure = silentUnifiedAuthLogin(
+                        context = context,
+                        flowTag = "SHOWER_DIRECT",
+                        viaWebVpn = WbuAuthTransport.getIdsViaWebVpn(context),
+                        // 上面已确认存着密码：绝不因为「缺密码」在落地页弹窗
+                        onlyWithSavedPassword = true
+                    )
+                    if (failure == null) continue
                     _state.value = ShowerDirectUiState.Failed(
                         R.string.err_need_unified_auth_session,
-                        retryable = true
+                        retryable = true,
+                        // 只有「确实需要用户补新凭据」才给重新登录入口；网络类问题点重试就行
+                        needsLogin = failure.needsRelogin
                     )
+                    return@launch
+                }
 
-                is CampusShowerEntryResolver.Result.Unavailable ->
-                    _state.value = ShowerDirectUiState.Failed(R.string.link_hub_error_network, retryable = true)
+                when (result) {
+                    is CampusShowerEntryResolver.Result.Ready -> {
+                        _state.value = ShowerDirectUiState.Opening
+                        _openWebApp.tryEmit(result)
+                    }
+
+                    CampusShowerEntryResolver.Result.InvalidDevice ->
+                        _state.value = ShowerDirectUiState.Failed(R.string.link_hub_error_shower_invalid)
+
+                    CampusShowerEntryResolver.Result.NeedLogin ->
+                        _state.value = ShowerDirectUiState.Failed(
+                            R.string.err_need_unified_auth_session,
+                            retryable = true,
+                            // 没存密码 / 开关关着时以前只能干瞪眼，现在至少给一个登录入口
+                            needsLogin = true
+                        )
+
+                    is CampusShowerEntryResolver.Result.Unavailable ->
+                        _state.value = ShowerDirectUiState.Failed(R.string.link_hub_error_network, retryable = true)
+                }
+                return@launch
             }
         }
     }

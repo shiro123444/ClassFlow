@@ -784,6 +784,21 @@ internal class WbuAuthTransport(
         private const val KEY_USE_FIXED_SERVICE_FOR_TICKET = "use_fixed_service_for_ticket"
         private const val KEY_CREDENTIAL_ADVANCED_MODE = "credential_advanced_mode"
         private const val KEY_CREDENTIAL_AUTO_VERIFY = "credential_auto_verify_enabled"
+
+        /**
+         * 「自动使用保存的密码登录」（账号与凭据页，默认开）。
+         *
+         * 语义是**只增不减**：关掉 = 回到加这个开关之前的行为（已有的静默路径照旧），
+         * 打开才让「以前会直接甩登录面板 / 直接说未登录」的场景也先静默试一次。
+         */
+        private const val KEY_AUTO_LOGIN_WITH_SAVED_PASSWORD = "auto_login_with_saved_password"
+
+        /**
+         * 「自动校园网探测」（账号与凭据页，默认开；仅 WebVPN 模式下显示）。
+         *
+         * 见 [isAutoCampusProbeEnabled]。
+         */
+        private const val KEY_AUTO_CAMPUS_PROBE = "auto_campus_probe"
         const val IDS_PERSON_CENTER_SERVICE = "http://ids.wbu.edu.cn/personalInfo/personCenter/index.html"
         const val MAX_CAPTCHA_ATTEMPTS = 5
 
@@ -947,6 +962,34 @@ internal class WbuAuthTransport(
 
         fun setCredentialAutoVerifyEnabled(context: Context, enabled: Boolean) {
             prefsOf(context).edit().putBoolean(KEY_CREDENTIAL_AUTO_VERIFY, enabled).apply()
+        }
+
+        /**
+         * 「自动使用保存的密码登录」，默认**开**。
+         *
+         * 由它决定「以前不会自动登录」的场景（课表一键同步、扫一扫、设备直达、选课中途失效、
+         * 网页应用换票、WebView 手动登录页、账号页自身…）要不要先静默试一次。
+         */
+        fun isAutoLoginWithSavedPasswordEnabled(context: Context): Boolean =
+            prefsOf(context).getBoolean(KEY_AUTO_LOGIN_WITH_SAVED_PASSWORD, true)
+
+        fun setAutoLoginWithSavedPasswordEnabled(context: Context, enabled: Boolean) {
+            prefsOf(context).edit().putBoolean(KEY_AUTO_LOGIN_WITH_SAVED_PASSWORD, enabled).apply()
+        }
+
+        /**
+         * 「自动校园网探测」，默认**开**（账号与凭据页里只在「使用 WebVPN」开启时显示）。
+         *
+         * 语义同样是**只增不减**：关掉 = 回到加这个开关之前的行为（WebVPN 模式下就走 WebVPN），
+         * 打开才让需要校园网的流程先快速探一次 —— 人在校园网里就别再绕 WebVPN（又慢又容易掉线）。
+         *
+         * 不需要校园网的应用（一卡通 / U净 / 付款码）任何情况下都不做探测，与它无关。
+         */
+        fun isAutoCampusProbeEnabled(context: Context): Boolean =
+            prefsOf(context).getBoolean(KEY_AUTO_CAMPUS_PROBE, true)
+
+        fun setAutoCampusProbeEnabled(context: Context, enabled: Boolean) {
+            prefsOf(context).edit().putBoolean(KEY_AUTO_CAMPUS_PROBE, enabled).apply()
         }
 
         /**
@@ -1121,7 +1164,7 @@ internal class WbuAuthTransport(
         fun hasLocalSession(
             context: Context,
             service: CredentialService,
-            useVpn: Boolean = WbuSyncEngine.getSavedUseVpn(context) ?: false,
+            useVpn: Boolean = WbuSyncEngine.getSavedUseVpn(context),
         ): Boolean {
             val jar = getShared(context, useVpn).cookieStore
             fun has(name: String) = jar.any { it.name == name && it.value.isNotBlank() }
@@ -1190,11 +1233,15 @@ internal class WbuAuthTransport(
             }
         }
 
-        fun getSavedUseVpn(context: Context): Boolean? {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            if (!prefs.getBoolean(KEY_LAST_USE_VPN_SET, false)) return null
-            return prefs.getBoolean(KEY_LAST_USE_VPN, false)
-        }
+        /**
+         * 「使用 WebVPN」（网络接入模式），**默认开**。
+         *
+         * 默认开是为了让新用户不必先搞懂这个开关，就能直接享受到「自动校园网探测」：
+         * 校外自动经 WebVPN、校园网内自动直连（见 `resolveCampusUseVpn`）。
+         * `last_use_vpn_set` 仍记录「用户是否明确设置过」，需要区分默认值与他本人选择时可以用它。
+         */
+        fun getSavedUseVpn(context: Context): Boolean =
+            prefsOf(context).getBoolean(KEY_LAST_USE_VPN, true)
 
         fun setSavedUseVpn(context: Context, enabled: Boolean) {
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -1484,5 +1531,29 @@ internal class WbuAuthTransport(
 
         fun clearSavedVpnPassword(context: Context) =
             clearSavedPassword(context, CredentialService.WEBVPN)
+
+        /**
+         * 服务端**确认**密码错之后，忘掉本地保存的那份「这次真正提交过」的密码。
+         *
+         * 只在「本地那一槽存的正好是刚被拒的这份密码」时才动它（逐值比对，而不是按层猜）：
+         * - 用户临时在小窗里输入、又没勾「记住密码」时本地本来就没存，不该牵连其它槽位；
+         * - 门禁密码与统一认证密码在本校是同一套凭据，谁都可能存着这份错密码，谁存了就清谁。
+         *
+         * 清掉的同时关掉对应服务的「记住密码」：这样随后弹出的登录 Sheet 里密码框是空的、
+         * 也不会再用占位符把这份错密码原样提交一遍（`WbuAuthBottomSheet.resolveEffectivePassword()` 会复用占位符）。
+         */
+        fun forgetRejectedPassword(context: Context, submittedPassword: String) {
+            if (submittedPassword.isBlank()) return
+            val unified = getSavedPassword(context, CredentialService.UNIFIED_AUTH)
+            if (unified != null && unified == submittedPassword) {
+                Log.i("WbuAuthTransport", "确认统一认证密码被拒，清掉保存的密码槽并关闭「记住密码」")
+                setRememberPasswordEnabled(context, CredentialService.UNIFIED_AUTH, false)
+            }
+            val vpn = getSavedPassword(context, CredentialService.WEBVPN)
+            if (vpn != null && vpn == submittedPassword) {
+                Log.i("WbuAuthTransport", "确认 WebVPN 门禁密码被拒，清掉保存的门禁密码槽并关闭「记住密码」")
+                setRememberPasswordEnabled(context, CredentialService.WEBVPN, false)
+            }
+        }
     }
 }

@@ -663,6 +663,8 @@
     <string name="section_credential_verify">验证</string>
     <string name="item_auto_verify">自动验证会话</string>
     <string name="desc_auto_verify">进入本页时自动联网核验各服务的登录态；关闭后仅显示本地状态</string>
+    <string name="item_auto_login_saved_password">自动使用保存的密码登录</string>
+    <string name="desc_auto_login_saved_password">会话失效时直接用已保存的密码登录，不再每次都让你手动登录；关闭后这些场景不会自动登录</string>
     <string name="action_verify_now">立即验证</string>
     <string name="desc_verify_now">手动核验全部服务的会话有效性</string>
     <string name="service_unified_auth">统一认证</string>
@@ -707,11 +709,15 @@
     <string name="item_session_credentials">会话凭据</string>
     <string name="status_no_credentials">无凭据</string>
     <string name="item_webvpn_mode">使用 WebVPN</string>
-    <string name="desc_webvpn_mode">校外访问时开启；登录与同步将经过 WebVPN 门禁</string>
+    <string name="desc_webvpn_mode">校外访问时开启（默认开启）；校园网内会自动直连，其余情况经 WebVPN 门禁</string>
+    <string name="item_auto_campus_probe">自动校园网探测</string>
+    <string name="a11y_long_press_login">长按打开登录面板</string>
+    <string name="desc_auto_campus_probe">开启 WebVPN 时，需要校园网的功能先用快速探测判断是否在校园网内；在校园网内直接连接，不绕 WebVPN</string>
     <string name="item_login">登录</string>
     <string name="desc_login_service">重新登录以更新该服务的授权状态</string>
     <string name="err_no_valid_credentials">无有效凭据，请先用「登录同步」完成登录</string>
     <string name="err_need_unified_auth_session">尚无有效统一认证凭据，请先用统一认证密码登录一次</string>
+    <string name="format_need_login_long_press">%1$s（长按按钮可打开登录面板）</string>
     <string name="action_go_to_credential_management">前往账号与凭据</string>
     <string name="action_sync_short">同步</string>
 
@@ -844,6 +850,7 @@
     <string name="msg_retake_drop_success">重修退课成功</string>
     <string name="msg_retake_select_success">重修选课成功</string>
     <string name="msg_retake_drop_failed">重修退课失败</string>
+    <string name="msg_session_restored_retry">登录状态已自动恢复，请再点一次</string>
     <string name="msg_retake_select_failed">重修选课失败</string>
     <string name="status_verifying_campus_card">正在验证一卡通凭据...</string>
     <string name="status_connecting_ujing">正在连接 U净 校园饮水...</string>

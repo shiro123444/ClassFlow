@@ -91,7 +91,7 @@ internal class IdsCasClient(
                         val location = it.header("Location")
                         if (location.isNullOrBlank()) {
                             Log.w("IdsCasClient", "$flowTag CAS redirect without Location")
-                            CasPasswordLoginResult(false, "登录跳转异常（无 Location）", LocalLoginFailure.CREDENTIALS)
+                            CasPasswordLoginResult(false, "登录跳转异常（无 Location）", LocalLoginFailure.PROTOCOL)
                         } else {
                             val st = Regex("""[?&]ticket=([^&]+)""").find(location)?.groupValues?.getOrNull(1)
                             if (!consumeTicket) {
@@ -103,7 +103,7 @@ internal class IdsCasClient(
                                 val target = rewritten.toHttpUrlOrNull()
                                 if (target == null) {
                                     Log.w("IdsCasClient", "$flowTag CAS redirect Location invalid: $rewritten")
-                                    CasPasswordLoginResult(false, "登录跳转异常（Location 无效）", LocalLoginFailure.CREDENTIALS)
+                                    CasPasswordLoginResult(false, "登录跳转异常（Location 无效）", LocalLoginFailure.PROTOCOL)
                                 } else {
                                     val followRes = followToLeavingLogin(rewritten, flowTag)
                                     followRes.copy(stTicket = st ?: followRes.stTicket)
@@ -112,15 +112,16 @@ internal class IdsCasClient(
                         }
                     }
                     finalUrlStaysOnLogin(it.request.url.toString()) -> {
-                        val err = extractCasError(body)
-                        CasPasswordLoginResult(false, err.ifBlank { "登录失败，请检查账号或验证码" }, LocalLoginFailure.CREDENTIALS)
+                        // 服务端把登录页原样返回 = 凭据被拒。文案决定「到底该补哪个输入框」，
+                        // 判不出具体类型时不许当成密码错（否则会把用户正确的密码删掉）。
+                        rejectedOnLoginPage(extractCasError(body))
                     }
                     else -> CasPasswordLoginResult(success = true)
                 }
             }
         } catch (e: Exception) {
             Log.e("IdsCasClient", "$flowTag CAS login request exception", e)
-            CasPasswordLoginResult(false, "网络异常: ${e.message}", LocalLoginFailure.CREDENTIALS)
+            CasPasswordLoginResult(false, "网络异常: ${e.message}", LocalLoginFailure.NETWORK)
         }
     }
 
@@ -145,7 +146,7 @@ internal class IdsCasClient(
                         val loc = resp.header("Location")
                         if (loc.isNullOrBlank()) {
                             Log.w("IdsCasClient", "$flowTag follow redirect missing Location")
-                            return@withContext CasPasswordLoginResult(false, "跳转异常（无 Location）", LocalLoginFailure.CREDENTIALS)
+                            return@withContext CasPasswordLoginResult(false, "跳转异常（无 Location）", LocalLoginFailure.PROTOCOL)
                         }
                         val rewritten = rewriteJwxtRedirectLocation(loc)
                         Log.d("IdsCasClient", "$flowTag follow 30x to $rewritten")
@@ -156,26 +157,46 @@ internal class IdsCasClient(
                     // 最终非 30x 落地响应
                     if (finalUrlStaysOnLogin(currentUrl)) {
                         Log.w("IdsCasClient", "$flowTag CAS redirect landed back on login. url=$currentUrl")
-                        val err = if (currentUrl.contains("/por/")) {
-                            "WebVPN 未授权或会话已失效"
+                        // 落到门户 /por/：是 WebVPN 门禁会话没了（跟账号密码无关，绝不能当成密码错）
+                        if (currentUrl.contains("/por/")) {
+                            CasPasswordLoginResult(false, "WebVPN 未授权或会话已失效", LocalLoginFailure.VPN_SESSION)
                         } else {
-                            extractCasError(body).ifBlank { "登录失败，请重试" }
+                            rejectedOnLoginPage(extractCasError(body))
                         }
-                        return@withContext CasPasswordLoginResult(false, err, LocalLoginFailure.CREDENTIALS)
                     } else {
                         return@withContext CasPasswordLoginResult(success = true, landingUrl = currentUrl, landingHtml = body)
                     }
                 }
                 Log.w("IdsCasClient", "$flowTag too many redirects during followToLeavingLogin")
-                CasPasswordLoginResult(false, "重定向次数过多", LocalLoginFailure.CREDENTIALS)
+                CasPasswordLoginResult(false, "重定向次数过多", LocalLoginFailure.PROTOCOL)
             } catch (e: Exception) {
                 Log.e("IdsCasClient", "$flowTag CAS follow exception", e)
-                CasPasswordLoginResult(false, "网络异常: ${e.message}", LocalLoginFailure.CREDENTIALS)
+                CasPasswordLoginResult(false, "网络异常: ${e.message}", LocalLoginFailure.NETWORK)
             }
         }
 
     private fun finalUrlStaysOnLogin(url: String): Boolean =
         url.contains("/authserver/login") || url.contains("/por/login") || url.contains("/por/")
+
+    /**
+     * 登录请求被服务端原样打回登录页 → 结构化「凭据被拒」。
+     *
+     * [serverTip] 必须是**服务端原文**（[extractCasError]），不要把本地兜底文案传进来：
+     * 兜底文案里带「验证码」两个字，会被 [classifyCredentialRejection] 误判成验证码错误。
+     * 服务端没给提示时归类为 [CredentialKind.Unknown] —— 不点名声明的拒绝，一律不动本地保存的密码。
+     */
+    private fun rejectedOnLoginPage(serverTip: String?): CasPasswordLoginResult {
+        val serverText = serverTip?.trim().orEmpty()
+        val kind = classifyCredentialRejection(serverText)
+        val shown = serverText.ifBlank {
+            when (kind) {
+                CredentialKind.Captcha -> "验证码未通过，请重试"
+                CredentialKind.Password -> "账号或密码错误"
+                CredentialKind.SmsCode, CredentialKind.Unknown -> "登录失败，请重试"
+            }
+        }
+        return CasPasswordLoginResult(false, shown, LocalLoginFailure.CREDENTIALS, rejectedKind = kind)
+    }
 
     data class CasLoginPage(
         val hiddenFields: Map<String, String>,
@@ -384,7 +405,9 @@ internal class IdsCasClient(
 
         val page = fetchCasLoginPage(idsLoginUrl, flowTag, clearAuthCookies = clearAuthCookies)
             ?: run {
-                return@withContext CasPasswordLoginResult(false, "无法获取登录参数", LocalLoginFailure.CREDENTIALS)
+                // 拿不到登录页表单 = 请求根本没能正常走通（网关拦截、页面改版、CDN 异常），
+                // 不是「账号密码不对」——绝不能因为它去清用户的密码或弹登录框。
+                return@withContext CasPasswordLoginResult(false, "无法获取登录参数", LocalLoginFailure.PROTOCOL)
             }
 
         var captchaNeeded = page.needCaptcha
@@ -400,7 +423,7 @@ internal class IdsCasClient(
             val solved = solveSliderCaptcha(origin, flowTag, captchaProvider)
             if (!solved) {
                 Log.w("IdsCasClient", "$flowTag CAS captcha not solved")
-                return@withContext CasPasswordLoginResult(false, "滑块验证未通过", LocalLoginFailure.CREDENTIALS)
+                return@withContext CasPasswordLoginResult(false, "滑块验证未通过", LocalLoginFailure.CAPTCHA)
             }
             Log.i("IdsCasClient", "$flowTag CAS captcha verified, submit with original execution")
         }
@@ -581,7 +604,7 @@ internal class IdsCasClient(
             postCasFormManualFollow(loginReq, flowTag, consumeTicket = consumeTicket)
         } catch (e: Exception) {
             Log.e("IdsCasClient", "$flowTag dynamicCode login exception", e)
-            CasPasswordLoginResult(false, "网络异常: ${e.message}", LocalLoginFailure.CREDENTIALS)
+            CasPasswordLoginResult(false, "网络异常: ${e.message}", LocalLoginFailure.NETWORK)
         }
     }
 
@@ -673,7 +696,7 @@ internal class IdsCasClient(
             postCasFormManualFollow(loginReq, "QR", consumeTicket = consumeTicket)
         } catch (e: Exception) {
             Log.e("IdsCasClient", "qr login exception", e)
-            CasPasswordLoginResult(false, "网络异常: ${e.message}", LocalLoginFailure.CREDENTIALS)
+            CasPasswordLoginResult(false, "网络异常: ${e.message}", LocalLoginFailure.NETWORK)
         }
     }
 
@@ -910,6 +933,12 @@ data class CasPasswordLoginResult(
     val success: Boolean,
     val message: String = "",
     val failure: LocalLoginFailure = LocalLoginFailure.CREDENTIALS,
+    /**
+     * 仅当 [failure] == [LocalLoginFailure.CREDENTIALS] 时有意义：服务端到底点名了哪个输入框。
+     * 只有 [CredentialKind.Password] 才允许清掉本地保存的密码 —— 密码、验证码、未知三者
+     * 给用户的下一步完全不同，混在一起就会出现「输错验证码把密码删了」这种事。
+     */
+    val rejectedKind: CredentialKind = CredentialKind.Unknown,
     val landingUrl: String? = null,
     val landingHtml: String? = null,
     val stTicket: String? = null

@@ -61,7 +61,11 @@ import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.sp
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.needsRelogin
 import com.xingheyuzhuan.shiguangschedule.ui.components.WbuCourseImportSheet
+import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
+import com.xingheyuzhuan.shiguangschedule.ui.components.needLoginHintText
+import com.xingheyuzhuan.shiguangschedule.ui.components.prepareWbuImportWithSavedPassword
 import com.xingheyuzhuan.shiguangschedule.ui.theme.LocalIsDarkTheme
 import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.R
@@ -118,6 +122,11 @@ fun CourseTableConversionScreen(
 
     // 直连导入课表 Sheet 状态
     var showDirectImportSheet by remember { mutableStateOf(false) }
+
+    // 单击导入 = 不显示登录面板直接导（长按才打开登录面板）
+    var directImportWithoutLogin by remember { mutableStateOf(false) }
+    // 单击导入进行中（探测校园网 / 静默登录 / 抓取课表）：卡片上给个转圈，别让用户以为没反应
+    var directImportRunning by remember { mutableStateOf(false) }
 
     // 文件导入启动器
     val importLauncher = rememberLauncherForActivityResult(OpenJsonDocumentContract()) { uri: Uri? ->
@@ -356,20 +365,55 @@ fun CourseTableConversionScreen(
                     icon = Icons.Rounded.CloudDownload,
                     title = stringResource(R.string.title_wbu_direct_import),
                     subtitle = stringResource(R.string.desc_wbu_direct_import),
-                    onClick = { showDirectImportSheet = true },
+                    // 单击 = 直接导入：不打开登录面板（需要登录时只提示一句「长按」）
+                    onClick = {
+                        directImportWithoutLogin = true
+                        directImportRunning = true
+                        showDirectImportSheet = true
+                    },
+                    // 长按 = 打开登录面板：需要重新登录 / 换账号 / 改导入偏好时走这里
+                    onLongClick = {
+                        // 「自动使用保存的密码登录」：进导入面板前先用保存的密码把登录态建好，
+                        // 之后面板里只差用户点确认；网络类失败不该把用户推到登录面板前
+                        coroutineScope.launch {
+                            val failure = prepareWbuImportWithSavedPassword(context, "COURSE_IMPORT") {
+                                snackbarHostState.showSnackbar(context.getString(R.string.status_login_saved_credentials))
+                            }
+                            if (failure != null && !failure.needsRelogin) {
+                                snackbarHostState.showSnackbar(
+                                    accessFailureText(context, failure)
+                                        ?: context.getString(R.string.err_need_unified_auth_session)
+                                )
+                                return@launch
+                            }
+                            directImportWithoutLogin = false
+                            showDirectImportSheet = true
+                        }
+                    },
                     titleBadge = {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer)
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                text = stringResource(R.string.badge_recommended),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
+                            if (directImportRunning) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.height(12.dp),
+                                    strokeWidth = 1.5.dp
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.primaryContainer)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.badge_recommended),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
                         }
                     }
                 )
@@ -593,7 +637,17 @@ fun CourseTableConversionScreen(
 
     if (showDirectImportSheet) {
         WbuCourseImportSheet(
-            onDismissRequest = { showDirectImportSheet = false }
+            onDismissRequest = {
+                showDirectImportSheet = false
+                directImportRunning = false
+            },
+            startWithoutLogin = directImportWithoutLogin,
+            onNeedLogin = { failure ->
+                coroutineScope.launch {
+                    val message = needLoginHintText(context, failure) ?: return@launch
+                    snackbarHostState.showSnackbar(message)
+                }
+            }
         )
     }
 }

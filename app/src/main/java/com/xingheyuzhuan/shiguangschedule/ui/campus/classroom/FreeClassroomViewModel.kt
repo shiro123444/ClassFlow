@@ -35,6 +35,7 @@ import javax.inject.Inject
 import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.resolveCampusUseVpn
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.needsRelogin
 import com.xingheyuzhuan.shiguangschedule.ui.components.CampusAccessResult
 import com.xingheyuzhuan.shiguangschedule.ui.components.campusAccess
@@ -121,11 +122,16 @@ class FreeClassroomViewModel @Inject constructor(
     /** 最近一次实际使用的通道：用户点过「改用 WebVPN」后，后续请求沿用同一条通道。 */
     private var lastUseVpn: Boolean? = null
 
-    private val queryClient
-        get() = WbuQueryClient(
-            context,
-            useVpn = lastUseVpn ?: (WbuSyncEngine.getSavedUseVpn(context) ?: false)
-        )
+    /**
+     * 辅助请求（校区列表、单周日期、教室整周课表）用的通道。
+     *
+     * 这些请求不走 [campusAccess]，过去直接看「WebVPN 开关」——于是 WebVPN 开着时，人在校园网里
+     * 打开空教室页，**第一个请求**（校区列表 `/admin/api/jcsj/xqsj/getXqList`）还是会绕到
+     * `...webvpn.wbu.edu.cn:8118`，要等主请求探完校园网才改走直连：白白多一次跨域往返。
+     * 现在与主请求用同一套判据（[resolveCampusUseVpn]，探测结果带缓存）。
+     */
+    private suspend fun queryClient(): WbuQueryClient =
+        WbuQueryClient(context, useVpn = lastUseVpn ?: resolveCampusUseVpn(context))
 
     init {
         initData()
@@ -152,7 +158,7 @@ class FreeClassroomViewModel @Inject constructor(
             updateSingleWeekDatesForSelected()
 
             // 2. 拉取校区列表
-            val campuses = queryClient.fetchCampusList()
+            val campuses = queryClient().fetchCampusList()
             _uiState.update { it.copy(campusList = campuses) }
             updateBuildingListForCampus(_uiState.value.selectedCampusId)
             loadFreeClassrooms()
@@ -209,8 +215,8 @@ class FreeClassroomViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            needLogin = access.failure.needsRelogin ||
-                                access.failure is AccessFailure.Cancelled,
+                            // 只有「会话失效 / 凭据被拒」才弹登录 Sheet；用户取消小窗安静回落
+                            needLogin = access.failure.needsRelogin,
                             errorMessage = accessFailureText(context, access.failure),
                             offerWebVpnOnce = access.failure.shouldOfferWebVpnOnce(access.useVpn)
                         )
@@ -408,7 +414,7 @@ class FreeClassroomViewModel @Inject constructor(
             }
 
             // 3. 本地无开学日期，回退调用教务 getXqrqxx 接口
-            val datesFromApi = queryClient.fetchWeekDates(singleWeek)
+            val datesFromApi = queryClient().fetchWeekDates(singleWeek)
             if (datesFromApi != null) {
                 weekDateCache[singleWeek] = datesFromApi
                 if (_uiState.value.selectedWeeks == setOf(singleWeek)) {
@@ -505,7 +511,7 @@ class FreeClassroomViewModel @Inject constructor(
                 )
             }
 
-            val result = queryClient.probeClassroomWeeklySchedule(
+            val result = queryClient().probeClassroomWeeklySchedule(
                 roomName = room.cleanRoomName,
                 week = week,
                 onProgress = { cur, tot ->

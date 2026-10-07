@@ -122,7 +122,11 @@ class CampusShowerHandler @Inject constructor(
                 LinkHubApplyResult.Failed(R.string.link_hub_error_shower_invalid)
 
             CampusShowerEntryResolver.Result.NeedLogin ->
-                LinkHubApplyResult.Failed(R.string.err_need_unified_auth_session, retryable = true)
+                LinkHubApplyResult.Failed(
+                    R.string.err_need_unified_auth_session,
+                    retryable = true,
+                    needsLogin = true
+                )
 
             is CampusShowerEntryResolver.Result.Unavailable ->
                 LinkHubApplyResult.Failed(R.string.link_hub_error_network, retryable = true)

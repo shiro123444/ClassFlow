@@ -14,6 +14,7 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuQueryClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSessionExpiredException
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.resolveCampusUseVpn
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -66,11 +67,9 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     /** 最近一次实际使用的通道：点过「改用 WebVPN」后，续借/详情等后续请求要沿用同一条通道。 */
     private var lastUseVpn: Boolean? = null
 
-    private fun queryClient(): WbuQueryClient =
-        WbuQueryClient(
-            getApplication(),
-            useVpn = lastUseVpn ?: (WbuSyncEngine.getSavedUseVpn(getApplication()) ?: false)
-        )
+    /** 续借 / 详情这些后续请求用的通道：与主请求同一套判据（[resolveCampusUseVpn]，探测结果带缓存）。 */
+    private suspend fun queryClient(): WbuQueryClient =
+        WbuQueryClient(getApplication(), useVpn = lastUseVpn ?: resolveCampusUseVpn(getApplication()))
 
     /** 「改用 WebVPN」按钮：本次访问改走校外通道。 */
     fun retryWithWebVpnOnce() {
@@ -137,11 +136,10 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                         it.copy(
                             isLoading = false,
                             isRefreshing = false,
-                            // 用户主动取消小窗时不显示任何错误文案（accessFailureText 返回 null）
+                            // 用户主动取消小窗时不显示任何错误文案（accessFailureText 返回 null），
+                            // 也不弹登录 Sheet —— 页面右上角本来就有登录入口，用户想去点自己会点
                             errorMessage = failureText,
-                            // 取消 = 「补输入没补上」，回落到完整登录 Sheet；而不是报错
-                            isSessionExpired = result.failure.needsRelogin ||
-                                result.failure is AccessFailure.Cancelled,
+                            isSessionExpired = result.failure.needsRelogin,
                             offerWebVpnOnce = result.failure.shouldOfferWebVpnOnce(result.useVpn)
                         )
                     }

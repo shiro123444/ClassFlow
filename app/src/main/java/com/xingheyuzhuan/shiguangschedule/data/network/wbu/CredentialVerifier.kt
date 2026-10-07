@@ -35,6 +35,9 @@ enum class SessionState {
  *
  * 复用现有探针实现：教务 [WbuQueryClient.checkSession]、图书馆 [WbuQueryClient.ensureOpacSession]、
  * WebVPN [WebVpnClient.validateTwfid]、WebDAV 根目录探活。
+ *
+ * 通道（直连 / WebVPN）由 [resolveCampusUseVpn] 决定：它会先做一次快速校园网探测（「自动校园网探测」），
+ * 所以「校验校园网环境」这件事在本页也做了，之后才是各服务凭据有效性的核验。
  */
 @Singleton
 class CredentialVerifier @Inject constructor(
@@ -43,7 +46,10 @@ class CredentialVerifier @Inject constructor(
 ) {
 
     suspend fun verify(service: CredentialService): SessionState = withContext(Dispatchers.IO) {
-        val useVpn = WbuSyncEngine.getSavedUseVpn(context) ?: false
+        // 验证同样是「需要校园网」的访问，通道判定与校园服务流水线保持一致：
+        // 开着 WebVPN 但人在校园网里时直接连，不绕 webvpn 域 —— 否则本页的核验会比必要的慢，
+        // 而且核验用的通道和页面实际访问用的通道不一致，容易出现「验证说没事、进去说登录过期」。
+        val useVpn = resolveCampusUseVpn(context)
         when (service) {
             CredentialService.UNIFIED_AUTH -> verifyUnifiedAuth(useVpn)
             CredentialService.JIAOWU -> verifyJiaowu(useVpn)

@@ -108,6 +108,93 @@ val AccessFailure.needsRelogin: Boolean
     get() = this is AccessFailure.SessionExpired || this is AccessFailure.CredentialRejected
 
 /**
+ * 这次失败是否**确认**「某个保存的密码不对」—— 是则返回该密码所在的层，否则 null。
+ *
+ * 只有它为真时才允许清掉本地保存的密码：
+ * - 必须是 [AccessFailure.CredentialRejected]，且 [CredentialKind] 正好是 [CredentialKind.Password]
+ *   （验证码错、未知原因的拒绝都不算 —— 清密码的前提是服务端点名了密码）；
+ * - 且确实发生在有「保存的密码」的那两层：统一认证（学号密码）、WebVPN 门户门禁（门禁密码）。
+ */
+val AccessFailure.confirmedPasswordRejectionLayer: AccessLayer?
+    get() {
+        val rejected = this as? AccessFailure.CredentialRejected ?: return null
+        if (rejected.kind != CredentialKind.Password) return null
+        return when (rejected.layer) {
+            AccessLayer.UnifiedAuth, AccessLayer.WebVpnPortal, AccessLayer.CampusDirect -> rejected.layer
+            AccessLayer.Service -> null
+        }
+    }
+
+/**
+ * 服务端「拒绝凭据」的文案 → 到底该算哪个输入框错了。
+ *
+ * 判据全部来自线上实测的中/英文两套服务端文案，不靠猜：
+ * - CAS 密码错（HTTP 401 + 停在登录页）：`您提供的用户名或者密码有误` /
+ *   `username or password is incorrect`；
+ * - CAS 验证码错（同为 401）：`验证码错误` / `Verification code error`；
+ * - 教务 legacy `/admin/login`：`用户或密码错误, 请重试。当前错误次数为：1次…`；
+ * - 门户（Sangfor）不用文案判定，只看 `ErrorCode`（它的 `Message` 永远是英文）。
+ *
+ * 判不出明确类型时返回 [CredentialKind.Unknown]：**不清**任何保存的密码 ——
+ * 「把用户正确的密码当成错的删掉」的代价远高于「多留一个错密码」。
+ */
+internal fun classifyCredentialRejection(serverText: String?): CredentialKind {
+    val text = serverText?.trim().orEmpty()
+    if (text.isEmpty()) return CredentialKind.Unknown
+    val lower = text.lowercase()
+
+    // 验证码先判：文案里同时出现「密码」和「验证码」时，用户要补的是验证码（密码往往是上一轮就对的）
+    val captchaHints = listOf(
+        "验证码", "滑块", "图形码", "动态码",
+        "captcha", "verification code", "verify code", "checkcode", "randcode", "rand code"
+    )
+    if (captchaHints.any { lower.contains(it) }) return CredentialKind.Captcha
+
+    val passwordHints = listOf(
+        "用户名或者密码", "账号或者密码", "账号或密码", "用户名或密码", "用户或密码",
+        "密码错误", "密码有误", "密码不正确", "密码验证失败", "密码不匹配",
+        "incorrect password", "invalid password", "password is incorrect", "wrong password",
+        "username or password", "account or password", "user name or password", "password error"
+    )
+    if (passwordHints.any { lower.contains(it) }) return CredentialKind.Password
+
+    return CredentialKind.Unknown
+}
+
+/**
+ * CAS 登录结果 → 结构化失败原因。
+ *
+ * 单独抽成可直接调用的函数（而不是留在 WbuSyncEngine 的私有方法里）是为了让单测能钉住它：
+ * 「网络异常」「拿不到登录参数」被翻译成「账号密码不对」是这条链路上代价最高的一类错误 ——
+ * 它会让用户在完全没做错任何事的情况下被要求重新输入密码。
+ */
+internal fun casLoginFailure(result: CasPasswordLoginResult, layer: AccessLayer): AccessFailure =
+    when (result.failure) {
+        LocalLoginFailure.CAPTCHA -> AccessFailure.CredentialRejected(layer, CredentialKind.Captcha, result.message)
+        LocalLoginFailure.CREDENTIALS ->
+            AccessFailure.CredentialRejected(layer, result.rejectedKind, result.message)
+        LocalLoginFailure.NETWORK -> AccessFailure.Unreachable(layer)
+        LocalLoginFailure.PROTOCOL -> AccessFailure.Unexpected(layer, result.message)
+        LocalLoginFailure.VPN_SESSION -> AccessFailure.SessionExpired(AccessLayer.WebVpnPortal)
+    }
+
+/**
+ * WebVPN 门户登录失败 → 结构化失败原因。
+ *
+ * 只有 [PortalFailureKind.Rejected] 会变成「密码被拒」（上层据此清掉保存的门禁密码）；
+ * 图形验证码、风控、网络、协议问题一律不点名密码。
+ */
+internal fun portalLoginFailure(message: String?, kind: PortalFailureKind): AccessFailure = when (kind) {
+    PortalFailureKind.Rejected ->
+        AccessFailure.CredentialRejected(AccessLayer.WebVpnPortal, CredentialKind.Password, message)
+    PortalFailureKind.Captcha ->
+        AccessFailure.CredentialRejected(AccessLayer.WebVpnPortal, CredentialKind.Captcha, message)
+    PortalFailureKind.Network -> AccessFailure.Unreachable(AccessLayer.WebVpnPortal)
+    PortalFailureKind.Protocol -> AccessFailure.Unexpected(AccessLayer.WebVpnPortal, message)
+    PortalFailureKind.Cancelled -> AccessFailure.Cancelled
+}
+
+/**
  * 统一的失败判据：把「响应特征」与「异常类型」翻译成 [AccessFailure]。
  *
  * 过去这些判断散落在各个 client 里（`Location.contains("login")`、`contains("/por/")`、

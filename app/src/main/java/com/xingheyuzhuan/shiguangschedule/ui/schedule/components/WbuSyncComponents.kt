@@ -5,12 +5,14 @@ import com.xingheyuzhuan.shiguangschedule.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -71,7 +73,10 @@ internal fun liquidGlassSurfaceModifier(
  * WBU 教务一键同步按钮。
  * ClassFlow 定制：独立文件承载，以缩小 WeeklyScheduleScreen 与上游的差异面。
  *
- * @param onClick 单击：优先尝试使用已保存的登录态无感同步
+ * @param onClick 单击：直接使用已保存的登录态同步（**不打开登录面板**）
+ * @param onLongClick 长按：打开登录面板（需要重新登录时的入口就藏在这里）
+ * @param loading 同步进行中（含「探测校园网 / 静默登录 / 换票」这几秒）：显示进度圈，
+ *   让「点了没反应」变成「正在干活」——校外的探测只能靠超时收场，这段等待必须有反馈
  * @param hazeState 背景模糊源；传入时按钮采用与导航栏一致的 Liquid Glass 毛玻璃样式
  */
 @Composable
@@ -80,6 +85,9 @@ fun WbuSyncActionButton(
     modifier: Modifier = Modifier,
     hazeState: HazeState? = null,
     contentColor: Color? = null,
+    onLongClick: (() -> Unit)? = null,
+    onLongClickLabel: String? = null,
+    loading: Boolean = false,
 ) {
     val isDark = LocalIsDarkTheme.current
     val shape = RoundedCornerShape(16.dp)
@@ -89,14 +97,33 @@ fun WbuSyncActionButton(
             .padding(end = 8.dp)
             .size(48.dp)
             .then(liquidGlassSurfaceModifier(hazeState, shape))
-            .clickable(onClick = onClick),
+            .then(
+                if (onLongClick != null) {
+                    // 长按 = 打开登录面板；单击 = 直接同步。两者都要能说清楚，所以带上无障碍标签。
+                    Modifier.combinedClickable(
+                        onLongClickLabel = onLongClickLabel,
+                        onLongClick = onLongClick,
+                        onClick = onClick
+                    )
+                } else {
+                    Modifier.clickable(onClick = onClick)
+                }
+            ),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = Icons.Filled.Sync,
-            contentDescription = stringResource(R.string.a11y_sync_wbu_schedule),
-            tint = iconTint
-        )
+        if (loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(24.dp),
+                strokeWidth = 2.dp,
+                color = iconTint
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Filled.Sync,
+                contentDescription = stringResource(R.string.a11y_sync_wbu_schedule),
+                tint = iconTint
+            )
+        }
     }
 }
 @Preview(showBackground = true)

@@ -60,6 +60,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.xingheyuzhuan.shiguangschedule.Destination
 import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.R
+import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
+import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import com.xingheyuzhuan.shiguangschedule.data.model.link.LinkHubFact
 import com.xingheyuzhuan.shiguangschedule.data.model.link.LinkHubNode
 import com.xingheyuzhuan.shiguangschedule.data.model.link.LinkHubOrigin
@@ -94,6 +96,7 @@ fun LinkHubScreen(
     // 是否需要页面外壳（标题栏 + 卡片）。免确认节点从第一帧到跳转全程为 false：
     // 没有外壳就没有「确认页」，也就不存在「闪一道确认页」。
     var shellShown by remember { mutableStateOf(false) }
+    var showAuthSheet by remember { mutableStateOf(false) }
     LaunchedEffect(state) {
         if (state !is LinkHubUiState.Resolving && state !is LinkHubUiState.Applying) shellShown = true
     }
@@ -181,6 +184,8 @@ fun LinkHubScreen(
                     messageRes = current.messageRes,
                     retryable = current.retryable,
                     openInBrowserUrl = current.openInBrowserUrl,
+                    needsLogin = current.needsLogin,
+                    onLogin = { showAuthSheet = true },
                     onRetry = viewModel::retry,
                     onOpenInBrowser = { url -> openInExternalBrowser(context, url) },
                     onBack = { navBridge.popBackStack() }
@@ -192,6 +197,22 @@ fun LinkHubScreen(
                 )
             }
         }
+    }
+
+    // 「重新登录」入口：登录态缺失时以前只能反复点重试，登录成功后自动把刚才的节点再落地一次
+    if (showAuthSheet) {
+        WbuCampusAuthSheet(
+            onDismiss = { showAuthSheet = false },
+            onLoginSuccess = {
+                showAuthSheet = false
+                viewModel.onLoginSuccess()
+            },
+            requireUnifiedCas = true,
+            // 节点落地只需要统一认证会话：不校验校园网、不登录教务
+            unifiedAuthOnly = true,
+            tipsScenario = WbuAuthTipsScenario.IDENTITY,
+            title = stringResource(R.string.title_login_unified_auth)
+        )
     }
 }
 
@@ -428,6 +449,8 @@ private fun FailedBlock(
     @StringRes messageRes: Int,
     retryable: Boolean,
     openInBrowserUrl: String?,
+    needsLogin: Boolean,
+    onLogin: () -> Unit,
     onRetry: () -> Unit,
     onOpenInBrowser: (String) -> Unit,
     onBack: () -> Unit
@@ -452,6 +475,14 @@ private fun FailedBlock(
                 .padding(top = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            if (needsLogin) {
+                Button(
+                    onClick = onLogin,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(stringResource(R.string.action_relogin))
+                }
+            }
             if (retryable) {
                 Button(
                     onClick = onRetry,

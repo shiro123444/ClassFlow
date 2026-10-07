@@ -1,5 +1,6 @@
 package com.xingheyuzhuan.shiguangschedule.ui.settings.credentials
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xingheyuzhuan.shiguangschedule.data.api.webdav.WebDavConfig
@@ -7,9 +8,14 @@ import com.xingheyuzhuan.shiguangschedule.data.repository.WebDavStoredInfo
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.CredentialVerifier
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SessionState
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuCredentialRepository
 import com.xingheyuzhuan.shiguangschedule.data.repository.ApiConfigRepository
+import com.xingheyuzhuan.shiguangschedule.ui.components.shouldAttemptSavedPasswordLogin
+import com.xingheyuzhuan.shiguangschedule.ui.components.silentUnifiedAuthLogin
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -46,6 +52,16 @@ data class ServiceUiState(
 data class CredentialUiState(
     val services: List<ServiceUiState> = emptyList(),
     val autoVerify: Boolean = true,
+    /**
+     * 「自动使用保存的密码登录」（默认开）：开启后，以前「没有会话就直接甩登录面板 / 直接说未登录」
+     * 的场景也先用保存的密码静默登录一次；关掉即回到加这个开关之前的行为。
+     */
+    val autoLoginWithSavedPassword: Boolean = true,
+    /**
+     * 「自动校园网探测」（默认开，仅「使用 WebVPN」开启时显示）：
+     * 需要校园网的功能先用快速探测判断是否在校园网内，在校园网内就直接连接、不绕 WebVPN。
+     */
+    val autoCampusProbe: Boolean = true,
     val webDavConfigured: Boolean = false,
     val useVpn: Boolean = false,
     val idsViaWebVpn: Boolean = false,
@@ -69,6 +85,7 @@ private data class VerifyState(val verifying: Boolean = false, val state: Sessio
  */
 @HiltViewModel
 class CredentialManagementViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val wbuRepository: WbuCredentialRepository,
     private val verifier: CredentialVerifier,
     private val apiConfigRepository: ApiConfigRepository,
@@ -104,14 +121,45 @@ class CredentialManagementViewModel @Inject constructor(
             initialValue = CredentialUiState()
         )
 
-    /** 进入页面：刷新本地状态，并按开关决定是否自动验证。 */
+    /** 进入页面：刷新本地状态；开了「自动使用保存的密码登录」就先静默补上失效的会话，再自动验证。 */
     fun onScreenEnter() {
         refreshTrigger.update { it + 1 }
-        if (wbuRepository.isAutoVerifyEnabled()) verifyAll()
+        viewModelScope.launch {
+            rebuildSessionIfNeeded()
+            if (wbuRepository.isAutoVerifyEnabled()) verifyAll()
+        }
+    }
+
+    /**
+     * 「自动使用保存的密码登录」：进页面时先悄悄把失效的统一认证会话补回来。
+     *
+     * 本页以前只做只读校验，于是「会话其实早就过期了」也只显示成一排「未登录」，
+     * 用户还得自己去点登录。现在只要本机存着密码，进来就把会话建好，下面的校验才是有意义的。
+     *
+     * 只在「确实需要重建」时才动手（开关关着、本机没存密码、本地会话还有效，都什么都不做），
+     * 静默登录期间的弹窗（门禁密码 / 短信 / 图形校验）走进程级小窗。
+     */
+    private suspend fun rebuildSessionIfNeeded() {
+        if (!shouldAttemptSavedPasswordLogin(context)) return
+        val useVpn = wbuRepository.isUseVpn()
+        if (WbuAuthTransport.hasLocalSession(context, CredentialService.UNIFIED_AUTH, useVpn = useVpn)) return
+        silentUnifiedAuthLogin(
+            context = context,
+            flowTag = "CREDENTIALS",
+            viaWebVpn = WbuAuthTransport.getIdsViaWebVpn(context),
+            // 上面已经确认存着密码，这里再兜一层：绝不因为「缺密码」在本页弹窗
+            onlyWithSavedPassword = true
+        )
     }
 
     fun setAutoVerify(enabled: Boolean) {
         wbuRepository.setAutoVerifyEnabled(enabled)
+        refreshTrigger.update { it + 1 }
+    }
+
+    /** 切换「自动使用保存的密码登录」。 */
+    fun setAutoLoginWithSavedPassword(enabled: Boolean) {
+        wbuRepository.setAutoLoginWithSavedPasswordEnabled(enabled)
         refreshTrigger.update { it + 1 }
     }
 
@@ -148,6 +196,18 @@ class CredentialManagementViewModel @Inject constructor(
     /** 跳过校园网检测。 */
     fun setSkipCampusCheck(enabled: Boolean) {
         wbuRepository.setSkipCampusCheck(enabled)
+        refreshTrigger.update { it + 1 }
+    }
+
+    /**
+     * 切换「自动校园网探测」。
+     *
+     * 关掉后也可以顺手把那次快速探测的缓存忘了：用户刚改完设置，下一次访问理应重新判断，
+     * 而不是继续用 15s 内的旧结果。
+     */
+    fun setAutoCampusProbe(enabled: Boolean) {
+        wbuRepository.setAutoCampusProbeEnabled(enabled)
+        WbuNetworkProbe.invalidateFastCache()
         refreshTrigger.update { it + 1 }
     }
 
@@ -404,6 +464,7 @@ class CredentialManagementViewModel @Inject constructor(
         return CredentialUiState(
             services = services,
             autoVerify = wbuRepository.isAutoVerifyEnabled(),
+            autoLoginWithSavedPassword = wbuRepository.isAutoLoginWithSavedPasswordEnabled(),
             webDavConfigured = cfg != null,
             useVpn = wbuRepository.isUseVpn(),
             idsViaWebVpn = wbuRepository.isIdsViaWebVpn(),
@@ -411,6 +472,7 @@ class CredentialManagementViewModel @Inject constructor(
             useHttpsWebVpn = wbuRepository.isUseHttpsWebVpn(),
             usePcUserAgent = wbuRepository.isUsePcUserAgent(),
             skipCampusCheck = wbuRepository.isSkipCampusCheck(),
+            autoCampusProbe = wbuRepository.isAutoCampusProbeEnabled(),
             selectSemesterOnImport = wbuRepository.isSelectSemesterOnImport(),
             keepTeacherId = wbuRepository.isKeepTeacherId(),
             keepBuilding = wbuRepository.isKeepBuilding(),

@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -511,6 +512,7 @@ fun SettingTile(
     modifier: Modifier = Modifier,
     contentHighlightModifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
     titleBadge: @Composable (() -> Unit)? = null,
     trailingContent: @Composable (() -> Unit)? = {
         val dark = LocalIsDarkTheme.current
@@ -551,7 +553,17 @@ fun SettingTile(
                 brush = Brush.verticalGradient(listOf(tileBorderTop, tileBorderBottom)),
                 shape = RoundedCornerShape(16.dp)
             )
-            .clickable(enabled = onClick != null) { onClick?.invoke() }
+            .then(
+                // 长按是可选能力：只有传了 onLongClick 的卡片才占用长按手势，其余保持原样
+                if (onLongClick != null) {
+                    Modifier.combinedClickable(
+                        onClick = { onClick?.invoke() },
+                        onLongClick = onLongClick
+                    )
+                } else {
+                    Modifier.clickable(enabled = onClick != null) { onClick?.invoke() }
+                }
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

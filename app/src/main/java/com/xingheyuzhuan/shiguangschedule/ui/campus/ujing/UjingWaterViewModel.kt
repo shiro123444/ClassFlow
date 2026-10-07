@@ -6,15 +6,17 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.xingheyuzhuan.shiguangschedule.data.model.wbu.CredentialService
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessLayer
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingMqttClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuCampusCardClient
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuFailureDetector
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSessionExpiredException
-import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuUjingClient
-import com.xingheyuzhuan.shiguangschedule.ui.components.WbuAuthPromptRequest
-import kotlinx.coroutines.CompletableDeferred
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.needsRelogin
+import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
+import com.xingheyuzhuan.shiguangschedule.ui.components.silentUnifiedAuthLogin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -24,7 +26,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 sealed interface UjingWaterUiStage {
     data object Splash : UjingWaterUiStage
@@ -97,13 +98,6 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
     private var currentCd: String = ""
     private var hasStarted: Boolean = false
 
-    /** 静默登录时向 UI 索取的补充输入（WebVPN 密码 / 短信验证码），null 表示当前无需输入。 */
-    private val _authPrompt = MutableStateFlow<WbuAuthPromptRequest?>(null)
-    val authPrompt: StateFlow<WbuAuthPromptRequest?> = _authPrompt.asStateFlow()
-
-    private var authPromptDeferred: CompletableDeferred<String?>? = null
-    private var silentLoginEngine: WbuSyncEngine? = null
-
     /**
      * 启动饮水机扫码出水全流程。
      */
@@ -160,18 +154,20 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
                 _uiState.update { it.copy(stage = UjingWaterUiStage.Loading(getApplication<Application>().getString(R.string.status_verifying_campus_card))) }
                 val platformToken = runCatching { cardClient.ensureValidAccessToken() }.getOrElse { e ->
                     if (e is WbuSessionExpiredException || e.message?.contains("失效") == true) {
-                        // 尝试静默使用已保存的统一认证密码登录
-                        val autoLoginOk = trySilentUnifiedAuthLogin()
-                        if (autoLoginOk) {
-                            // 静默登录成功，再次获取 access_token
-                            runCatching { cardClient.ensureValidAccessToken() }.getOrElse { secondErr ->
-                                Log.w(TAG, "Re-fetch platform token after silent login failed", secondErr)
-                                _uiState.update { it.copy(needLogin = true) }
-                                return@launch
-                            }
-                        } else {
-                            // 无密码或静默登录失败，降级弹起登录 Sheet
-                            _uiState.update { it.copy(needLogin = true) }
+                        // 会话失效：用保存的密码静默重登一次，再换一次平台票（都发生在下单之前）
+                        val failure = silentLogin(
+                            app = getApplication(),
+                            stageText = getApplication<Application>().getString(R.string.status_login_saved_credentials)
+                        )
+                        if (failure != null) {
+                            showLoginOrError(failure)
+                            return@launch
+                        }
+                        runCatching { cardClient.ensureValidAccessToken() }.getOrElse { secondErr ->
+                            Log.w(TAG, "Re-fetch platform token after silent login failed", secondErr)
+                            showLoginOrError(
+                                WbuFailureDetector.fromThrowable(secondErr, AccessLayer.CampusDirect)
+                            )
                             return@launch
                         }
                     } else {
@@ -357,95 +353,48 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
-     * 尝试使用已保存的统一认证凭据进行后台静默登录。
+     * 用保存的密码静默登录统一认证（缺 WebVPN 门禁密码 / 短信验证码 / 图形校验时就地弹小窗）。
      *
      * 调用时机：先让 `WbuCampusCardClient.ensureValidAccessToken()` 复用仍然有效的 **CASTGC**（免密换票），
-     * 只有它缺失 / 失效时才走到这里；这里再失败（没保存密码、需要滑块、用户取消）才把 `needLogin`
-     * 交给 UI 弹登录 Sheet。
+     * 只有它缺失 / 失效时才走到这里。
      *
-     * 经 WebVPN 时：本地存了 WebVPN 密码就直接用，没存则弹小窗让用户补一次门禁密码 + 短信验证码，
-     * 补了还是不行才回落到 Sheet —— 全程只影响这一条静默链路，不会把主界面顶掉。
+     * 实现统一交给 [silentUnifiedAuthLogin]：小窗走进程级通道（不再占用本页状态），失败原因也是结构化的，
+     * 于是「只有确实要用户补新凭据才弹登录 Sheet」这条规则在本页同样成立。
      */
-    private suspend fun trySilentUnifiedAuthLogin(): Boolean {
+    private suspend fun silentLogin(app: Application, stageText: String): AccessFailure? {
+        _uiState.update { it.copy(stage = UjingWaterUiStage.Loading(stageText)) }
+        // 是否经 WebVPN 只由「统一认证经过WebVPN」决定：没开就完全不牵扯 WebVPN
+        // （本项目里 /w/ 是直连服务，本来也不需要校园网）
+        return silentUnifiedAuthLogin(
+            context = app,
+            flowTag = "UJING_WATER",
+            viaWebVpn = WbuAuthTransport.getIdsViaWebVpn(app),
+            // 本机没存密码就别弹小窗问：直接回落到登录 Sheet（本页的老行为）
+            onlyWithSavedPassword = true
+        )
+    }
+
+    /**
+     * 静默登录失败后的收尾。
+     *
+     * **只有**「会话失效 / 凭据被拒」才把用户请去登录 Sheet；用户取消小窗、网络不通、服务端异常
+     * 都只留一条可重试的说明 —— 以前这里任何失败都会弹 Sheet，用户在小窗上点个取消也会被顶一脸登录框。
+     */
+    private fun showLoginOrError(failure: AccessFailure) {
         val app = getApplication<Application>()
-        val studentId = WbuAuthTransport.getSavedStudentId(app)
-        val password = WbuAuthTransport.getSavedPassword(app, CredentialService.UNIFIED_AUTH)
-
-        if (studentId.isBlank() || password.isNullOrBlank()) {
-            Log.d(TAG, "No saved unified auth credentials found for silent login")
-            return false
+        if (failure.needsRelogin) {
+            _uiState.update { it.copy(needLogin = true) }
+            return
         }
-
-        return try {
-            _uiState.update { it.copy(stage = UjingWaterUiStage.Loading(app.getString(R.string.status_login_saved_credentials))) }
-            // 是否经 WebVPN 只由「统一认证经过WebVPN」决定：没开就完全不牵扯 WebVPN
-            // （本项目里 /w/ 是直连服务，本来也不需要校园网）
-            val viaWebVpn = WbuAuthTransport.getIdsViaWebVpn(app)
-            val engine = WbuSyncEngine(app, useVpn = viaWebVpn)
-            silentLoginEngine = engine
-            val success = engine.loginUnifiedAuthOnly(
-                studentId = studentId,
-                password = password,
-                viaWebVpn = viaWebVpn,
-                flowTag = "UJING_WATER_AUTO_AUTH",
-                vpnPasswordProvider = {
-                    WbuAuthTransport.getSavedVpnPassword(app)?.takeIf { it.isNotBlank() }
-                        ?: requestAuthPrompt(WbuAuthPromptRequest.VpnPassword)
-                },
-                smsCodeProvider = { maskedPhone, isStillValid, sendInterval, promptText ->
-                    requestAuthPrompt(
-                        WbuAuthPromptRequest.SmsCode(
-                            maskedPhone = maskedPhone,
-                            isStillValid = isStillValid,
-                            sendInterval = sendInterval,
-                            promptText = promptText
-                        )
-                    )
-                }
+        _uiState.update {
+            it.copy(
+                needLogin = false,
+                stage = UjingWaterUiStage.Error(
+                    accessFailureText(app, failure)
+                        ?: app.getString(R.string.err_need_unified_auth_session)
+                )
             )
-            Log.i(TAG, "Silent unified auth login result: $success")
-            success
-        } catch (e: Exception) {
-            Log.w(TAG, "Silent unified auth login failed", e)
-            false
-        } finally {
-            silentLoginEngine = null
-            dismissAuthPrompt()
         }
-    }
-
-    /** UI 提交（传 null = 取消）当前补充输入弹窗。 */
-    fun submitAuthPrompt(value: String?) {
-        val deferred = authPromptDeferred
-        authPromptDeferred = null
-        _authPrompt.value = null
-        deferred?.complete(value)
-    }
-
-    /** 短信验证码「重新发送」。 */
-    /** 短信验证码「重新发送」：返回服务端要求的重发冷却秒数（0 = 不限制），失败返回 null。 */
-    suspend fun resendVpnSmsCode(): Int? {
-        val engine = silentLoginEngine ?: return null
-        return runCatching { engine.resendVpnSmsCode() }
-            .onFailure { Log.w(TAG, "重新发送短信验证码失败", it) }
-            .getOrNull()
-            ?.takeIf { it.success }
-            ?.cooldownSeconds
-    }
-
-    /** 向 UI 索取一次补充输入，挂起直到用户提交或取消。 */
-    private suspend fun requestAuthPrompt(request: WbuAuthPromptRequest): String? {
-        val deferred = CompletableDeferred<String?>()
-        withContext(Dispatchers.Main) {
-            authPromptDeferred = deferred
-            _authPrompt.value = request
-        }
-        return deferred.await()
-    }
-
-    private fun dismissAuthPrompt() {
-        authPromptDeferred = null
-        _authPrompt.value = null
     }
 
     fun onLoginSuccess() {

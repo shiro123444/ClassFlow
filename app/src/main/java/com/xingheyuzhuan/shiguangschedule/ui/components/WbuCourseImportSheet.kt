@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,10 +30,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.xingheyuzhuan.shiguangschedule.R
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.resolveCampusUseVpn
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import com.xingheyuzhuan.shiguangschedule.ui.settings.coursetables.ManageCourseTablesViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 
@@ -41,11 +45,17 @@ import kotlinx.coroutines.launch
  *
  * 登录部分复用 [WbuCampusAuthSheet]（内建 WebVPN 门户登录、短信二次验证、滑块验证码与二维码），
  * 本组件只负责导入管线、学期选择器与重复/多教师冲突课程处理。
+ *
+ * @param startWithoutLogin 「单击导入」模式（默认关闭）：**不显示登录面板**，直接用保存的凭据 /
+ *   现有会话跑一遍导入，需要重新登录时回调 [onNeedLogin]。面板模式的入口是长按。
+ * @param onNeedLogin [startWithoutLogin] 模式下静默登录不成功时的回调（参数为结构化失败原因）。
  */
 @Composable
 fun WbuCourseImportSheet(
     onDismissRequest: () -> Unit,
     onImportSuccess: ((tableName: String) -> Unit)? = null,
+    startWithoutLogin: Boolean = false,
+    onNeedLogin: ((AccessFailure?) -> Unit)? = null,
     viewModel: ManageCourseTablesViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -167,15 +177,13 @@ fun WbuCourseImportSheet(
         return true
     }
 
-    /** 登录成功后：用刚建立的会话来跑导入管线。 */
-    val startImportAfterLogin: () -> Unit = {
+    /** 用给定会话跑导入管线（登录面板点「一键同步」与「单击导入」共用）。 */
+    fun launchImportPipeline(engine: WbuSyncEngine) {
         coroutineScope.launch {
             try {
                 isImporting = true
                 importStatusMessage = context.getString(R.string.status_fetching_schedule)
                 importErrorMessage = ""
-                val useVpn = WbuSyncEngine.getSavedUseVpn(context) ?: false
-                val engine = WbuSyncEngine(context = context, useVpn = useVpn)
                 runDirectImportPipeline(engine, WbuSyncEngine.getSavedStudentId(context))
             } catch (e: Exception) {
                 isImporting = false
@@ -185,18 +193,68 @@ fun WbuCourseImportSheet(
         }
     }
 
-    WbuCampusAuthSheet(
-        onDismiss = { if (!isImporting) onDismissRequest() },
-        onLoginSuccess = { startImportAfterLogin() },
-        dismissOnSuccess = false,
-        hideImportPreferences = false,
-        tipsScenario = WbuAuthTipsScenario.IMPORT,
-        primaryButtonText = stringResource(R.string.action_one_tap_sync),
-        loadingButtonText = stringResource(R.string.status_fetching_schedule),
-        externalLoading = isImporting,
-        externalStatusMessage = importStatusMessage,
-        externalErrorMessage = importErrorMessage
-    )
+    if (startWithoutLogin) {
+        // 「单击导入」：**不显示登录面板**，直接用保存的凭据 / 现有会话导入一遍。
+        // 需要重新登录时只回调一句（登录面板的入口是长按），不把用户直接推到面板前。
+        LaunchedEffect(Unit) {
+            val failure = prepareWbuImportWithSavedPassword(context, "COURSE_IMPORT")
+            if (failure != null) {
+                onNeedLogin?.invoke(failure)
+                onDismissRequest()
+                return@LaunchedEffect
+            }
+            // 需要校园网：开了「自动校园网探测」且人在校园网内就直连
+            val useVpn = resolveCampusUseVpn(context, WbuSyncEngine.getSavedUseVpn(context))
+            val engine = WbuSyncEngine(context = context, useVpn = useVpn)
+            val completed = try {
+                // 现有会话可能只是「看着还在」（WebVPN 门禁 TWFID 过期尤其常见）：不行就用保存的密码
+                // 静默登录一次，而不是等上几秒之后把用户叫去登录面板。
+                val sessionFailure = prepareJiaowuSessionForSync(context, engine, "COURSE_IMPORT")
+                if (sessionFailure != null) {
+                    onNeedLogin?.invoke(sessionFailure)
+                    onDismissRequest()
+                    return@LaunchedEffect
+                }
+                isImporting = true
+                importStatusMessage = context.getString(R.string.status_fetching_schedule)
+                importErrorMessage = ""
+                runDirectImportPipeline(engine, WbuSyncEngine.getSavedStudentId(context))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                importErrorMessage = context.getString(R.string.format_err_import_exception, e.message ?: "")
+                false
+            } finally {
+                isImporting = false
+                importStatusMessage = ""
+            }
+            // 没有面板可以显示过程与错误：失败原因用一条 Toast 说清楚再收工
+            if (!completed) {
+                if (importErrorMessage.isNotBlank()) {
+                    Toast.makeText(context, importErrorMessage, Toast.LENGTH_LONG).show()
+                    importErrorMessage = ""
+                }
+                onDismissRequest()
+            }
+        }
+    } else {
+        WbuCampusAuthSheet(
+            onDismiss = { if (!isImporting) onDismissRequest() },
+            onLoginSuccess = {
+                launchImportPipeline(
+                    WbuSyncEngine(context = context, useVpn = WbuSyncEngine.getSavedUseVpn(context))
+                )
+            },
+            dismissOnSuccess = false,
+            hideImportPreferences = false,
+            tipsScenario = WbuAuthTipsScenario.IMPORT,
+            primaryButtonText = stringResource(R.string.action_one_tap_sync),
+            loadingButtonText = stringResource(R.string.status_fetching_schedule),
+            externalLoading = isImporting,
+            externalStatusMessage = importStatusMessage,
+            externalErrorMessage = importErrorMessage
+        )
+    }
 
     // 学期选择弹窗
     semesterSelectDeferred?.let { deferred ->

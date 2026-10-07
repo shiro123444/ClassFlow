@@ -52,6 +52,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.PortalCaptchaData
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.PortalCaptchaResult
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaData
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaResult
 
 /**
  * 静默登录过程中需要用户**就地补一次输入**时的请求。
@@ -78,6 +82,50 @@ sealed interface WbuAuthPromptRequest {
         val sendInterval: Int,
         val promptText: String
     ) : WbuAuthPromptRequest
+}
+
+/**
+ * 静默登录过程中需要用户**就地过一次人机校验**时的请求。
+ *
+ * 为什么和 [WbuAuthPromptRequest] 分开：那类的答案是「一段文字」，这类的答案是「拖一下 / 认一张图」，
+ * 答案类型不同，硬塞进同一个 sealed 接口只会让每个渲染端都要处理一份用不上的 `onSubmit(String)`。
+ *
+ * 人机校验不是密码错：走到这里**不许**清掉任何已保存的密码，用户补一次校验就能继续。
+ */
+sealed interface WbuAuthPromptChallenge {
+
+    /** 统一认证要求滑块验证。 */
+    data class Slider(val captcha: SliderCaptchaData) : WbuAuthPromptChallenge
+
+    /** WebVPN 门户要求图形验证码。 */
+    data class PortalCaptcha(val captcha: PortalCaptchaData) : WbuAuthPromptChallenge
+}
+
+/**
+ * 渲染当前的 [challenge]（null 表示没有待完成的校验）。
+ *
+ * 取消也要回报：[onSlider] 收 [SliderCaptchaResult.Cancel]，[onPortalCaptcha] 收 [PortalCaptchaResult.Cancel]。
+ */
+@Composable
+fun WbuAuthPromptChallengeDialogs(
+    challenge: WbuAuthPromptChallenge?,
+    onSlider: (SliderCaptchaResult) -> Unit,
+    onPortalCaptcha: (PortalCaptchaResult) -> Unit
+) {
+    when (challenge) {
+        null -> Unit
+        is WbuAuthPromptChallenge.Slider -> SliderCaptchaDialog(
+            captcha = challenge.captcha,
+            onSubmit = onSlider,
+            onDismiss = { onSlider(SliderCaptchaResult.Cancel) }
+        )
+        is WbuAuthPromptChallenge.PortalCaptcha -> PortalCaptchaDialog(
+            captcha = challenge.captcha,
+            onSubmit = { onPortalCaptcha(PortalCaptchaResult.Submit(it)) },
+            onRefresh = { onPortalCaptcha(PortalCaptchaResult.Refresh) },
+            onDismiss = { onPortalCaptcha(PortalCaptchaResult.Cancel) }
+        )
+    }
 }
 
 /**
@@ -367,33 +415,76 @@ object WbuAuthPromptBus {
     /** 当前待补输入的请求，null 表示没有。 */
     val request: StateFlow<WbuAuthPromptRequest?> = _request.asStateFlow()
 
-    private var pending: CompletableDeferred<String?>? = null
+    private val _challenge = MutableStateFlow<WbuAuthPromptChallenge?>(null)
+
+    /** 当前待完成的人机校验（滑块 / 门户图形码），null 表示没有。 */
+    val challenge: StateFlow<WbuAuthPromptChallenge?> = _challenge.asStateFlow()
+
+    private var pendingText: CompletableDeferred<String?>? = null
+    private var pendingSlider: CompletableDeferred<SliderCaptchaResult>? = null
+    private var pendingPortalCaptcha: CompletableDeferred<PortalCaptchaResult>? = null
 
     /**
-     * 串行化补输入：弹窗本身是模态的，同时来两个请求只会互相覆盖 ——
-     * 旧的 `pending` 会被后一个覆盖，前一个 `ask` 永远等不到结果；而且 `finally` 还会把界面上的新请求一起清掉。
+     * 串行化就地问答：弹窗本身是模态的，同时来两个请求只会互相覆盖 ——
+     * 旧的挂起者会被后一个覆盖，前面的 `ask*` 永远等不到结果；而且 `finally` 还会把界面上的新请求一起清掉。
      */
     private val mutex = Mutex()
 
     /** 短信重发钩子：由发起方在调用前注入。 */
     var onResendSmsCode: (suspend () -> Int?)? = null
 
-    /** 挂起等待用户输入；返回 null 表示用户取消。 */
+    /** 挂起等待用户输入文本；返回 null 表示用户取消。 */
     suspend fun ask(request: WbuAuthPromptRequest): String? = mutex.withLock {
         val deferred = CompletableDeferred<String?>()
-        pending = deferred
+        pendingText = deferred
         _request.value = request
         try {
             deferred.await()
         } finally {
-            pending = null
+            pendingText = null
             _request.value = null
         }
     }
 
-    /** UI 提交结果（取消传 null）。 */
+    /** 挂起等待用户完成滑块验证；返回 [SliderCaptchaResult.Cancel] 表示用户取消。 */
+    suspend fun askSlider(captcha: SliderCaptchaData): SliderCaptchaResult = mutex.withLock {
+        val deferred = CompletableDeferred<SliderCaptchaResult>()
+        pendingSlider = deferred
+        _challenge.value = WbuAuthPromptChallenge.Slider(captcha)
+        try {
+            deferred.await()
+        } finally {
+            pendingSlider = null
+            _challenge.value = null
+        }
+    }
+
+    /** 挂起等待用户辨认门户图形验证码；返回 [PortalCaptchaResult.Cancel] 表示用户取消。 */
+    suspend fun askPortalCaptcha(captcha: PortalCaptchaData): PortalCaptchaResult = mutex.withLock {
+        val deferred = CompletableDeferred<PortalCaptchaResult>()
+        pendingPortalCaptcha = deferred
+        _challenge.value = WbuAuthPromptChallenge.PortalCaptcha(captcha)
+        try {
+            deferred.await()
+        } finally {
+            pendingPortalCaptcha = null
+            _challenge.value = null
+        }
+    }
+
+    /** UI 提交文本结果（取消传 null）。 */
     fun submit(value: String?) {
-        pending?.complete(value)
+        pendingText?.complete(value)
+    }
+
+    /** UI 提交滑块结果。 */
+    fun submitSlider(result: SliderCaptchaResult) {
+        pendingSlider?.complete(result)
+    }
+
+    /** UI 提交门户图形验证码结果。 */
+    fun submitPortalCaptcha(result: PortalCaptchaResult) {
+        pendingPortalCaptcha?.complete(result)
     }
 }
 
@@ -401,9 +492,15 @@ object WbuAuthPromptBus {
 @Composable
 fun WbuAuthPromptHost() {
     val request by WbuAuthPromptBus.request.collectAsState()
+    val challenge by WbuAuthPromptBus.challenge.collectAsState()
     WbuAuthPromptDialogs(
         request = request,
         onSubmit = { WbuAuthPromptBus.submit(it) },
         onResendSmsCode = { WbuAuthPromptBus.onResendSmsCode?.invoke() }
+    )
+    WbuAuthPromptChallengeDialogs(
+        challenge = challenge,
+        onSlider = { WbuAuthPromptBus.submitSlider(it) },
+        onPortalCaptcha = { WbuAuthPromptBus.submitPortalCaptcha(it) }
     )
 }

@@ -32,7 +32,14 @@ sealed interface LinkHubApplyResult {
     data class Failed(
         @StringRes val messageRes: Int,
         /** 是否值得让用户点「重试」（网络类、登录态类失败为 true）。 */
-        val retryable: Boolean = false
+        val retryable: Boolean = false,
+        /**
+         * 失败原因是「本机没有统一认证会话」。
+         *
+         * 上层据此用保存的密码静默登一次再重来 —— 登录态是用户**自己动手就能解决**的那类问题，
+         * 网络类失败重试即可，不该顺手把用户推进登录面板。
+         */
+        val needsLogin: Boolean = false
     ) : LinkHubApplyResult
 }
 

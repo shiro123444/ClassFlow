@@ -195,7 +195,7 @@ class WbuCredentialRepository @Inject constructor(
 
     /** 尽力发起服务端退出登录（失败忽略，本地仍会清理）。 */
     private suspend fun attemptServerLogout(service: CredentialService) = withContext(Dispatchers.IO) {
-        val useVpn = WbuSyncEngine.getSavedUseVpn(context) ?: false
+        val useVpn = WbuSyncEngine.getSavedUseVpn(context)
         val transport = WbuAuthTransport.getShared(context, useVpn)
         when (service) {
             // 统一认证：吊销 CASTGC（服务端 TGT）
@@ -263,8 +263,18 @@ class WbuCredentialRepository @Inject constructor(
     fun setAutoVerifyEnabled(enabled: Boolean) =
         WbuAuthTransport.setCredentialAutoVerifyEnabled(context, enabled)
 
+    /**
+     * 「自动使用保存的密码登录」：开启后，以前会直接甩登录面板 / 直接说未登录的场景，
+     * 也先用保存的密码静默登录一次。默认开。
+     */
+    fun isAutoLoginWithSavedPasswordEnabled(): Boolean =
+        WbuAuthTransport.isAutoLoginWithSavedPasswordEnabled(context)
+
+    fun setAutoLoginWithSavedPasswordEnabled(enabled: Boolean) =
+        WbuAuthTransport.setAutoLoginWithSavedPasswordEnabled(context, enabled)
+
     /** 当前网络接入模式：true = WebVPN（校外），false = 校园网直连。 */
-    fun isUseVpn(): Boolean = WbuSyncEngine.getSavedUseVpn(context) ?: false
+    fun isUseVpn(): Boolean = WbuSyncEngine.getSavedUseVpn(context)
 
     fun setUseVpn(enabled: Boolean) = WbuSyncEngine.setSavedUseVpn(context, enabled)
 
@@ -292,6 +302,15 @@ class WbuCredentialRepository @Inject constructor(
     fun isSkipCampusCheck(): Boolean = WbuSyncEngine.getSkipCampusCheck(context)
 
     fun setSkipCampusCheck(enabled: Boolean) = WbuSyncEngine.setSkipCampusCheck(context, enabled)
+
+    /**
+     * 「自动校园网探测」（账号与凭据页，默认开，仅 WebVPN 模式下显示）：
+     * 需要校园网的流程先用快速探测判断是否在校园网内，在校园网内就直接连接、不绕 WebVPN。
+     */
+    fun isAutoCampusProbeEnabled(): Boolean = WbuAuthTransport.isAutoCampusProbeEnabled(context)
+
+    fun setAutoCampusProbeEnabled(enabled: Boolean) =
+        WbuAuthTransport.setAutoCampusProbeEnabled(context, enabled)
 
     /** 「高级模式」开关（跨页面记住）。 */
     fun isAdvancedMode(): Boolean = WbuAuthTransport.getCredentialAdvancedMode(context)

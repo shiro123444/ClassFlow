@@ -20,6 +20,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -31,6 +34,8 @@ import com.xingheyuzhuan.shiguangschedule.Destination
 import com.xingheyuzhuan.shiguangschedule.NavBridge
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId
+import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
+import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
 import com.xingheyuzhuan.shiguangschedule.ui.components.WbuLoadingPlaceholder
 
 /**
@@ -54,6 +59,7 @@ fun ShowerDirectScreen(
     viewModel: ShowerDirectViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
+    var showAuthSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(system, code, port) { viewModel.start(system, code, port) }
 
@@ -90,10 +96,28 @@ fun ShowerDirectScreen(
             is ShowerDirectUiState.Failed -> FailedBlock(
                 messageRes = current.messageRes,
                 retryable = current.retryable,
+                needsLogin = current.needsLogin,
+                onLogin = { showAuthSheet = true },
                 onRetry = viewModel::retry,
                 onExit = { navBridge.popBackStack() }
             )
         }
+    }
+
+    // 「重新登录」入口：以前登录态失效只给「重试」，用户点多少次看到的都是同一句提示。
+    if (showAuthSheet) {
+        WbuCampusAuthSheet(
+            onDismiss = { showAuthSheet = false },
+            onLoginSuccess = {
+                showAuthSheet = false
+                viewModel.onLoginSuccess()
+            },
+            requireUnifiedCas = true,
+            // 设备直达只需统一认证会话：不校验校园网、不登录教务，网络开关随「统一认证经过WebVPN」显隐
+            unifiedAuthOnly = true,
+            tipsScenario = WbuAuthTipsScenario.IDENTITY,
+            title = stringResource(R.string.title_login_unified_auth)
+        )
     }
 }
 
@@ -101,6 +125,8 @@ fun ShowerDirectScreen(
 private fun FailedBlock(
     messageRes: Int,
     retryable: Boolean,
+    needsLogin: Boolean,
+    onLogin: () -> Unit,
     onRetry: () -> Unit,
     onExit: () -> Unit
 ) {
@@ -127,6 +153,11 @@ private fun FailedBlock(
                 textAlign = TextAlign.Center
             )
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (needsLogin) {
+                    Button(onClick = onLogin) {
+                        Text(stringResource(R.string.action_relogin))
+                    }
+                }
                 if (retryable) {
                     Button(onClick = onRetry) {
                         Text(stringResource(R.string.action_retry))

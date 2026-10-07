@@ -14,6 +14,8 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.ShowerQrLink
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WasherAvailability
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.ui.components.shouldAttemptSavedPasswordLogin
+import com.xingheyuzhuan.shiguangschedule.ui.components.silentUnifiedAuthLogin
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
@@ -182,10 +184,39 @@ class QrScanViewModel @Inject constructor(
 
     init {
         attachSslHandler(engine)
+        autoLoginWithSavedPasswordIfNeeded()
+    }
+
+    /**
+     * 「自动使用保存的密码登录」（账号与凭据页，默认开）：本机没有统一认证会话、
+     * 但确实存着统一认证密码时，进页面就先静默登录一次，登上了直接进扫码态 ——
+     * 以前这里会显示「需要登录」，得用户自己先手动登录一次。
+     *
+     * 只在**确实存着密码**时尝试：没存密码就保持原有的登录入口，不弹任何东西 ——
+     * 这条新增路径的语义是「用保存的密码」，不是「每次都问一遍密码」。
+     * 静默过程中的小窗（密码 / 短信 / 图形码）会就地弹出；失败则什么都不改，用户看到的还是原来的「需要登录」。
+     */
+    private fun autoLoginWithSavedPasswordIfNeeded() {
+        if (engine.hasUnifiedAuthSession()) return
+        if (!shouldAttemptSavedPasswordLogin(context)) return
+        viewModelScope.launch {
+            val failure = silentUnifiedAuthLogin(
+                context = context,
+                flowTag = "QR_SCAN",
+                viaWebVpn = WbuAuthTransport.getIdsViaWebVpn(context),
+                // 上面已确认存着密码：绝不因为「缺密码」在进页面时弹窗
+                onlyWithSavedPassword = true
+            )
+            // 静默登录换掉了进程级 Cookie 罐里的会话，本页的 engine 要重建才能看到新的 CASTGC
+            engine = createEngine().also { attachSslHandler(it) }
+            if (failure == null && engine.hasUnifiedAuthSession()) {
+                _state.value = QrScanUiState.Scanning
+            }
+        }
     }
 
     private fun createEngine(): WbuSyncEngine =
-        WbuSyncEngine(context, WbuSyncEngine.getSavedUseVpn(context) ?: false)
+        WbuSyncEngine(context, WbuSyncEngine.getSavedUseVpn(context))
 
     private fun attachSslHandler(target: WbuSyncEngine) {
         target.sslIssueHandler = { message ->

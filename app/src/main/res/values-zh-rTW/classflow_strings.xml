@@ -663,6 +663,8 @@
     <string name="section_credential_verify">驗證</string>
     <string name="item_auto_verify">自動驗證工作階段</string>
     <string name="desc_auto_verify">進入本頁時自動連網核驗各服務的登入狀態；關閉後僅顯示本機狀態</string>
+    <string name="item_auto_login_saved_password">自動使用已儲存的密碼登入</string>
+    <string name="desc_auto_login_saved_password">工作階段失效時直接用已儲存的密碼登入，不再每次都請你手動登入；關閉後這些情境不會自動登入</string>
     <string name="action_verify_now">立即驗證</string>
     <string name="desc_verify_now">手動核驗全部服務的工作階段有效性</string>
     <string name="service_unified_auth">統一認證</string>
@@ -707,11 +709,15 @@
     <string name="item_session_credentials">工作階段憑據</string>
     <string name="status_no_credentials">無憑據</string>
     <string name="item_webvpn_mode">使用 WebVPN</string>
-    <string name="desc_webvpn_mode">校外存取時開啟；登入與同步將經過 WebVPN 閘道</string>
+    <string name="desc_webvpn_mode">校外存取時開啟（預設開啟）；校園網路內會自動直連，其餘情況經 WebVPN 閘道</string>
+    <string name="item_auto_campus_probe">自動校園網路探測</string>
+    <string name="a11y_long_press_login">長按開啟登入面板</string>
+    <string name="desc_auto_campus_probe">開啟 WebVPN 時，需要校園網路的功能會先用快速探測判斷是否位於校園網路內；在校園網路內就直接連線，不繞 WebVPN</string>
     <string name="item_login">登入</string>
     <string name="desc_login_service">重新登入以更新該服務的授權狀態</string>
     <string name="err_no_valid_credentials">無有效憑據，請先用「登入同步」完成登入</string>
     <string name="err_need_unified_auth_session">尚無有效統一認證憑據，請先用統一認證密碼登入一次</string>
+    <string name="format_need_login_long_press">%1$s（長按按鈕可開啟登入面板）</string>
     <string name="action_go_to_credential_management">前往帳號與憑證</string>
     <string name="action_sync_short">同步</string>
 
@@ -844,6 +850,7 @@
     <string name="msg_retake_drop_success">重修退課成功</string>
     <string name="msg_retake_select_success">重修選課成功</string>
     <string name="msg_retake_drop_failed">重修退課失敗</string>
+    <string name="msg_session_restored_retry">登入狀態已自動恢復，請再點一次</string>
     <string name="msg_retake_select_failed">重修選課失敗</string>
     <string name="status_verifying_campus_card">正在驗證一卡通憑據...</string>
     <string name="status_connecting_ujing">正在連接 U淨 校園飲水...</string>

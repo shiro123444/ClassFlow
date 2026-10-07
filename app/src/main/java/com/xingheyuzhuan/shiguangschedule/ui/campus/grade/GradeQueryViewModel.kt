@@ -58,7 +58,7 @@ class GradeQueryViewModel @Inject constructor(
     private val queryClient
         get() = WbuQueryClient(
             context,
-            useVpn = lastUseVpn ?: (WbuSyncEngine.getSavedUseVpn(context) ?: false)
+            useVpn = lastUseVpn ?: (WbuSyncEngine.getSavedUseVpn(context))
         )
 
     init {
@@ -126,8 +126,8 @@ class GradeQueryViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            needLogin = access.failure.needsRelogin ||
-                                access.failure is AccessFailure.Cancelled,
+                            // 只有「会话失效 / 凭据被拒」才弹登录 Sheet；用户取消小窗安静回落
+                            needLogin = access.failure.needsRelogin,
                             errorMessage = accessFailureText(context, access.failure),
                             offerWebVpnOnce = access.failure.shouldOfferWebVpnOnce(access.useVpn)
                         )

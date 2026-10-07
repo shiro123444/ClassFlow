@@ -25,6 +25,7 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.SliderCaptchaResult
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthMode
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuLoginMethod
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.resolveCampusUseVpn
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.VpnFullLoginStatus
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.PortalCaptchaData
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.PortalCaptchaResult
@@ -110,7 +111,7 @@ fun WbuCampusAuthSheet(
                 // 仅登录统一认证：是否经 WebVPN 由「统一认证经过WebVPN」决定
                 // （该设置关闭时开关不显示，并由 Sheet 强制直连）
                 unifiedAuthOnly -> IdsCasClient.getIdsViaWebVpn(context)
-                else -> WbuSyncEngine.getSavedUseVpn(context) ?: false
+                else -> WbuSyncEngine.getSavedUseVpn(context)
             }
         )
     }
@@ -120,6 +121,20 @@ fun WbuCampusAuthSheet(
     var qrJob by remember { mutableStateOf<Job?>(null) }
 
     var activeVpnEngine by remember { mutableStateOf<WbuSyncEngine?>(null) }
+
+    /** 用户在面板里手动改过接入方式：改过之后就不再让自动探测的结论覆盖他自己的选择。 */
+    var useVpnChosenByUser by remember { mutableStateOf(false) }
+
+    // 「自动校园网探测」也管面板的初始通道：「使用 WebVPN」现在默认开着，人在校园网里时
+    // 面板不该默认把用户推去走 WebVPN（那还得先过门禁、输门户密码），该直连就直连。
+    // 探测结果带短缓存，下面「直连模式下的校园网提示」那次探测会直接复用它，不多等一轮。
+    LaunchedEffect(Unit) {
+        if (webVpnPortalOnly || forceDirectCampus || unifiedAuthOnly) return@LaunchedEffect
+        if (initialUseVpnOverride != null) return@LaunchedEffect
+        if (isLoading || qrState != null) return@LaunchedEffect
+        val resolved = resolveCampusUseVpn(context)
+        if (!useVpnChosenByUser && resolved != initialUseVpn) initialUseVpn = resolved
+    }
 
     // 滑块验证码
     var captchaDialogData by remember { mutableStateOf<SliderCaptchaData?>(null) }
@@ -409,6 +424,7 @@ fun WbuCampusAuthSheet(
             }
         },
         onUseVpnChange = {
+            useVpnChosenByUser = true
             initialUseVpn = it
             // 仅登录统一认证时该开关只描述「本次统一认证是否经 WebVPN」，
             // 不写全局「网络接入模式」，避免影响教务/图书馆等校园服务的接入方式

@@ -63,3 +63,21 @@ fun accessFailureText(
 private fun webVpnOrGeneralCredentialText(context: Context, layer: AccessLayer): String =
     if (layer == AccessLayer.WebVpnPortal) context.getString(R.string.fail_webvpn_credential_rejected)
     else context.getString(R.string.fail_credential_rejected)
+
+/**
+ * 「需要重新登录」的提示文案：在失败原因后面附一句「长按按钮可打开登录面板」。
+ *
+ * 单击同步 / 单击导入**不再弹登录面板**，所以必须在提示里说清楚面板的入口挪到了长按上，
+ * 否则用户只会看到「登录已过期」，却不知道该去哪里登录。
+ *
+ * @param failure null 表示「只知道需要登录、不知道原因」→ 用兜底文案；
+ *   用户自己取消（[accessFailureText] 返回 null）时同样返回 null，让调用方安静收场、不报错。
+ */
+fun needLoginHintText(context: Context, failure: AccessFailure?): String? {
+    val reason = if (failure == null) {
+        context.getString(R.string.err_need_unified_auth_session)
+    } else {
+        accessFailureText(context, failure) ?: return null
+    }
+    return context.getString(R.string.format_need_login_long_press, reason)
+}

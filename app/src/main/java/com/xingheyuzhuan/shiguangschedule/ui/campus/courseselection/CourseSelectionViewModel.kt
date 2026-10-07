@@ -27,7 +27,9 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessLayer
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.needsRelogin
+import com.xingheyuzhuan.shiguangschedule.ui.components.shouldAttemptSavedPasswordLogin
 import com.xingheyuzhuan.shiguangschedule.ui.components.silentUnifiedAuthLogin
 
 /**
@@ -177,13 +179,20 @@ class CourseSelectionViewModel @Inject constructor(
             if (!_uiState.value.mockEnabled &&
                 !WbuAuthTransport.hasLocalSession(getApplication(), CredentialService.JIAOWU, useVpn = false)
             ) {
-                val failure = silentUnifiedAuthLogin(getApplication(), "COURSE_SELECTION", viaWebVpn = false)
+                val failure = silentUnifiedAuthLogin(
+                    getApplication(),
+                    "COURSE_SELECTION",
+                    viaWebVpn = false,
+                    // 选课要的是教务会话：只拿 CASTGC 不够，还得换一次 jw_uf
+                    service = CredentialService.JIAOWU
+                )
                 if (failure != null) {
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             isRefreshing = false,
-                            needLogin = failure.needsRelogin || failure is AccessFailure.Cancelled,
+                            // 只有「会话失效 / 凭据被拒」才弹登录 Sheet；用户取消小窗安静回落
+                            needLogin = failure.needsRelogin,
                             errorMessage = accessFailureText(getApplication(), failure)
                         )
                     }
@@ -409,7 +418,7 @@ class CourseSelectionViewModel @Inject constructor(
                 }
                 .onFailure { err ->
                     _uiState.update { it.copy(opInFlight = false) }
-                    handleFailure(err, R.string.msg_select_course_failed)
+                    handleFailure(err, R.string.msg_select_course_failed, isWrite = true)
                 }
         }
     }
@@ -427,7 +436,7 @@ class CourseSelectionViewModel @Inject constructor(
                 }
                 .onFailure { err ->
                     _uiState.update { it.copy(opInFlight = false) }
-                    handleFailure(err, R.string.msg_drop_course_failed)
+                    handleFailure(err, R.string.msg_drop_course_failed, isWrite = true)
                 }
         }
     }
@@ -445,7 +454,7 @@ class CourseSelectionViewModel @Inject constructor(
                 }
                 .onFailure { err ->
                     _uiState.update { it.copy(opInFlight = false) }
-                    handleFailure(err, R.string.err_cancel_waitlist_failed)
+                    handleFailure(err, R.string.err_cancel_waitlist_failed, isWrite = true)
                 }
         }
     }
@@ -495,7 +504,7 @@ class CourseSelectionViewModel @Inject constructor(
                 }
                 .onFailure { err ->
                     _uiState.update { it.copy(opInFlight = false) }
-                    handleFailure(err, if (drop) R.string.msg_retake_drop_failed else R.string.msg_retake_select_failed)
+                    handleFailure(err, if (drop) R.string.msg_retake_drop_failed else R.string.msg_retake_select_failed, isWrite = true)
                 }
         }
     }
@@ -509,17 +518,69 @@ class CourseSelectionViewModel @Inject constructor(
         _uiState.update { it.copy(needLogin = false) }
     }
 
-    private fun handleFailure(err: Throwable, @StringRes fallbackRes: Int) {
+    /**
+     * 统一的失败收尾。
+     *
+     * 会话失效时**先静默重建一次**（用保存的密码；缺 WebVPN 密码 / 短信验证码 / 图形校验就地补），
+     * 成功则读取类操作直接重载一遍、写操作让用户再点一次（`WbuSessionExpiredException` 意味着
+     * 服务端根本没执行这一步，重试不会重复提交），只有重建也失败（凭据被拒 / 真的要用户补新凭据）
+     * 才弹登录 Sheet。
+     *
+     * 开关关着或本机没存密码时保持老行为：直接引导登录。
+     *
+     * @param isWrite 这一步是否会改动服务端数据（选课 / 退课 / 退选…）
+     */
+    private fun handleFailure(err: Throwable, @StringRes fallbackRes: Int, isWrite: Boolean = false) {
+        val app = getApplication<Application>()
+        val fallback = app.getString(fallbackRes)
         val expired = err is WbuSessionExpiredException
-        val fallback = getApplication<Application>().getString(fallbackRes)
-        _uiState.update {
-            it.copy(
-                isLoading = false,
-                isRefreshing = false,
-                errorMessage = accessFailureText(getApplication(), err) ?: fallback,
-                opMessage = if (expired) null else (accessFailureText(getApplication(), err) ?: fallback),
-                needLogin = expired
-            )
+
+        if (!expired) {
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    isRefreshing = false,
+                    errorMessage = accessFailureText(app, err) ?: fallback,
+                    opMessage = accessFailureText(app, err) ?: fallback,
+                    needLogin = false
+                )
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            val failure = if (shouldAttemptSavedPasswordLogin(app)) {
+                silentUnifiedAuthLogin(
+                    app,
+                    "COURSE_SELECTION",
+                    viaWebVpn = false,
+                    service = CredentialService.JIAOWU
+                )
+            } else {
+                AccessFailure.SessionExpired(AccessLayer.UnifiedAuth)
+            }
+
+            if (failure != null) {
+                val text = accessFailureText(app, failure)
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        isRefreshing = false,
+                        // 用户取消小窗时 text 为 null：安静回落，不编造错误原因
+                        errorMessage = text,
+                        needLogin = failure.needsRelogin
+                    )
+                }
+                return@launch
+            }
+
+            // 会话已静默重建好
+            _uiState.update { it.copy(isLoading = false, isRefreshing = false) }
+            if (isWrite) {
+                _uiState.update { it.copy(opMessage = app.getString(R.string.msg_session_restored_retry)) }
+            } else {
+                loadInit(isRefresh = true)
+            }
         }
     }
 }

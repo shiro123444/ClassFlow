@@ -44,14 +44,32 @@ enum class VpnFullLoginStatus {
 }
 
 /**
- * 教务系统直连(含 VPN 镜像)表单登录的失败原因。
+ * 统一认证 / 教务表单登录的失败层级。
+ *
+ * 为什么必须分开：这四个层级对用户的下一步完全不同 ——
+ * 凭据类要重新登录（且确认密码错时该清掉保存的密码），网络类只要重试，
+ * 协议类（拿不到登录参数、跳转异常）连登录框都不该弹。
+ * 过去它们全被塞进一个 CREDENTIALS，于是「网络异常」也会被显示成「账号密码不对」。
  */
 enum class LocalLoginFailure {
-    /** 服务端回跳 /admin/login?jcaptchaError=1，疑似需要超星验证码 */
+    /** 需要人机校验（滑块 / 服务端回跳 jcaptchaError=1），不是密码错。 */
     CAPTCHA,
 
-    /** 停止在 /admin/login 但无验证码标识，通常是账号或密码错误 */
-    CREDENTIALS
+    /**
+     * 停在登录页且服务端确实拒绝了这次提交。
+     * 具体点名的是密码还是验证码看 [CasPasswordLoginResult.rejectedKind]；
+     * 服务端没点名时是 [CredentialKind.Unknown]（不点名声明的拒绝，不清本地密码）。
+     */
+    CREDENTIALS,
+
+    /** 一个响应都没拿到：超时、DNS、连接被拒、TLS 失败。 */
+    NETWORK,
+
+    /** 拿到了响应但流程走不通：缺 Location、重定向过多、拿不到登录表单/参数（含被网关/WAF 拦截）。 */
+    PROTOCOL,
+
+    /** 请求被 WebVPN 门户接管（落到 /por/）：门禁会话失效，与账号密码无关。 */
+    VPN_SESSION
 }
 
 /**
@@ -223,15 +241,13 @@ class WbuSyncEngine(
 
     /** CAS/IDS 登录失败 → 结构化原因（滑块验证码单独标记，供 UI 切到验证通道）。 */
     private fun casFailure(result: CasPasswordLoginResult, layer: AccessLayer): AccessFailure =
-        when (result.failure) {
-            LocalLoginFailure.CAPTCHA -> AccessFailure.CredentialRejected(layer, CredentialKind.Captcha)
-            LocalLoginFailure.CREDENTIALS ->
-                AccessFailure.CredentialRejected(layer, CredentialKind.Unknown, result.message)
-        }
+        casLoginFailure(result, layer)
 
-    /** WebVPN 门户密码登录被拒 → 结构化原因。 */
-    private fun portalFailure(message: String?): AccessFailure =
-        AccessFailure.CredentialRejected(AccessLayer.WebVpnPortal, CredentialKind.Password, message)
+    /** 门户登录失败 → 结构化原因。只有 [PortalFailureKind.Rejected] 允许据此清掉保存的门禁密码。 */
+    private fun portalFailure(
+        message: String?,
+        kind: PortalFailureKind = PortalFailureKind.Protocol
+    ): AccessFailure = portalLoginFailure(message, kind)
 
     /**
      * WebVPN TLS 证书校验异常回调（转发到共享 transport）。
@@ -478,7 +494,7 @@ class WbuSyncEngine(
         when (portalStep) {
             is PortalLoginStep.Error -> {
                 Log.w("WbuSyncEngine", "WebVPN portal login failed: ${portalStep.message}")
-                lastFailure = portalFailure(portalStep.message)
+                lastFailure = portalFailure(portalStep.message, portalStep.kind)
                 false
             }
             is PortalLoginStep.SmsRequired -> {
@@ -554,7 +570,7 @@ class WbuSyncEngine(
         val portalStep = portal.portalPasswordLogin(portalUsername, password, portalCaptchaProvider)
         val authenticated = when (portalStep) {
             is PortalLoginStep.Error -> {
-                lastFailure = portalFailure(portalStep.message)
+                lastFailure = portalFailure(portalStep.message, portalStep.kind)
                 false
             }
             is PortalLoginStep.PortalAuthenticated -> true
@@ -878,7 +894,7 @@ class WbuSyncEngine(
         when (portalStep) {
             is PortalLoginStep.Error -> {
                 Log.w("WbuSyncEngine", "VPN login error: ${portalStep.message}")
-                return fail(portalFailure(portalStep.message))
+                return fail(portalFailure(portalStep.message, portalStep.kind))
             }
             is PortalLoginStep.SmsRequired -> {
                 statusCallback?.invoke(VpnFullLoginStatus.SMS_REQUIRED)
@@ -1100,7 +1116,13 @@ class WbuSyncEngine(
             val hiddenFields = mutableMapOf<String, String>()
             client.newCall(loginPageReq).execute().use { loginPageResp ->
                 val html = loginPageResp.body?.string().orEmpty()
-                if (html.isBlank()) return false
+                // 登录页拿不到内容 ≠ 账号密码错：可能是网络被拦、服务端维护。必须带上结构化原因返回，
+                // 否则调用方只能看到一个「失败」而不知道该重试还是该重新登录。
+                if (html.isBlank()) {
+                    return fail(
+                        AccessFailure.Unexpected(AccessLayer.CampusDirect, "教务登录页为空（HTTP ${loginPageResp.code}）")
+                    )
+                }
                 val document = Jsoup.parse(html, "$baseUrl/admin/login")
                 document.select("input[type=hidden][name]").forEach { input ->
                     val name = input.attr("name")
@@ -1129,10 +1151,13 @@ class WbuSyncEngine(
                     lastFailure = if (finalUrl.contains("jcaptchaError")) {
                         AccessFailure.CredentialRejected(AccessLayer.CampusDirect, CredentialKind.Captcha)
                     } else {
+                        // 教务的文案形如「用户或密码错误, 请重试。当前错误次数为：1次…」：
+                        // 点名前判定为密码错（可清密码），判不出就只能是 Unknown（清密码的手要停住）。
+                        val serverText = extractLoginErrorMessage(postRespString)
                         AccessFailure.CredentialRejected(
                             AccessLayer.CampusDirect,
-                            CredentialKind.Unknown,
-                            extractLoginErrorMessage(postRespString)
+                            classifyCredentialRejection(serverText),
+                            serverText
                         )
                     }
                     return false
@@ -1897,7 +1922,7 @@ class WbuSyncEngine(
         }
 
         fun hasPersistedSession(context: Context): Boolean = WbuAuthTransport.hasPersistedSession(context)
-        fun getSavedUseVpn(context: Context): Boolean? = WbuAuthTransport.getSavedUseVpn(context)
+        fun getSavedUseVpn(context: Context): Boolean = WbuAuthTransport.getSavedUseVpn(context)
         fun setSavedUseVpn(context: Context, enabled: Boolean) = WbuAuthTransport.setSavedUseVpn(context, enabled)
         fun getSavedStudentId(context: Context): String = WbuAuthTransport.getSavedStudentId(context)
         fun setSavedStudentId(context: Context, studentId: String) = WbuAuthTransport.setSavedStudentId(context, studentId)

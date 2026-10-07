@@ -32,6 +32,24 @@ enum class TwfidState {
 /**
  * WebVPN 门户登录结果。
  */
+/**
+ * 门户登录失败的性质。
+ *
+ * 判据只看门户返回的 `ErrorCode`（它的 `Message` 永远是英文，按文案判会漏）：
+ * - `20004` = 账号或密码错误 → [Rejected]，只有这一种允许清掉本地保存的门禁密码；
+ * - `20023/20041/20042/20043/20053/20268` = 图形验证码 / 出口 IP 风控 → [Captcha]；
+ * - 缺 RSA key、拿不到图形验证码、会话没生效 → [Protocol]；
+ * - 一个响应都没拿到 → [Network]；
+ * - 用户自己关掉图形验证码弹窗 → [Cancelled]。
+ */
+enum class PortalFailureKind {
+    Rejected,
+    Captcha,
+    Network,
+    Protocol,
+    Cancelled
+}
+
 sealed class PortalLoginStep {
     data class SmsRequired(
         val maskedPhone: String,
@@ -44,7 +62,10 @@ sealed class PortalLoginStep {
         val promptText: String = ""
     ) : PortalLoginStep()
     object PortalAuthenticated : PortalLoginStep()
-    data class Error(val message: String) : PortalLoginStep()
+    data class Error(
+        val message: String,
+        val kind: PortalFailureKind = PortalFailureKind.Protocol
+    ) : PortalLoginStep()
 }
 
 /** 图形验证码图片由门户会话下载，交给 UI 供用户手动辨认。 */
@@ -215,9 +236,17 @@ internal class WebVpnClient(
         if (removed) Log.i(TAG, "已丢弃本次登录尝试产生的未认证 TWFID")
     }
 
-    private fun failure(previousTwfid: String?, message: String): PortalLoginStep {
+    /**
+     * 统一的失败出口：先把手上的 TWFID 还原（失败尝试产生的未认证据点不能留），再带上失败性质。
+     * [kind] 默认 [PortalFailureKind.Protocol] —— 即「说不清是凭据问题」，调用方不会因此清密码。
+     */
+    private fun failure(
+        previousTwfid: String?,
+        message: String,
+        kind: PortalFailureKind = PortalFailureKind.Protocol
+    ): PortalLoginStep {
         discardFreshTwfid(previousTwfid)
-        return PortalLoginStep.Error(message)
+        return PortalLoginStep.Error(message, kind)
     }
 
     // ------------------- 门户密码登录 -------------------
@@ -239,7 +268,11 @@ internal class WebVpnClient(
 
                 for (attempt in 1..MAX_PASSWORD_ATTEMPTS) {
                     val authXml = getText("$vpnBase/por/login_auth.csp?apiversion=1")
-                        ?: return@withContext failure(previousTwfid, "无法连接 WebVPN 门户，请检查网络")
+                        ?: return@withContext failure(
+                            previousTwfid,
+                            "无法连接 WebVPN 门户，请检查网络",
+                            PortalFailureKind.Network
+                        )
                     // 门户前端同样先拉 psw_config：RSA key / CSRF_RAND_CODE / 验证码开关 / 表单字段名都在这里
                     val pswConfigXml = getText("$vpnBase/public/psw_config").orEmpty()
 
@@ -270,23 +303,33 @@ internal class WebVpnClient(
                         val provider = captchaProvider
                             ?: return@withContext failure(
                                 previousTwfid,
-                                "WebVPN 需要图形验证码，但当前没有可用的输入界面"
+                                "WebVPN 需要图形验证码，但当前没有可用的输入界面",
+                                PortalFailureKind.Captcha
                             )
                         while (true) {
                             val image = fetchPortalCaptcha(randCodeUrl)
-                                ?: return@withContext failure(previousTwfid, "获取 WebVPN 图形验证码失败，请重试")
+                                ?: return@withContext failure(
+                                    previousTwfid,
+                                    "获取 WebVPN 图形验证码失败，请重试",
+                                    PortalFailureKind.Network
+                                )
                             when (val input = provider(PortalCaptchaData(image, attempt, captchaErrorCode))) {
                                 is PortalCaptchaResult.Submit -> {
                                     captchaCode = input.code.trim()
                                     if (captchaCode.length != CAPTCHA_LENGTH) {
-                                        return@withContext failure(previousTwfid, "图形验证码应为 4 位")
+                                        return@withContext failure(
+                                            previousTwfid,
+                                            "图形验证码应为 4 位",
+                                            PortalFailureKind.Captcha
+                                        )
                                     }
                                     break
                                 }
                                 PortalCaptchaResult.Refresh -> continue
                                 PortalCaptchaResult.Cancel -> return@withContext failure(
                                     previousTwfid,
-                                    "已取消 WebVPN 图形验证码输入"
+                                    "已取消 WebVPN 图形验证码输入",
+                                    PortalFailureKind.Cancelled
                                 )
                             }
                         }
@@ -304,18 +347,35 @@ internal class WebVpnClient(
                     Log.d(TAG, "login_psw -> ${summarizeAuthXml(pswXml)}")
 
                     val errorCode = extractXmlTag(pswXml, "ErrorCode")
+                    // 20053 RANDCODE_ON_PWDERR：门户自己的错误码含义就是「验证码开着，且密码不对」。
+                    // 这种时候继续拿同一个错密码重试，只会白烧掉门户的失败次数（还会触发出口 IP 风控），
+                    // 直接按「密码被拒」上报，让上层清掉保存的密码、请用户重新输入。
+                    if (errorCode == "20053") {
+                        return@withContext failure(
+                            previousTwfid,
+                            extractXmlTag(pswXml, "Message")
+                                ?: extractXmlTag(pswXml, "Note")
+                                ?: "账号或密码错误",
+                            PortalFailureKind.Rejected
+                        )
+                    }
                     if (isWebVpnCaptchaError(errorCode)) {
                         if (errorCode == "20041" && ++attackSignals >= MAX_ATTACK_SIGNALS) {
                             return@withContext failure(
                                 previousTwfid,
-                                "WebVPN 连续触发登录风控，已停止重试；请稍后再登录"
+                                "WebVPN 连续触发登录风控，已停止重试；请稍后再登录",
+                                PortalFailureKind.Captcha
                             )
                         }
                         captchaRequired = true
                         captchaErrorCode = errorCode.orEmpty()
                         Log.i(TAG, "门户要求图形验证码 (ErrorCode=$errorCode)，重试 $attempt/$MAX_PASSWORD_ATTEMPTS")
                         if (attempt < MAX_PASSWORD_ATTEMPTS) continue
-                        return@withContext failure(previousTwfid, "图形验证码多次未通过，请稍后再试")
+                        return@withContext failure(
+                            previousTwfid,
+                            "图形验证码多次未通过，请稍后再试",
+                            PortalFailureKind.Captcha
+                        )
                     }
                     break
                 }
@@ -347,12 +407,20 @@ internal class WebVpnClient(
                 val authenticated = errorCode == "1" || errorCode == "20021" ||
                     (errorCode.isNullOrBlank() && resultCode == "1")
                 if (!authenticated) {
-                    return@withContext failure(
-                        previousTwfid,
-                        extractXmlTag(pswXml, "Message")
-                            ?: extractXmlTag(pswXml, "Note")
-                            ?: "WebVPN 密码验证失败"
-                    )
+                    val serverMessage = extractXmlTag(pswXml, "Message")
+                        ?: extractXmlTag(pswXml, "Note")
+                    // 只有服务端明确点名「账号或密码错误」才允许清掉本地保存的门禁密码：
+                    // 20004 是门户对密码错的官方错误码（实测 Message = "Invalid username or password!"）；
+                    // 另外也接受英文文案里的明确表述（门户 Message 恒为英文）。其余没见过的错误码按「说不清」处理 ——
+                    // 宁可多留一个错密码，也不能删掉正确的那个。
+                    val kind = if (errorCode == "20004" ||
+                        classifyCredentialRejection(serverMessage) == CredentialKind.Password
+                    ) {
+                        PortalFailureKind.Rejected
+                    } else {
+                        PortalFailureKind.Protocol
+                    }
+                    return@withContext failure(previousTwfid, serverMessage ?: "WebVPN 密码验证失败", kind)
                 }
 
                 // 服务端说成功还不算数：用网关接口确认这个会话真能过，再把 TWFID 交出去
@@ -374,7 +442,7 @@ internal class WebVpnClient(
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "WebVPN password login failed", e)
-                failure(previousTwfid, "网络错误: ${e.message}")
+                failure(previousTwfid, "网络错误: ${e.message}", PortalFailureKind.Network)
             }
         }
 

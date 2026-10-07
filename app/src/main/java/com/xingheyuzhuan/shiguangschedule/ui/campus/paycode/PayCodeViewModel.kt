@@ -16,6 +16,7 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuCampusCardClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuPayCodeClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSessionExpiredException
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.needsRelogin
 import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
 import com.xingheyuzhuan.shiguangschedule.ui.components.silentUnifiedAuthLogin
 import kotlinx.coroutines.CancellationException
@@ -184,28 +185,7 @@ class PayCodeViewModel(application: Application) : AndroidViewModel(application)
             val token = ensureToken() ?: return@launch
             accessToken = token
 
-            val methods = try {
-                payCodeClient.queryPayMethods(token)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: PayCodeUnavailableException) {
-                // 服务端明确拒绝（没有一卡通账号 / 维护中）：把原话直接写出来，别翻译成通用失败文案
-                Log.w(TAG, "查询支付方式失败：${e.serverMessage}")
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        isRefreshing = false,
-                        methods = emptyList(),
-                        code = null,
-                        notice = e.serverMessage
-                            ?: getApplication<Application>().getString(R.string.pay_code_no_methods)
-                    )
-                }
-                return@launch
-            } catch (e: Exception) {
-                failWith(e)
-                return@launch
-            }
+            val methods = loadMethods(token) ?: return@launch
 
             if (methods.isEmpty()) {
                 _uiState.update {
@@ -361,21 +341,7 @@ class PayCodeViewModel(application: Application) : AndroidViewModel(application)
             viaWebVpn = WbuAuthTransport.getIdsViaWebVpn(app)
         )
         if (failure != null) {
-            _uiState.update {
-                it.copy(
-                    isLoading = false,
-                    isRefreshing = false,
-                    isFetchingCode = false,
-                    // 用户主动取消补输入：不弹登录 Sheet，只留一条可重试的说明
-                    needLogin = failure !is AccessFailure.Cancelled,
-                    errorMessage = if (failure is AccessFailure.Cancelled) {
-                        app.getString(R.string.err_need_unified_auth_session)
-                    } else {
-                        accessFailureText(app, failure)
-                            ?: app.getString(R.string.err_need_unified_auth_session)
-                    }
-                )
-            }
+            settleLoginFailure(failure)
             return null
         }
 
@@ -386,10 +352,12 @@ class PayCodeViewModel(application: Application) : AndroidViewModel(application)
         } catch (e: Exception) {
             Log.w(TAG, "静默重登后仍未取得平台令牌", e)
             if (e.looksLikeSessionExpired()) {
+                // 静默重登明明成功了，却还是拿不到平台令牌：这一层没法自愈，交给用户手动登录
                 _uiState.update {
                     it.copy(
                         isLoading = false,
                         isRefreshing = false,
+                        isFetchingCode = false,
                         needLogin = true,
                         errorMessage = app.getString(R.string.err_need_unified_auth_session)
                     )
@@ -399,6 +367,72 @@ class PayCodeViewModel(application: Application) : AndroidViewModel(application)
             }
             null
         }
+    }
+
+    /**
+     * 静默登录失败后的收尾。
+     *
+     * **只有**「会话失效 / 凭据被拒」才弹登录 Sheet；用户取消小窗、网络不通、服务端异常
+     * 只留一条可重试的说明 —— 以前除了用户取消之外，其它失败都会被判成「需要登录」，
+     * 于是一次网络抖动就会把用户顶到登录面板前面。
+     */
+    private fun settleLoginFailure(failure: AccessFailure) {
+        val app = getApplication<Application>()
+        _uiState.update {
+            it.copy(
+                isLoading = false,
+                isRefreshing = false,
+                isFetchingCode = false,
+                needLogin = failure.needsRelogin,
+                errorMessage = accessFailureText(app, failure)
+                    ?: app.getString(R.string.err_need_unified_auth_session),
+                // 非凭据类失败：给一条「打开官方页面」的退路，别让用户卡在原地
+                needsOfficialPage = !failure.needsRelogin
+            )
+        }
+    }
+
+    /**
+     * 查询支付方式；令牌在「校验」与「查询」之间过期时，续期 / 静默重登后重试一次。
+     *
+     * 以前这里没有这一层：`queryPayMethods` 抛出的 401 直接掉进通用 catch，页面只剩一句
+     * 「加载失败」，而同一个令牌在 [requestBatch] 里却能自愈 —— 同一次刷新里两种待遇。
+     *
+     * @return null 表示失败已上报（调用方直接结束本轮）。
+     */
+    private suspend fun loadMethods(initialToken: String): List<CampusPayMethod>? {
+        var token = initialToken
+        for (attempt in 1..2) {
+            try {
+                return payCodeClient.queryPayMethods(token)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: PayCodeUnavailableException) {
+                // 服务端明确拒绝（没有一卡通账号 / 维护中）：把原话直接写出来，别翻译成通用失败文案
+                Log.w(TAG, "查询支付方式失败：${e.serverMessage}")
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        isRefreshing = false,
+                        methods = emptyList(),
+                        code = null,
+                        notice = e.serverMessage
+                            ?: getApplication<Application>().getString(R.string.pay_code_no_methods)
+                    )
+                }
+                return null
+            } catch (e: Exception) {
+                if (attempt == 1 && e.looksLikeSessionExpired()) {
+                    Log.i(TAG, "查询支付方式令牌失效，续期后重试：${e.message}")
+                    token = ensureToken() ?: return null
+                    accessToken = token
+                    continue
+                }
+                failWith(e)
+                return null
+            }
+        }
+        return null
     }
 
     private fun publish(queue: PayCodeQueue, fetching: Boolean) {
