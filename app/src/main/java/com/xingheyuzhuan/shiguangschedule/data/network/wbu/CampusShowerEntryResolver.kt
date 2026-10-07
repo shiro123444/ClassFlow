@@ -5,6 +5,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.net.URLEncoder
 import javax.inject.Inject
 import javax.inject.Singleton
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
  * 洗浴控水入口解析器（全局扫码与通用链接节点共用）。
@@ -68,7 +69,10 @@ class CampusShowerEntryResolver @Inject constructor(
     }
 
     /**
-     * 马影河 2-3 栋：水表 51 设备号（+ 可选端口）→ lifeService 深链。
+     * 马影河 2-3 栋：水表设备号（+ 可选端口）→ lifeService 深链。
+     *
+     * 设备号既可以是裸设备号，也可以是整条厂商 / 学校入口链接（`?id=` 载体，协议允许）；
+     * 原文怎么拼见 [buildLifeServiceRaw]。
      */
     suspend fun resolveLifeService(imei: String, port: String? = null): Result {
         val raw = buildLifeServiceRaw(imei, port) ?: return Result.InvalidDevice
@@ -102,22 +106,46 @@ class CampusShowerEntryResolver @Inject constructor(
 
     companion object {
 
+        /** 水表 51 厂商链接基底（页面手输入口生成的原文形态）。 */
+        private const val VENDOR_BASE = "http://4gsk.shuibiao51.com"
+
+        /** 设备号长度上限。 */
+        private const val MAX_CODE_LENGTH = 256
+
+        /** 端口位数上限。 */
+        private const val MAX_PORT_DIGITS = 8
+
         /**
-         * 2-3 栋页面 `handleImei` 等价原文：
-         * `http://4gsk.shuibiao51.com?id=<imei>`，多路设备再拼 `$#$<port>`。
+         * 2-3 栋页面 `handleImei` 等价原文（`applications/js/chunk-b88c7b1e.f1981e59.js`）。
+         *
+         * 页面两个分支的语义不同，原文必须按分支喂：
+         * - **不带端口**：页面走 `imei = getRequest(原文).id`，所以原文要是带 `?id=` 的链接；
+         * - **带端口**：页面走 `imei = 第一段原文本身`（**不再解析 URL**），所以第一段必须是
+         *   **裸设备号** —— 把厂商链接套在第一段会得到 `http://…?id=<整条链接>$#$2` 这种原文，
+         *   页面会把整条链接当 imei 交给 `getDevicesType`，服务端认不出设备。
+         *
+         * 设备号本身是链接（协议允许把整条厂商链接当设备号）时按页面规则取其中的 `id`：
+         * 不带端口直接**原文透传**（与扫码路径一致），带端口则用取到的 id 组 `<id>$#$<port>`。
          *
          * 只接受无空白、无 `$`/`#` 的设备号，避免污染页面解析。
          */
         fun buildLifeServiceRaw(imei: String, port: String? = null): String? {
-            val id = imei.trim()
-            if (id.isEmpty() || id.length > 256) return null
-            if (id.any { it.isWhitespace() || it == '$' || it == '#' }) return null
+            val code = imei.trim()
+            if (code.isEmpty() || code.length > MAX_CODE_LENGTH) return null
+            if (code.any { it.isWhitespace() || it == '$' || it == '#' }) return null
 
-            val base = "http://4gsk.shuibiao51.com?id=$id"
+            val url = code.toHttpUrlOrNull()
+            val deviceId = if (url == null) code else url.queryParameter("id")?.trim()
+            if (deviceId.isNullOrEmpty()) return null
+            if (deviceId.any { it.isWhitespace() || it == '$' || it == '#' }) return null
+
             val portPart = port?.trim().orEmpty()
-            if (portPart.isEmpty()) return base
-            if (portPart.length > 8 || !portPart.all { it.isDigit() }) return null
-            return base + "\$#\$" + portPart
+            if (portPart.isEmpty()) {
+                // 不带端口：链接原样透传（页面自己取 ?id=），裸设备号才补厂商链接
+                return if (url == null) "$VENDOR_BASE?id=$deviceId" else code
+            }
+            if (portPart.length > MAX_PORT_DIGITS || !portPart.all { it.isDigit() }) return null
+            return deviceId + ShowerQrLink.IMEI_PORT_SEPARATOR + portPart
         }
     }
 }

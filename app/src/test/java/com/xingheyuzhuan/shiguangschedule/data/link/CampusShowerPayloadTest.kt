@@ -74,14 +74,33 @@ class CampusShowerPayloadTest {
 
     @Test
     fun buildsLifeServiceRaw() {
+        // 不带端口：页面走 `imei = getRequest(原文).id`，所以原文要补上厂商链接
         assertEquals(
             "http://4gsk.shuibiao51.com?id=abc",
             CampusShowerEntryResolver.buildLifeServiceRaw("abc")
         )
+        // 带端口：页面走 `imei = 第一段原文本身`（不再解析 URL），第一段必须是裸设备号
         assertEquals(
-            "http://4gsk.shuibiao51.com?id=abc\$#\$2",
+            "abc\$#\$2",
             CampusShowerEntryResolver.buildLifeServiceRaw("abc", "2")
         )
+    }
+
+    @Test
+    fun buildsLifeServiceRawFromDeviceLink() {
+        // 设备号本身是链接（协议允许）：不带端口原文透传、带端口先取出 ?id= 再拼端口 ——
+        // 否则页面会把整条链接当 imei 交给 getDevicesType，服务端认不出设备
+        assertEquals(
+            "http://yktxyyy1.wbu.edu.cn:50040?id=17010737",
+            CampusShowerEntryResolver.buildLifeServiceRaw("http://yktxyyy1.wbu.edu.cn:50040?id=17010737")
+        )
+        assertEquals(
+            "17010737\$#\$2",
+            CampusShowerEntryResolver.buildLifeServiceRaw("http://yktxyyy1.wbu.edu.cn:50040?id=17010737", "2")
+        )
+        // 链接里没有可用的 ?id=：不是设备码载体
+        assertNull(CampusShowerEntryResolver.buildLifeServiceRaw("http://yktxyyy1.wbu.edu.cn:50040/devices"))
+        assertNull(CampusShowerEntryResolver.buildLifeServiceRaw("http://4gsk.shuibiao51.com?id="))
     }
 
     @Test
