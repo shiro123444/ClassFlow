@@ -136,7 +136,7 @@ fun WbuCampusAuthSheet(
     var smsDeferred by remember { mutableStateOf<CompletableDeferred<String?>?>(null) }
     var smsDialogPhone by remember { mutableStateOf<String?>(null) }
     var smsDialogIsStillValid by remember { mutableStateOf(false) }
-    var smsDialogSendInterval by remember { mutableIntStateOf(60) }
+    var smsDialogSendInterval by remember { mutableIntStateOf(0) }
     var smsDialogPromptText by remember { mutableStateOf("") }
     var smsVerifying by remember { mutableStateOf(false) }
     var smsError by remember { mutableStateOf<String?>(null) }
@@ -260,13 +260,13 @@ fun WbuCampusAuthSheet(
                 smsVerifying = false
             },
             onResend = {
-                scope.launch {
-                    val result = activeVpnEngine?.resendVpnSmsCode()
-                    if (result?.success == true) {
-                        smsDialogSendInterval = result.cooldownSeconds
-                    } else {
-                        smsError = context.getString(R.string.err_resend_failed)
-                    }
+                val result = activeVpnEngine?.resendVpnSmsCode()
+                if (result?.success == true) {
+                    smsDialogSendInterval = result.cooldownSeconds
+                    result.cooldownSeconds
+                } else {
+                    smsError = context.getString(R.string.err_resend_failed)
+                    null
                 }
             },
             onDismiss = {

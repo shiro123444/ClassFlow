@@ -107,13 +107,17 @@ class CredentialVerifier @Inject constructor(
         }
     }
 
-    /** WebVPN：TWFID 探活。 */
+    /** WebVPN：TWFID 探活（走只读的 /por/conf.csp，不消耗登录尝试、不触发风控）。 */
     private suspend fun verifyWebVpn(): SessionState {
         val twfid = WbuAuthTransport.getTwfid(context)
         if (twfid.isBlank()) return SessionState.NOT_LOGGED_IN
         val transport = WbuAuthTransport.getShared(context, true)
-        val valid = WebVpnClient(transport).validateTwfid(twfid)
-        return if (valid) SessionState.VALID else SessionState.EXPIRED
+        return when (WebVpnClient(transport).probeTwfid(twfid)) {
+            TwfidState.VALID -> SessionState.VALID
+            TwfidState.NOT_AUTHENTICATED -> SessionState.EXPIRED
+            // 探活没做成 ≠ 会话失效：报「无法判定」，不要吓用户说会话过期
+            TwfidState.UNKNOWN -> SessionState.UNKNOWN
+        }
     }
 
     /** 一卡通：使用 access_token 探测会话有效性；若过期则尝试用 refresh_token 刷新续期（不顶号）。 */

@@ -441,15 +441,29 @@ class WbuSyncEngine(
             cookieStore.firstOrNull { it.name == "TWFID" && it.value.isNotBlank() }?.value.orEmpty()
         }
         if (currentTwfid.isNotEmpty()) {
-            if (portal.validateTwfid(currentTwfid)) {
-                Log.i("WbuSyncEngine", "ensureVpnTunnelReady: Valid TWFID present, skip WebVPN portal login")
-                portal.injectTwfid(currentTwfid)
-                persistCurrentTwfid()
-                return@withContext true
-            } else {
-                Log.w("WbuSyncEngine", "ensureVpnTunnelReady: Existing TWFID invalid, clearing and prompting for password")
-                WbuAuthTransport.clearTwfid(context)
-                portal.removeTwfidCookie()
+            when (portal.probeTwfid(currentTwfid)) {
+                TwfidState.VALID -> {
+                    Log.i("WbuSyncEngine", "ensureVpnTunnelReady: Valid TWFID present, skip WebVPN portal login")
+                    portal.injectTwfid(currentTwfid)
+                    persistCurrentTwfid()
+                    return@withContext true
+                }
+                TwfidState.NOT_AUTHENTICATED -> {
+                    // 只有服务端明确说「没有可用会话」才清本地槽位
+                    Log.w("WbuSyncEngine", "ensureVpnTunnelReady: TWFID 未认证，清除并索取密码")
+                    WbuAuthTransport.clearTwfid(context)
+                    portal.removeTwfidCookie()
+                }
+                TwfidState.UNKNOWN -> {
+                    // 探活没做成（网络/门户不可达）：保留本地会话，不白烧一次登录机会
+                    Log.w("WbuSyncEngine", "ensureVpnTunnelReady: 无法确认 TWFID 状态，保留本地会话并报错")
+                    return@withContext fail(
+                        AccessFailure.Unexpected(
+                            AccessLayer.WebVpnPortal,
+                            "无法确认 WebVPN 会话状态，请检查网络后重试"
+                        )
+                    )
+                }
             }
         }
 
@@ -510,14 +524,25 @@ class WbuSyncEngine(
             cookieStore.firstOrNull { it.name == "TWFID" && it.value.isNotBlank() }?.value.orEmpty()
         }
         if (existingTwfid.isNotBlank()) {
-            if (portal.validateTwfid(existingTwfid)) {
-                portal.injectTwfid(existingTwfid)
-                persistCurrentTwfid()
-                transport.persistCookieStore()
-                return@withContext true
+            when (portal.probeTwfid(existingTwfid)) {
+                TwfidState.VALID -> {
+                    portal.injectTwfid(existingTwfid)
+                    persistCurrentTwfid()
+                    transport.persistCookieStore()
+                    return@withContext true
+                }
+                TwfidState.NOT_AUTHENTICATED -> {
+                    WbuAuthTransport.clearTwfid(context)
+                    portal.removeTwfidCookie()
+                }
+                TwfidState.UNKNOWN -> {
+                    lastFailure = AccessFailure.Unexpected(
+                        AccessLayer.WebVpnPortal,
+                        "无法确认 WebVPN 会话状态，请检查网络后重试"
+                    )
+                    return@withContext false
+                }
             }
-            WbuAuthTransport.clearTwfid(context)
-            portal.removeTwfidCookie()
         }
 
         val forceFetch = WbuAuthTransport.getForceFetchStudentIdBeforeVpn(context)
@@ -569,7 +594,12 @@ class WbuSyncEngine(
      * 否则 TWFID 只存在于 Cookie 罐，账号页/登录弹窗读到的一直是空值。
      */
     private fun persistCurrentTwfid() {
-        val fresh = cookieStore.firstOrNull { it.name == "TWFID" && it.value.isNotBlank() }?.value
+        // 只认门户域名下、未过期的那个 TWFID：共享 Cookie 罐里可能还躺着别处导入的同名 Cookie
+        val now = System.currentTimeMillis()
+        val fresh = cookieStore.lastOrNull {
+            it.name == "TWFID" && it.value.isNotBlank() && it.expiresAt > now &&
+                (it.domain == "webvpn.wbu.edu.cn" || it.domain.endsWith(".webvpn.wbu.edu.cn"))
+        }?.value?.let { normalizeTwfid(it) }
         if (!fresh.isNullOrBlank()) WbuAuthTransport.setTwfid(context, fresh)
     }
 
@@ -807,14 +837,21 @@ class WbuSyncEngine(
         // 手动 TWFID：已认证则跳过 WebVPN 门户登录，直接进入教务
         val manualTwfid = transport.currentTwfid().trim()
         if (manualTwfid.isNotEmpty()) {
-            if (portal.validateTwfid(manualTwfid)) {
-                Log.i("WbuSyncEngine", "Manual TWFID validated; skip WebVPN credential login")
-                portal.injectTwfid(manualTwfid)
-                return vpnLoginTail(studentId, password, captchaProvider, authMode, statusCallback)
-            } else {
-                Log.w("WbuSyncEngine", "Manual TWFID invalid/expired; clear and fall back to WebVPN login")
-                WbuAuthTransport.clearTwfid(context)
-                portal.removeTwfidCookie()
+            when (portal.probeTwfid(manualTwfid)) {
+                TwfidState.VALID -> {
+                    Log.i("WbuSyncEngine", "Manual TWFID validated; skip WebVPN credential login")
+                    portal.injectTwfid(manualTwfid)
+                    return vpnLoginTail(studentId, password, captchaProvider, authMode, statusCallback)
+                }
+                TwfidState.NOT_AUTHENTICATED -> {
+                    Log.w("WbuSyncEngine", "Manual TWFID 未认证；清除后走门户密码登录")
+                    WbuAuthTransport.clearTwfid(context)
+                    portal.removeTwfidCookie()
+                }
+                TwfidState.UNKNOWN -> {
+                    // 探活没做成不代表手动 TWFID 失效：保留，继续走门户登录流程
+                    Log.w("WbuSyncEngine", "Manual TWFID 探活未完成，先保留并继续门户登录")
+                }
             }
         }
 

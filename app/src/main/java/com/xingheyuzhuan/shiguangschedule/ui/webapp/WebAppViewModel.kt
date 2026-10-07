@@ -13,6 +13,7 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSessionExpiredException
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuWebAppClient
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.TwfidState
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WebVpnClient
 import com.xingheyuzhuan.shiguangschedule.ui.components.WbuAuthPromptRequest
 import kotlinx.coroutines.CompletableDeferred
@@ -149,16 +150,22 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             } else {
-                // 2. 开启了 WebVPN：先核验当前 TWFID 是否仍有效
+                // 2. 开启了 WebVPN：先核验当前 TWFID 是否仍有效（只读探活，不消耗登录尝试）
                 val twfid = WbuAuthTransport.getTwfid(app)
                 val transport = WbuAuthTransport.getShared(app, true)
                 transport.restoreCookieStore()
                 val vpnClient = WebVpnClient(transport)
-                val twfidValid = if (twfid.isNotBlank()) {
-                    runCatching { vpnClient.validateTwfid(twfid) }.getOrDefault(false)
-                } else false
+                val twfidState = if (twfid.isNotBlank()) {
+                    val state = runCatching { vpnClient.probeTwfid(twfid) }.getOrDefault(TwfidState.UNKNOWN)
+                    if (state == TwfidState.NOT_AUTHENTICATED) {
+                        // 服务端明确说这个槽位没认证：清掉本地凭据
+                        WbuAuthTransport.clearTwfid(app)
+                        vpnClient.removeTwfidCookie()
+                    }
+                    state
+                } else TwfidState.NOT_AUTHENTICATED
 
-                if (twfidValid) {
+                if (twfidState == TwfidState.VALID) {
                     vpnClient.injectTwfid(twfid)
                     // WebVPN 门禁有效，直接通过 WebVPN 代理通道加载
                     proceedWithChannel(def, useVpn = true)
@@ -241,10 +248,13 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 val vpnClient = WebVpnClient(transport)
-                val twfidValid = runCatching { vpnClient.validateTwfid(twfid) }.getOrDefault(false)
-                if (!twfidValid) {
-                    WbuAuthTransport.clearTwfid(app)
-                    vpnClient.removeTwfidCookie()
+                val twfidState = runCatching { vpnClient.probeTwfid(twfid) }.getOrDefault(TwfidState.UNKNOWN)
+                if (twfidState != TwfidState.VALID) {
+                    if (twfidState == TwfidState.NOT_AUTHENTICATED) {
+                        // 只有服务端明确说未认证才清本地槽位；探活失败（网络抖动）时保留
+                        WbuAuthTransport.clearTwfid(app)
+                        vpnClient.removeTwfidCookie()
+                    }
                     if (trySilentUnifiedAuthLogin(forceWebVpn = true)) {
                         proceedWithChannel(def, useVpn)
                         return@launch
@@ -434,12 +444,14 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /** 短信验证码「重新发送」。 */
-    fun resendVpnSmsCode() {
-        val engine = silentLoginEngine ?: return
-        viewModelScope.launch {
-            runCatching { engine.resendVpnSmsCode() }
-                .onFailure { Log.w(TAG, "重新发送短信验证码失败", it) }
-        }
+    /** 短信验证码「重新发送」：返回服务端要求的重发冷却秒数（0 = 不限制），失败返回 null。 */
+    suspend fun resendVpnSmsCode(): Int? {
+        val engine = silentLoginEngine ?: return null
+        return runCatching { engine.resendVpnSmsCode() }
+            .onFailure { Log.w(TAG, "重新发送短信验证码失败", it) }
+            .getOrNull()
+            ?.takeIf { it.success }
+            ?.cooldownSeconds
     }
 
     /** 向 UI 索取一次补充输入，挂起直到用户提交或取消。 */

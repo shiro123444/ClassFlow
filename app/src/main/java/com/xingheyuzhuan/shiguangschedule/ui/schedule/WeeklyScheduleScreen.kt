@@ -178,7 +178,7 @@ fun WeeklyScheduleScreen(
     // SMS 验证码对话框状态
     var smsDialogPhone by remember { mutableStateOf<String?>(null) }
     var smsDialogIsStillValid by remember { mutableStateOf(false) }
-    var smsDialogSendInterval by remember { mutableIntStateOf(60) }
+    var smsDialogSendInterval by remember { mutableIntStateOf(0) }
     var smsDialogPromptText by remember { mutableStateOf<String?>(null) }
     var smsDeferred by remember { mutableStateOf<CompletableDeferred<String?>?>(null) }
     var smsVerifying by remember { mutableStateOf(false) }
@@ -1108,14 +1108,14 @@ fun WeeklyScheduleScreen(
                 smsVerifying = false
             },
             onResend = {
-                coroutineScope.launch {
-                    val result = activeVpnEngine?.resendVpnSmsCode()
-                    if (result?.success == true) {
-                        smsDialogSendInterval = result.cooldownSeconds
-                        snackbarHostState.showSnackbar(appContext.getString(R.string.snackbar_otp_resent))
-                    } else {
-                        snackbarHostState.showSnackbar(appContext.getString(R.string.snackbar_otp_resend_failed))
-                    }
+                val result = activeVpnEngine?.resendVpnSmsCode()
+                if (result?.success == true) {
+                    smsDialogSendInterval = result.cooldownSeconds
+                    snackbarHostState.showSnackbar(appContext.getString(R.string.snackbar_otp_resent))
+                    result.cooldownSeconds
+                } else {
+                    snackbarHostState.showSnackbar(appContext.getString(R.string.snackbar_otp_resend_failed))
+                    null
                 }
             },
             onDismiss = {

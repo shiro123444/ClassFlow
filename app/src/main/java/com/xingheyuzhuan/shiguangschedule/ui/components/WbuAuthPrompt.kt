@@ -89,7 +89,8 @@ sealed interface WbuAuthPromptRequest {
 fun WbuAuthPromptDialogs(
     request: WbuAuthPromptRequest?,
     onSubmit: (String?) -> Unit,
-    onResendSmsCode: () -> Unit = {}
+    /** 重新发送；返回服务端要求的重发冷却秒数（0 = 不限制），失败返回 null。 */
+    onResendSmsCode: suspend () -> Int? = { null }
 ) {
     when (request) {
         null -> Unit
@@ -375,7 +376,7 @@ object WbuAuthPromptBus {
     private val mutex = Mutex()
 
     /** 短信重发钩子：由发起方在调用前注入。 */
-    var onResendSmsCode: (suspend () -> Unit)? = null
+    var onResendSmsCode: (suspend () -> Int?)? = null
 
     /** 挂起等待用户输入；返回 null 表示用户取消。 */
     suspend fun ask(request: WbuAuthPromptRequest): String? = mutex.withLock {
@@ -400,10 +401,9 @@ object WbuAuthPromptBus {
 @Composable
 fun WbuAuthPromptHost() {
     val request by WbuAuthPromptBus.request.collectAsState()
-    val scope = rememberCoroutineScope()
     WbuAuthPromptDialogs(
         request = request,
         onSubmit = { WbuAuthPromptBus.submit(it) },
-        onResendSmsCode = { scope.launch { WbuAuthPromptBus.onResendSmsCode?.invoke() } }
+        onResendSmsCode = { WbuAuthPromptBus.onResendSmsCode?.invoke() }
     )
 }

@@ -287,7 +287,8 @@ internal class WbuAuthTransport(
 
     /** 通用 WebVPN 代理基址构造器：将任意 wbu.edu.cn 目标主机映射为对应的代理子域名。 */
     fun webVpnProxyBase(targetHost: String, withSingleSuffix: Boolean = true): String {
-        val slug = targetHost.replace('.', '-') + if (withSingleSuffix) "-s" else ""
+        // 门户的编码规则：'-' 先转义成 '--'，再把 '.' 换成 '-'；漏掉转义会让含 '-' 的主机名解析错
+        val slug = targetHost.replace("-", "--").replace('.', '-') + if (withSingleSuffix) "-s" else ""
         return "${webVpnScheme()}://$slug.webvpn.wbu.edu.cn${webVpnPort()}"
     }
 
@@ -723,8 +724,8 @@ internal class WbuAuthTransport(
 
     // ------------------- 实例便捷访问（读取静态偏好） -------------------
 
-    /** 当前手动 TWFID（prefs 的 webvpn 槽）。 */
-    fun currentTwfid(): String = prefs.getString(twfidKey(context), "").orEmpty()
+    /** 当前手动 TWFID（prefs 的 webvpn 槽）。读时一并归一化，兼容历史存进去的整行 Cookie。 */
+    fun currentTwfid(): String = normalizeTwfid(prefs.getString(twfidKey(context), "").orEmpty())
 
     fun clearTwfidPref() {
         prefs.edit().remove(twfidKey(context)).apply()
@@ -1134,11 +1135,12 @@ internal class WbuAuthTransport(
         }
 
         fun getTwfid(context: Context): String =
-            prefsOf(context).getString(twfidKey(context), "").orEmpty()
+            normalizeTwfid(prefsOf(context).getString(twfidKey(context), "").orEmpty())
 
         fun setTwfid(context: Context, value: String) {
+            // 兼容直接粘贴整行 Cookie（TWFID=xxx; path=/; domain=...）与带引号的取值
             prefsOf(context)
-                .edit().putString(twfidKey(context), value.trim()).apply()
+                .edit().putString(twfidKey(context), normalizeTwfid(value)).apply()
             _credentialChanges.tryEmit(Unit)
         }
 

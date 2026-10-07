@@ -423,12 +423,14 @@ class UjingWaterViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /** 短信验证码「重新发送」。 */
-    fun resendVpnSmsCode() {
-        val engine = silentLoginEngine ?: return
-        viewModelScope.launch {
-            runCatching { engine.resendVpnSmsCode() }
-                .onFailure { Log.w(TAG, "重新发送短信验证码失败", it) }
-        }
+    /** 短信验证码「重新发送」：返回服务端要求的重发冷却秒数（0 = 不限制），失败返回 null。 */
+    suspend fun resendVpnSmsCode(): Int? {
+        val engine = silentLoginEngine ?: return null
+        return runCatching { engine.resendVpnSmsCode() }
+            .onFailure { Log.w(TAG, "重新发送短信验证码失败", it) }
+            .getOrNull()
+            ?.takeIf { it.success }
+            ?.cooldownSeconds
     }
 
     /** 向 UI 索取一次补充输入，挂起直到用户提交或取消。 */

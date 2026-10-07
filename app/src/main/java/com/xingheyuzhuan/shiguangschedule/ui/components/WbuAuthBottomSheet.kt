@@ -1267,20 +1267,29 @@ private fun ToggleRow(
 fun VpnSmsCodeDialog(
     maskedPhone: String,
     isStillValid: Boolean = false,
-    sendInterval: Int = 60,
+    sendInterval: Int = 0,
     promptText: String? = null,
     onSubmit: (String) -> Unit,
-    onResend: () -> Unit,
+    /** 重新发送；返回服务端要求的重发冷却秒数（0 = 服务端不限制），失败返回 null。 */
+    onResend: suspend () -> Int?,
     onDismiss: () -> Unit,
     isVerifying: Boolean = false,
     errorMessage: String? = null
 ) {
+    val scope = rememberCoroutineScope()
     var smsCode by remember { mutableStateOf("") }
-    var resendCooldown by remember { mutableIntStateOf(if (isStillValid) 0 else sendInterval) }
+    // 倒计时只认服务端给的秒数：0 = 服务端不限制（门户前端 disableTime = SmsSendInterval || SmsIsStillValid || 0）。
+    // <=1 秒直接不锁：SmsIsStillValid 可能是布尔 1，别闪出一个 1 秒倒计时；门户 UI 的
+    // countDown() 也只在 1 < disableTime 时才计时。
+    var resendCooldown by remember(sendInterval) {
+        mutableIntStateOf(if (sendInterval > 1) sendInterval else 0)
+    }
     LaunchedEffect(resendCooldown) {
-        if (resendCooldown > 0) {
+        if (resendCooldown > 1) {
             delay(1000)
             resendCooldown--
+        } else if (resendCooldown == 1) {
+            resendCooldown = 0
         }
     }
     AlertDialog(
@@ -1346,8 +1355,11 @@ fun VpnSmsCodeDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 TextButton(
                     onClick = {
-                        resendCooldown = 60
-                        onResend()
+                        scope.launch {
+                            // 重发后按服务端返回的间隔重新计时；没拿到、或只给了 1 秒就不锁
+                            // （不要自己编 60 秒，也不要点一下闪一个 1 秒倒计时）
+                            resendCooldown = onResend()?.let { if (it > 1) it else 0 } ?: 0
+                        }
                     },
                     enabled = resendCooldown <= 0 && !isVerifying
                 ) {
