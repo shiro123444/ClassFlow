@@ -7,8 +7,10 @@ import androidx.lifecycle.viewModelScope
 import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppCatalog
 import com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppDefinition
+import com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.AccessFailure
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuAuthTransport
+import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuCampusCardClient
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuNetworkProbe
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSessionExpiredException
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuSyncEngine
@@ -19,11 +21,13 @@ import com.xingheyuzhuan.shiguangschedule.data.network.wbu.WebVpnClient
 import com.xingheyuzhuan.shiguangschedule.ui.components.accessFailureText
 import com.xingheyuzhuan.shiguangschedule.data.network.wbu.resolveCampusUseVpn
 import com.xingheyuzhuan.shiguangschedule.ui.components.silentUnifiedAuthLogin
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
  * 网页应用加载阶段。
@@ -83,6 +87,14 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
     private var silentLoginAttempted = false
 
     /**
+     * 本次流程是否已经为「网页被踢回 CAS 登录页」自救过一次。
+     *
+     * 自救会重新换票并重载页面；页面若又被踢回 CAS，说明凭据链本身解决不了，直接弹登录面板 ——
+     * 否则「重载 → 跳 CAS → 重载」会成环。每次 [start] / [retry] 重置。
+     */
+    private var webRecoveryAttempted = false
+
+    /**
      * 启动加载流程：
      * 1. 寻找配置定义；
      * 2. 检查 WebVPN 与校园网；
@@ -94,6 +106,7 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
         overrideTargetUrl = initialTargetUrl
         silentLoginAttempted = false
         lastSilentLoginFailure = null
+        webRecoveryAttempted = false
         val def = WebAppCatalog.findByIdString(appId)
         if (def == null) {
             _uiState.update { it.copy(stage = WebAppStage.Error(getApplication<Application>().getString(R.string.err_unknown_web_app, appId))) }
@@ -267,8 +280,15 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
             // 2. 检查本地是否有统一身份认证凭证 CASTGC。
             //    没有也不立刻弹登录 Sheet：优先用保存的账号密码静默登录一次（与 /w/ U净出水、扫一扫入口一致），
             //    成功就直接继续换票；只有没保存密码 / 静默登录失败才弹 Sheet。
+            //
+            //    一卡通平台不设这个前提：它有自己的平台令牌（access_token 有效就直接用，过期用
+            //    refresh_token 续期，两者都不顶号），手里那份还能用就不该先把用户拦到统一认证前
+            //    —— 凭据页也正是按令牌判「一卡通有效」，若这里另要 CASTGC，就会出现「一卡通有效却弹统一认证」。
+            //    真换不出令牌时 [WbuCampusCardClient.ensureValidAccessToken] 会抛 [WbuSessionExpiredException]，
+            //    由下面的 catch 走同一套静默登录 / 登录面板，结果与旧行为一致，只是不再白白多要一次统一认证。
+            val cardTokenFirst = def.id == WebAppId.CAMPUS_CARD
             val hasUnifiedSession = transport.cookieStore.any { it.name == "CASTGC" && it.value.isNotBlank() }
-            if (!hasUnifiedSession) {
+            if (!cardTokenFirst && !hasUnifiedSession) {
                 val failure = trySilentUnifiedAuthLogin()
                 if (failure != null) {
                     settleSilentLoginFailure(failure, requireVpnForLogin = useVpn)
@@ -286,8 +306,8 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
 
             try {
                 // 特判：一卡通移动服务平台 (CAMPUS_CARD)
-                if (def.id == com.xingheyuzhuan.shiguangschedule.data.model.wbu.WebAppId.CAMPUS_CARD) {
-                    val cardClient = com.xingheyuzhuan.shiguangschedule.data.network.wbu.WbuCampusCardClient(app, useVpn = false)
+                if (def.id == WebAppId.CAMPUS_CARD) {
+                    val cardClient = WbuCampusCardClient(app, useVpn = false)
                     val token = cardClient.ensureValidAccessToken()
                     val launchUrl = overrideTargetUrl ?: cardClient.buildLaunchUrl(token)
                     _uiState.update {
@@ -351,8 +371,10 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * 用保存的账号密码静默登录统一认证。
      *
-     * 顺序固定：**优先复用仍然有效的 CASTGC**（上面的 `hasUnifiedSession` 检查与换票逻辑直接命中），
-     * 只有它缺失 / 失效时才走到这里；这里再失败（没保存密码、用户取消、需要滑块）
+     * 顺序固定：**先复用手头还有效的会话** —— 一卡通是它自己的平台令牌
+     * （`ensureValidAccessToken`：access_token → refresh_token → 才轮到 CASTGC 换票），
+     * 其余应用是 CASTGC（上面的 `hasUnifiedSession` 检查与换票逻辑直接命中）；
+     * 只有这些凭证都缺失 / 失效时才走到这里；这里再失败（没保存密码、用户取消、需要滑块）
      * 才把 `needLogin` 交给 UI 弹登录 Sheet —— 与 `/w/` U净出水、扫一扫等入口保持同一套行为。
      *
      * 是否经 WebVPN：默认只由「统一认证经过 WebVPN」决定（[forceWebVpn] = false，即没开就完全不牵扯
@@ -432,6 +454,121 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * 网页容器里的页面被踢回统一认证登录页（`/authserver/login` / `/por/login`）时的自愈入口。
+     *
+     * 跳到 CAS 只说明「这一页手里的会话失效了」，并不等于「必须让用户登录统一认证」——
+     * 本机往往还留着能用的凭据（一卡通平台令牌 / `refresh_token`，或保存的账号密码），
+     * 所以先按各应用自己的凭据链把页面救回来：
+     * - 一卡通：换一份新的平台令牌，仍停在用户原来那个平台内页（见 [recoverCampusCard]）；
+     * - 其余网页应用：重新换一次 CAS 票再进，与进容器同一条路。
+     *
+     * 救不回来才把 `needLogin` 交给 UI 弹登录面板；每次进入容器只自救一次（[webRecoveryAttempted]）。
+     */
+    fun onWebAuthRedirect(pageUrl: String?) {
+        val def = _uiState.value.definition ?: return
+        if (webRecoveryAttempted) {
+            // 刚救过又被踢回 CAS：凭据链解决不了，交给登录面板
+            _uiState.update { it.copy(needLogin = true) }
+            return
+        }
+        webRecoveryAttempted = true
+        // 情况已经变了（页面确实被踢回 CAS 了），这次自救允许再静默登录一次
+        silentLoginAttempted = false
+        lastSilentLoginFailure = null
+        Log.i(TAG, "网页被踢回统一认证登录页，先按本机凭据自救一次：page=$pageUrl")
+
+        if (def.id == WebAppId.CAMPUS_CARD) {
+            viewModelScope.launch { recoverCampusCard(pageUrl) }
+            return
+        }
+        proceedWithChannel(def, useVpn = _uiState.value.temporaryUseVpn || _uiState.value.requireVpnForLogin)
+    }
+
+    /**
+     * 一卡通自救：换一份新的平台令牌，重新加载平台页。
+     *
+     * 顺序与进容器时一致：`access_token` → `refresh_token`（两者都不顶号、都不需要用户在场）
+     * → 静默登录补统一认证会话后再换票；全都不行才是真要用户登录。
+     * 当前停在平台的哪个内页就回哪一页，不在平台内页（第三方子应用 / 深链票据页）就回平台入口。
+     */
+    private suspend fun recoverCampusCard(pageUrl: String?) {
+        val app = getApplication<Application>()
+        val cardClient = WbuCampusCardClient(app, useVpn = false)
+        _uiState.update { it.copy(stage = WebAppStage.LoadingToken, needLogin = false) }
+
+        val token = when (val first = fetchCardToken(cardClient)) {
+            is CardTokenResult.Ready -> first.token
+            // 其它失败（网络等）已经落到错误页，不要再往下走
+            CardTokenResult.Failed -> return
+            CardTokenResult.NeedsUnifiedAuth -> {
+                val failure = trySilentUnifiedAuthLogin()
+                if (failure != null) {
+                    settleSilentLoginFailure(failure, requireVpnForLogin = false)
+                    return
+                }
+                when (val second = fetchCardToken(cardClient)) {
+                    is CardTokenResult.Ready -> second.token
+                    else -> {
+                        // 统一认证会话到手了却仍换不出令牌：只能请用户手动重登一次
+                        _uiState.update { it.copy(needLogin = true) }
+                        return
+                    }
+                }
+            }
+        }
+
+        val launchUrl = cardClient.buildLaunchUrl(token, campusCardPathOf(pageUrl))
+        Log.i(TAG, "一卡通自救成功，重新加载：$launchUrl")
+        _uiState.update {
+            it.copy(
+                stage = WebAppStage.ContentReady(url = launchUrl, token = token, useVpn = false),
+                needLogin = false
+            )
+        }
+    }
+
+    /** 取一份可用的一卡通平台令牌；失败原因按「需要登录」与「其它」分开。 */
+    private suspend fun fetchCardToken(cardClient: WbuCampusCardClient): CardTokenResult = try {
+        CardTokenResult.Ready(cardClient.ensureValidAccessToken())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: WbuSessionExpiredException) {
+        Log.i(TAG, "一卡通令牌不可用，需要统一认证会话：${e.message}")
+        CardTokenResult.NeedsUnifiedAuth
+    } catch (e: Exception) {
+        Log.w(TAG, "换一卡通令牌失败", e)
+        _uiState.update {
+            it.copy(
+                stage = WebAppStage.Error(
+                    e.localizedMessage
+                        ?: getApplication<Application>().getString(R.string.err_load_page_credential_failed)
+                )
+            )
+        }
+        CardTokenResult.Failed
+    }
+
+    /** 一卡通平台内页路径（`/plat/xxx` → `xxx`）；不在平台内页就给 null（回平台入口）。 */
+    private fun campusCardPathOf(pageUrl: String?): String? {
+        val parsed = pageUrl?.toHttpUrlOrNull() ?: return null
+        if (!parsed.host.equals("yktfwpt.wbu.edu.cn", ignoreCase = true)) return null
+        val path = parsed.encodedPath.trim('/')
+        if (!path.startsWith("plat")) return null
+        return path.removePrefix("plat").trim('/').takeIf { it.isNotBlank() }
+    }
+
+    /** 一卡通换令牌的结果。 */
+    private sealed interface CardTokenResult {
+        data class Ready(val token: String) : CardTokenResult
+
+        /** 缺统一认证会话 / 服务端不认：需要用户登录统一认证。 */
+        data object NeedsUnifiedAuth : CardTokenResult
+
+        /** 其它失败（网络等）：已经落到错误页，调用方不要再往下走。 */
+        data object Failed : CardTokenResult
+    }
+
     fun onLoginDismissed() {
         _uiState.update { it.copy(needLogin = false) }
         if (_uiState.value.stage !is WebAppStage.ContentReady) {
@@ -449,6 +586,7 @@ class WebAppViewModel(application: Application) : AndroidViewModel(application) 
     fun retry() {
         silentLoginAttempted = false
         lastSilentLoginFailure = null
+        webRecoveryAttempted = false
         val def = _uiState.value.definition
         if (def != null) {
             evaluateNetworkAndProceed(def)

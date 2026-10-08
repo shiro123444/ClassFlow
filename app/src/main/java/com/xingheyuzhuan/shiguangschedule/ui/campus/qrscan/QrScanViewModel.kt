@@ -112,6 +112,10 @@ sealed interface QrScanEvent {
  *
  * 请求序列见 WBUCas/qr_scan_notes.md 第四节：
  * `qrCodeLogin.do?uuid=`（置 2）→ `qrCodeConfirm.do`（置 1）。
+ *
+ * 本页**不以「本机有没有统一认证会话」当门面条件**：没登录也照常取景、照常分流
+ * （U净 / 洗浴 / 通用链接节点本就不需要统一认证），只有真扫到需要 CAS 的码时才就地补一次登录
+ * （[loginThenRetry]），补不上才落到 [QrScanUiState.NeedLogin] 面板，由用户自己点登录。
  */
 @HiltViewModel
 class QrScanViewModel @Inject constructor(
@@ -121,9 +125,8 @@ class QrScanViewModel @Inject constructor(
 
     private var engine = createEngine()
 
-    private val _state = MutableStateFlow<QrScanUiState>(
-        if (engine.hasUnifiedAuthSession()) QrScanUiState.Scanning else QrScanUiState.NeedLogin
-    )
+    /** 进页面即取景：是否登录统一认证不影响能不能扫，等到真要用了再补（见 [loginThenRetry]）。 */
+    private val _state = MutableStateFlow<QrScanUiState>(QrScanUiState.Scanning)
     val state: StateFlow<QrScanUiState> = _state.asStateFlow()
 
     /** 取景期间的一次性提示（码不属于任何已支持的分流、洗浴设备校验失败等），不中断取景。 */
@@ -187,37 +190,61 @@ class QrScanViewModel @Inject constructor(
     /** 已处理过的洗浴设备二维码原文，避免相机高频回调重复触发。 */
     private var handledShower: String? = null
 
+    /** 本页是否已自动补过一遍统一认证登录：只试一次，重扫同一类码不再反复登录（成环只会白烧服务端失败次数）。 */
+    private var silentLoginAttempted = false
+
+    /** 因「本机没有统一认证会话」而中断的那一步；登录成功后原样重放，用户不必再扫一次。 */
+    private var pendingAuthRetry: (suspend () -> Unit)? = null
+
     init {
         attachSslHandler(engine)
-        autoLoginWithSavedPasswordIfNeeded()
     }
 
     /**
-     * 「自动使用保存的密码登录」（账号与凭据页，默认开）：本机没有统一认证会话、
-     * 但确实存着统一认证密码时，进页面就先静默登录一次，登上了直接进扫码态 ——
-     * 以前这里会显示「需要登录」，得用户自己先手动登录一次。
+     * 扫到需要统一认证的码时才就近补一次登录，登录成功就把刚才中断的那一步原样重放。
      *
-     * 只在**确实存着密码**时尝试：没存密码就保持原有的登录入口，不弹任何东西 ——
-     * 这条新增路径的语义是「用保存的密码」，不是「每次都问一遍密码」。
-     * 静默过程中的小窗（密码 / 短信 / 图形码）会就地弹出；失败则什么都不改，用户看到的还是原来的「需要登录」。
+     * 重放是安全的：未登录时 `qrCodeLogin.do` 只会被 CAS 挡回来（uuid 不会被置为「已扫描」），
+     * 所以登录后重放不会破坏 PC 端状态；顺带省掉「登录完还得把码再扫一遍」这一步。
+     *
+     * 以下情况直接落到 [QrScanUiState.NeedLogin] 面板，让用户自己决定（与改动前的门面行为一致）：
+     * - 「自动使用保存的密码登录」关着，或本机根本没存统一认证密码（闸门见 [shouldAttemptSavedPasswordLogin]）；
+     * - 本次进页面已经自动试过一遍（[silentLoginAttempted]）；
+     * - 补登录没成（网络 / 用户取消 / 服务端拒绝）：原因由随后的登录面板 / Sheet 承接。
+     *
+     * 静默过程中的补输入小窗（WebVPN 门禁密码 / 短信验证码 / 图形校验）由 App 根部的
+     * `WbuAuthPromptHost` 就地弹出，本页不用自己挂。
      */
-    private fun autoLoginWithSavedPasswordIfNeeded() {
-        if (engine.hasUnifiedAuthSession()) return
-        if (!shouldAttemptSavedPasswordLogin(context)) return
+    private fun loginThenRetry(retry: suspend () -> Unit) {
+        pendingAuthRetry = retry
+        if (silentLoginAttempted || !shouldAttemptSavedPasswordLogin(context)) {
+            _state.value = QrScanUiState.NeedLogin
+            return
+        }
+        silentLoginAttempted = true
         viewModelScope.launch {
             val failure = silentUnifiedAuthLogin(
                 context = context,
                 flowTag = "QR_SCAN",
                 viaWebVpn = WbuAuthTransport.getIdsViaWebVpn(context),
-                // 上面已确认存着密码：绝不因为「缺密码」在进页面时弹窗
+                // 绝不因为「缺密码」在扫码时就地弹密码小窗：没存密码就走登录面板
                 onlyWithSavedPassword = true
             )
             // 静默登录换掉了进程级 Cookie 罐里的会话，本页的 engine 要重建才能看到新的 CASTGC
             engine = createEngine().also { attachSslHandler(it) }
             if (failure == null && engine.hasUnifiedAuthSession()) {
-                _state.value = QrScanUiState.Scanning
+                runPendingRetry()
+            } else {
+                _state.value = QrScanUiState.NeedLogin
             }
         }
+    }
+
+    /** 重放因缺会话而中断的那一步；没有待续动作时返回 false。 */
+    private suspend fun runPendingRetry(): Boolean {
+        val retry = pendingAuthRetry ?: return false
+        pendingAuthRetry = null
+        retry()
+        return true
     }
 
     private fun createEngine(): WbuSyncEngine =
@@ -286,12 +313,17 @@ class QrScanViewModel @Inject constructor(
         clearStickyNotice()
 
         viewModelScope.launch {
-            when (engine.scanPeerQrCode(casUuid)) {
-                QrScanOutcome.SCANNED -> _state.value = QrScanUiState.Scanned(casUuid)
-                QrScanOutcome.NEED_LOGIN -> _state.value = QrScanUiState.NeedLogin
-                QrScanOutcome.EXPIRED -> _state.value = QrScanUiState.Failed(QrScanError.EXPIRED)
-                QrScanOutcome.ERROR -> _state.value = QrScanUiState.Failed(QrScanError.NETWORK)
-            }
+            scanPeer(casUuid)
+        }
+    }
+
+    /** 扫码端「已扫描」（PC 端置 2）。缺统一认证会话时就地补登录一次再重放本步。 */
+    private suspend fun scanPeer(casUuid: String) {
+        when (engine.scanPeerQrCode(casUuid)) {
+            QrScanOutcome.SCANNED -> _state.value = QrScanUiState.Scanned(casUuid)
+            QrScanOutcome.NEED_LOGIN -> loginThenRetry { scanPeer(casUuid) }
+            QrScanOutcome.EXPIRED -> _state.value = QrScanUiState.Failed(QrScanError.EXPIRED)
+            QrScanOutcome.ERROR -> _state.value = QrScanUiState.Failed(QrScanError.NETWORK)
         }
     }
 
@@ -440,8 +472,9 @@ class QrScanViewModel @Inject constructor(
 
                     CampusShowerEntryResolver.Result.InvalidDevice -> notifyShowerInvalid(raw)
 
+                    // 分流本身要统一认证（一卡通令牌 + refresh 都续不上）：就地补登录一次再重跑这条分流
                     CampusShowerEntryResolver.Result.NeedLogin ->
-                        _state.value = QrScanUiState.NeedLogin
+                        loginThenRetry { resolveShower(raw, block) }
 
                     is CampusShowerEntryResolver.Result.Unavailable -> notifyShowerUnavailable(raw)
                 }
@@ -475,28 +508,35 @@ class QrScanViewModel @Inject constructor(
         _state.value = QrScanUiState.Confirming(current.uuid)
 
         viewModelScope.launch {
-            when (engine.confirmPeerQrCode(current.uuid)) {
-                QrConfirmOutcome.CONFIRMED -> _state.value = QrScanUiState.Success
-                QrConfirmOutcome.NEED_LOGIN -> _state.value = QrScanUiState.NeedLogin
-                QrConfirmOutcome.EXPIRED -> _state.value = QrScanUiState.Failed(QrScanError.EXPIRED)
-                QrConfirmOutcome.ERROR -> _state.value = QrScanUiState.Failed(QrScanError.NETWORK)
-            }
+            confirmPeer(current.uuid)
         }
     }
 
-    /** 重新扫描（重扫/重试）。 */
+    /** 扫码端「确认登录」（PC 端置 1）。缺统一认证会话时同样就地补登录一次再重放本步。 */
+    private suspend fun confirmPeer(uuid: String) {
+        when (engine.confirmPeerQrCode(uuid)) {
+            QrConfirmOutcome.CONFIRMED -> _state.value = QrScanUiState.Success
+            QrConfirmOutcome.NEED_LOGIN -> loginThenRetry { confirmPeer(uuid) }
+            QrConfirmOutcome.EXPIRED -> _state.value = QrScanUiState.Failed(QrScanError.EXPIRED)
+            QrConfirmOutcome.ERROR -> _state.value = QrScanUiState.Failed(QrScanError.NETWORK)
+        }
+    }
+
+    /** 重新扫描（重扫/重试）：回到取景，不再拿登录态当门槛。 */
     fun rescan() {
         handledUuid = null
         handledUjing = null
         handledLinkHub = null
         handledShower = null
+        // 上一次扫到一半的待续动作作废：用户要重扫，就按新扫到的码重新决定
+        pendingAuthRetry = null
         _transientNotice.value = null
         transientJob?.cancel()
         stickyJob?.cancel()
         stickyJob = null
         stickyNotice = null
         stickyRaw = null
-        _state.value = if (engine.hasUnifiedAuthSession()) QrScanUiState.Scanning else QrScanUiState.NeedLogin
+        _state.value = QrScanUiState.Scanning
     }
 
     /**
@@ -510,10 +550,15 @@ class QrScanViewModel @Inject constructor(
         if (_state.value is QrScanUiState.Failed) rescan()
     }
 
-    /** 登录 Sheet 登录成功后：可能切换了 WebVPN 模式，重建引擎再回到取景。 */
+    /**
+     * 登录 Sheet 登录成功后：可能切换了 WebVPN 模式，重建引擎；
+     * 有因缺会话而中断的动作就接着做完（不用把码再扫一遍），否则回到取景。
+     */
     fun onLoginSuccess() {
         engine = createEngine().also { attachSslHandler(it) }
-        rescan()
+        viewModelScope.launch {
+            if (!runPendingRetry()) rescan()
+        }
     }
 
     /** 回应用户对 WebVPN 证书的信任询问。 */

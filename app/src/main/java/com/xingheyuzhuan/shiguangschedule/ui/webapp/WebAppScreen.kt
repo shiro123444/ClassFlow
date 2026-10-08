@@ -348,7 +348,6 @@ fun WebAppScreen(
         val mainHandler = remember { Handler(Looper.getMainLooper()) }
         val uiState by viewModel.uiState.collectAsState()
 
-        var showAuthSheet by remember { mutableStateOf(false) }
         var sslErrorState by remember { mutableStateOf<Pair<SslErrorHandler, SslError>?>(null) }
         var webViewInstance by remember { mutableStateOf<WebView?>(null) }
         var scanRequest by remember { mutableStateOf<ScanRequest?>(null) }
@@ -473,16 +472,11 @@ fun WebAppScreen(
             }
         }
 
-        if (uiState.needLogin || showAuthSheet) {
+        // 只在真需要用户登录统一认证时弹面板：进容器时缺凭据、以及网页撞到 CAS 登录页而凭据自愈也没成功
+        if (uiState.needLogin) {
             WbuCampusAuthSheet(
-                onDismiss = {
-                    showAuthSheet = false
-                    viewModel.onLoginDismissed()
-                },
-                onLoginSuccess = {
-                    showAuthSheet = false
-                    viewModel.onLoginSuccess()
-                },
+                onDismiss = { viewModel.onLoginDismissed() },
+                onLoginSuccess = { viewModel.onLoginSuccess() },
                 requireUnifiedCas = true,
                 unifiedAuthOnly = true,
                 initialUseVpnOverride = uiState.requireVpnForLogin || uiState.temporaryUseVpn,
@@ -592,7 +586,7 @@ fun WebAppScreen(
                         // 同理：重建时不再把自启载荷交给页面
                         pendingAutoScan = if (deepLinkAutoStarted) null else pendingAutoScan,
                         onSslError = { handler, error -> sslErrorState = Pair(handler, error) },
-                        onSessionExpired = { showAuthSheet = true },
+                        onWebAuthRedirect = { pageUrl -> viewModel.onWebAuthRedirect(pageUrl) },
                         onInterceptScan = { redirectUrl -> scanRequest = ScanRequest.Redirect(redirectUrl) },
                         onBridgeScan = { callbackId -> scanRequest = ScanRequest.Bridge(callbackId) },
                         onEmScan = { callbackId -> scanRequest = ScanRequest.EmBridge(callbackId) },
@@ -995,7 +989,8 @@ private fun FullScreenWebContent(
     platformToken: String?,
     pendingAutoScan: String? = null,
     onSslError: (SslErrorHandler, SslError) -> Unit,
-    onSessionExpired: () -> Unit,
+    /** 网页被踢回统一认证登录页；[pageUrl] 是当前停留在的那一页（可能为 null），供自愈时回到原地。 */
+    onWebAuthRedirect: (pageUrl: String?) -> Unit,
     onInterceptScan: (redirectUrl: String) -> Unit,
     onBridgeScan: (callbackId: String) -> Unit,
     onEmScan: (callbackId: String) -> Unit,
@@ -1216,11 +1211,13 @@ private fun FullScreenWebContent(
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                     val url = request?.url?.toString() ?: return false
 
-                    // 1. 核心要求：坚决不让 WebView 展示统一身份认证的 Web 登录页面
-                    // 若重定向跳往 /authserver/login 或 /por/login，直接拦截并转为在原生弹登录窗
+                    // 1. 核心要求：坚决不让 WebView 展示统一身份认证的 Web 登录页面。
+                    //    跳到 CAS 登录页只有一个含义 —— 这一页手里的会话失效了；但「页面会话失效」不等于
+                    //    「必须让用户登录统一认证」：先交回 ViewModel，用本机凭据（一卡通平台令牌 / 保存的
+                    //    账号密码）把页面重新救回来，救不回来它才把需要登录的状态交给 UI 弹原生登录窗。
                     if (url.contains("/authserver/login") || url.contains("/por/login")) {
-                        Log.i("WebAppScreen", "Intercepted navigation to CAS login: $url")
-                        onSessionExpired()
+                        Log.i("WebAppScreen", "Intercepted navigation to CAS login: $url (page=${view?.url})")
+                        onWebAuthRedirect(view?.url)
                         return true
                     }
 

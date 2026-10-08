@@ -318,11 +318,25 @@ class MainActivity : AppCompatActivity() {
                 PendingIntent.FLAG_UPDATE_CURRENT
             }
             val pendingIntent = PendingIntent.getActivity(this, 0, intent, flags)
-            val ndefFilter = IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED).apply {
-                addDataScheme("https")
-                addDataScheme("http")
-            }
-            adapter.enableForegroundDispatch(this, pendingIntent, arrayOf(ndefFilter), null)
+            // 前台分发的优先级高于系统正常分发（含标签里的 AAR）：过滤器一旦写宽（只按 scheme 匹配
+            // https/http），别人的 https 标签也会被投到这里，路由不上就静默丢掉——例如支付宝
+            // 「碰一碰」标签（https 链接 + com.eg.android.AlipayGphone 的 AAR）本该交给支付宝，
+            // 却先被本 App 抢走，表现为「碰了没反应」。
+            // 因此这里与 AndroidManifest 的 NDEF 过滤器保持一致：只接管自己的校园域名，
+            // 其余标签一律不拦，仍交给系统按正常规则分发。
+            val hosts = listOf(BuildConfig.UJING_NFC_HOST, BuildConfig.LINK_HUB_HOST)
+                .map { it.trim().lowercase() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+            if (hosts.isEmpty()) return
+            val filters = hosts.map { host ->
+                IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED).apply {
+                    addDataScheme("https")
+                    addDataScheme("http")
+                    addDataAuthority(host, null)
+                }
+            }.toTypedArray()
+            adapter.enableForegroundDispatch(this, pendingIntent, filters, null)
         } catch (e: Exception) {
             android.util.Log.w("MainActivity", "Failed to enable NFC foreground dispatch", e)
         }
