@@ -529,54 +529,53 @@ private fun DetailCard(rows: List<Pair<String, String>>) {
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp)) {
             rows.forEachIndexed { index, (label, value) ->
                 if (index > 0) Spacer(Modifier.height(10.dp))
-                // 长值（订单编号那种 32 位十六进制）单独占一行，否则右侧放不下会被截成省略号
-                if (value.length > INLINE_VALUE_MAX) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        DetailLabel(label)
-                        Text(
-                            text = value,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        DetailLabel(label)
-                        Text(
-                            text = value,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(start = 12.dp)
-                        )
-                    }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    DetailLabel(label)
+                    // 长值（订单编号那种 32 位十六进制）用小一号字，好和标签挤在同一行里 ——
+                    // 实测 32 位在 12sp 下约 773px，标签用 11sp 才腾得出这 773px（见 DetailLabel 注释）
+                    Text(
+                        text = value,
+                        style = if (value.length > LONG_VALUE_MIN) {
+                            MaterialTheme.typography.bodySmall
+                        } else {
+                            MaterialTheme.typography.bodyMedium
+                        },
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.End,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 6.dp)
+                    )
                 }
             }
         }
     }
 }
 
+/**
+ * 标签固定用 11sp（`labelSmall`）：一卡通给的中文标签是四个字，12sp 下要占 168px，
+ * 换成 11sp 省出来的那 15px 正好让 32 位订单编号留在同一行里（实测约 773px 宽）。
+ */
 @Composable
 private fun DetailLabel(label: String) {
     Text(
         text = label,
-        style = MaterialTheme.typography.bodySmall,
+        style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
 }
 
-/** 超过这个长度就把值换到标签下面单独一行显示。 */
-private const val INLINE_VALUE_MAX = 20
+/** 超过这个长度的值改用小一号字，保证「标签 → 值」仍在一行里。 */
+private const val LONG_VALUE_MIN = 20
 
 /** 一张窄提示（比如「另一台设备正在用水」）。 */
 @Composable
