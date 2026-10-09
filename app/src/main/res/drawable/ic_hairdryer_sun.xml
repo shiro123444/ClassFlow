@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 吹风机桌面快捷方式预设图标：太阳（给每台机器挑一个，铺在桌面上好认）。
+     自带底色：浅色 / 深色桌面都能看清，也不依赖 Launcher 的图标底色。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 圆角底色 -->
+    <path
+        android:fillColor="#FF7043"
+        android:pathData="M0,24 A24,24 0 0 1 24,0 H84 A24,24 0 0 1 108,24 V84 A24,24 0 0 1 84,108 H24 A24,24 0 0 1 0,84 Z" />
+
+    <!-- 图形主体（彩色底 + 白色图形：远看是一块彩色，近看能分辨） -->
+    <path
+        android:fillType="nonZero"
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M49.50,100.00 L49.50,16.00 L58.50,16.00 L58.50,100.00 Z M58.50,16.00 L58.50,100.00 L49.50,100.00 L49.50,16.00 Z M12.00,53.50 L96.00,53.50 L96.00,62.50 L12.00,62.50 Z M96.00,62.50 L12.00,62.50 L12.00,53.50 L96.00,53.50 Z M21.12,84.52 L80.52,25.12 L86.88,31.48 L27.48,90.88 Z M86.88,31.48 L27.48,90.88 L21.12,84.52 L80.52,25.12 Z M27.48,25.12 L86.88,84.52 L80.52,90.88 L21.12,31.48 Z M80.52,90.88 L21.12,31.48 L27.48,25.12 L86.88,84.52 Z M74,58 A20,20 0 1 1 34,58 A20,20 0 1 1 74,58 Z" />
+</vector>

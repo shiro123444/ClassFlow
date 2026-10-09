@@ -109,6 +109,7 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.DisposableEffect
@@ -185,10 +186,24 @@ class MainActivity : AppCompatActivity() {
         /** 桌面快捷方式「付款码」入口 action（见 res/xml/shortcuts.xml）。 */
         const val ACTION_PAY_CODE = "com.xingheyuzhuan.shiguangschedule.action.PAY_CODE"
 
+        /**
+         * 桌面快捷方式「某台吹风机」入口 action（每台机器一条动态快捷方式，见 `HairdryerShortcuts`）。
+         *
+         * 附带 `cd` / `raw` 两个 extra：桌面图标点了就该直接执行，不再问一遍。
+         */
+        const val ACTION_HAIRDRYER_DEVICE = "com.xingheyuzhuan.shiguangschedule.action.HAIRDRYER_DEVICE"
+
+        /** 快捷方式 extra：设备码与扫码原文。 */
+        const val EXTRA_HAIRDRYER_CD = "hairdryer_cd"
+        const val EXTRA_HAIRDRYER_RAW = "hairdryer_raw"
+
         /** 官网下载页入口的入场动画时长。 */
         private const val DOWNLOAD_ENTRY_ANIM_MS = 2700
 
-        /** 吹风机入口的品牌过场时长：与支付宝调起并行播放，不等待其启动。 */
+        /**
+         * 蓝牙吹风机入口的品牌过场时长：与支付宝调起并行播放，不等待其启动，
+         * 正好盖住支付宝冷启动的空白期（与改造前一致）。
+         */
         private const val HAIRDRYER_ENTRY_ANIM_MS = 1800
     }
 
@@ -205,6 +220,9 @@ class MainActivity : AppCompatActivity() {
 
     @Inject
     lateinit var appSettingsRepository: AppSettingsRepository
+
+    @Inject
+    lateinit var hairdryerEntryRouter: com.xingheyuzhuan.shiguangschedule.data.repository.HairdryerEntryRouter
 
     @Inject
     lateinit var courseConversionRepository: CourseConversionRepository
@@ -384,13 +402,29 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        // 桌面快捷方式「某台吹风机」：点图标就是要用那台机器
+        if (intent.action == ACTION_HAIRDRYER_DEVICE) {
+            val cd = intent.getStringExtra(EXTRA_HAIRDRYER_CD).orEmpty()
+            if (cd.isNotBlank()) {
+                handleHairdryerEntry(
+                    cd = cd,
+                    raw = intent.getStringExtra(EXTRA_HAIRDRYER_RAW).orEmpty(),
+                    source = com.xingheyuzhuan.shiguangschedule.data.model.wbu.HairdryerLaunchSource.DIRECT
+                )
+            }
+            return
+        }
+
         val hairdryer = com.xingheyuzhuan.shiguangschedule.data.network.wbu.CampusLinkRouter.extractHairdryer(intent)
         if (hairdryer != null) {
-            // 吹风机：不等待支付宝启动——立即发起调起，同时本页播放品牌过场，
-            // 正好盖住支付宝冷启动的空白期；被覆盖后由 onStop 清掉剩余动画，返回时不会补播
-            entryOverlayDurationMs.value = HAIRDRYER_ENTRY_ANIM_MS
-            showEntryOverlay.value = true
-            launchHairdryerAlipay(hairdryer.cd)
+            // 碰一碰（NFC 标签 / `/hd/{cd}` 深链）：能本地确定是蓝牙机就直接走原体验；
+            // 只带设备码是因为 `/hd/{cd}` 不是贴纸原文，探测时得换成贴纸写法
+            // （见 `HairdryerLaunchViewModel.start`）。
+            handleHairdryerEntry(
+                cd = hairdryer.cd,
+                raw = "",
+                source = com.xingheyuzhuan.shiguangschedule.data.model.wbu.HairdryerLaunchSource.NFC
+            )
             return
         }
 
@@ -405,39 +439,41 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 调起支付宝 U净 吹风机页面：显式包名 → 通用 Scheme → NFC Action → Universal Link 逐级兜底。
+     * 吹风机入口的第一跳：**先问本地**，能确定是手机蓝牙机就直接走原体验
+     * （品牌过场 + 调起支付宝，中途不插任何界面）；只有需要探测（云端 4G）或这种码格式
+     * 第一次遇到（要先确认判据）时，才把用户请进过渡页。
      */
+    private fun handleHairdryerEntry(
+        cd: String,
+        raw: String,
+        source: com.xingheyuzhuan.shiguangschedule.data.model.wbu.HairdryerLaunchSource
+    ) {
+        lifecycleScope.launch {
+            val local = runCatching {
+                hairdryerEntryRouter.localBluetooth(cd = cd, raw = raw, source = source)
+            }.getOrDefault(false)
+            if (local) {
+                entryOverlayDurationMs.value = HAIRDRYER_ENTRY_ANIM_MS
+                showEntryOverlay.value = true
+                launchHairdryerAlipay(cd)
+            } else {
+                pendingDeepLink.value = Destination.HairdryerLaunch(
+                    cd = cd,
+                    raw = raw,
+                    source = source.name
+                )
+            }
+        }
+    }
+
+    /** 调起支付宝 U净 吹风机页面（显式包名 → 通用 Scheme → NFC Action → Universal Link 逐级兜底）。 */
     private fun launchHairdryerAlipay(cd: String) {
-        val scheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayScheme(cd)
-        val ulinkUrl = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayUrl(cd)
-        val nfcScheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerNfcScheme(cd)
-        val explicitIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
-            setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        runCatching {
-            startActivity(explicitIntent)
-        }.getOrElse {
-            val genericIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            runCatching {
-                startActivity(genericIntent)
-            }.getOrElse {
-                val nfcIntent = Intent(NfcAdapter.ACTION_NDEF_DISCOVERED, Uri.parse(nfcScheme)).apply {
-                    setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                runCatching {
-                    startActivity(nfcIntent)
-                }.getOrElse {
-                    val ulinkIntent = Intent(Intent.ACTION_VIEW, Uri.parse(ulinkUrl)).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    runCatching { startActivity(ulinkIntent) }
-                }
-            }
-        }
+        com.xingheyuzhuan.shiguangschedule.ui.campus.ujing.launchUjingHairdryer(
+            context = this,
+            cd = cd,
+            scheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayScheme(cd),
+            ulinkUrl = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayUrl(cd)
+        )
     }
 
     private fun enableHighRefreshRate() {
@@ -905,6 +941,7 @@ fun AppNavigation(
                             Destination.CourseSelection -> CourseSelectionScreen(navBridge = navBridge)
                             Destination.QrScan -> QrScanScreen(navBridge = navBridge)
                             Destination.CampusCardPayCode -> com.xingheyuzhuan.shiguangschedule.ui.campus.paycode.PayCodeScreen(navBridge = navBridge)
+                            Destination.HairdryerHub -> com.xingheyuzhuan.shiguangschedule.ui.campus.hairdryer.HairdryerHubScreen(navBridge = navBridge)
                             Destination.UpdateRepo -> UpdateRepoScreen(navBridge = navBridge)
                             Destination.NotificationSettings -> NotificationSettingsScreen(onBack = navBridge::popBackStack)
                             Destination.LanguageSettings -> LanguageSettingScreen(onBack = navBridge::popBackStack)
@@ -935,7 +972,8 @@ fun AppNavigation(
                                 navBridge = navBridge,
                                 appId = destination.appId,
                                 initialTargetUrl = destination.initialTargetUrl,
-                                pendingAutoScan = destination.pendingAutoScan
+                                pendingAutoScan = destination.pendingAutoScan,
+                                pendingHashRoute = destination.pendingHashRoute
                             )
 
                             is Destination.UjingWater -> com.xingheyuzhuan.shiguangschedule.ui.campus.ujing.UjingWaterScreen(
@@ -965,6 +1003,13 @@ fun AppNavigation(
                                 feeitemid = destination.feeitemid,
                                 webFallbackUrl = destination.webFallbackUrl,
                                 navBridge = navBridge
+                            )
+
+                            is Destination.HairdryerLaunch -> com.xingheyuzhuan.shiguangschedule.ui.campus.hairdryer.HairdryerLaunchScreen(
+                                navBridge = navBridge,
+                                cd = destination.cd,
+                                raw = destination.raw,
+                                source = destination.source
                             )
 
                             is Destination.AddEditCourse -> AddEditCourseScreen(

@@ -335,6 +335,8 @@ fun WebAppScreen(
     appId: String,
     initialTargetUrl: String? = null,
     pendingAutoScan: String? = null,
+    /** 页面自己授权完成之后才落上去的 hash 路由，见 [Destination.WebApp.pendingHashRoute]。 */
+    pendingHashRoute: String? = null,
     viewModel: WebAppViewModel = viewModel()
 ) {
     /** 仅洗衣机（/wm/ 或小天鹅链接）进入时显示 U净 品牌首屏。 */
@@ -585,6 +587,7 @@ fun WebAppScreen(
                         platformToken = stage.token,
                         // 同理：重建时不再把自启载荷交给页面
                         pendingAutoScan = if (deepLinkAutoStarted) null else pendingAutoScan,
+                        pendingHashRoute = pendingHashRoute,
                         onSslError = { handler, error -> sslErrorState = Pair(handler, error) },
                         onWebAuthRedirect = { pageUrl -> viewModel.onWebAuthRedirect(pageUrl) },
                         onInterceptScan = { redirectUrl -> scanRequest = ScanRequest.Redirect(redirectUrl) },
@@ -683,45 +686,15 @@ fun WebAppScreen(
                         scanRequest = null
                         val hairdryer = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.parse(rawResult) as? com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.Result.Hairdryer
                         if (hairdryer != null) {
-                            val scheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayScheme(hairdryer.cd)
-                            val ulinkUrl = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayUrl(hairdryer.cd)
-                            val nfcScheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerNfcScheme(hairdryer.cd)
-                            val explicitIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
-                                setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            val launched = runCatching {
-                                context.startActivity(explicitIntent)
-                                true
-                            }.getOrElse {
-                                val genericIntent = Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                runCatching {
-                                    context.startActivity(genericIntent)
-                                    true
-                                }.getOrElse {
-                                    val nfcIntent = Intent(android.nfc.NfcAdapter.ACTION_NDEF_DISCOVERED, Uri.parse(nfcScheme)).apply {
-                                        setPackage(com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.ALIPAY_PACKAGE_NAME)
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                    runCatching {
-                                        context.startActivity(nfcIntent)
-                                        true
-                                    }.getOrElse {
-                                        val ulinkIntent = Intent(Intent.ACTION_VIEW, Uri.parse(ulinkUrl)).apply {
-                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        }
-                                        runCatching {
-                                            context.startActivity(ulinkIntent)
-                                            true
-                                        }.getOrDefault(false)
-                                    }
-                                }
-                            }
-                            if (!launched) {
-                                Toast.makeText(context, context.getString(R.string.ujing_alipay_not_installed), Toast.LENGTH_SHORT).show()
-                            }
+                            // 吹风机不归本容器管：判型（手机蓝牙 → 支付宝 / 云端 4G → 一卡通页面）
+                            // 与首次确认都在过渡页里做，这里直接换过去
+                            navBridge.replace(
+                                Destination.HairdryerLaunch(
+                                    cd = hairdryer.cd,
+                                    raw = hairdryer.raw,
+                                    source = com.xingheyuzhuan.shiguangschedule.data.model.wbu.HairdryerLaunchSource.SCAN.name
+                                )
+                            )
                             return@QrScannerOverlay
                         }
                         if (webView != null && rawResult.isNotBlank()) {
@@ -980,6 +953,52 @@ private fun buildYktShowerAutoUseJs(raw: String): String = """
 })();
 """.trimIndent()
 
+/** 判断是不是 U净 吹风机 H5（`hairdryer-h5/wechatWorkH5`）。 */
+private fun isHairdryerUrl(url: String?): Boolean =
+    url != null && url.contains("hairdryer-h5", ignoreCase = true)
+
+/**
+ * U净 吹风机设备页的「授权后再落路由」。
+ *
+ * 为什么不能直接把 `#/deviceSelector?deviceId=…` 拼在启动地址上：设备页是 `requireAuth` 路由，
+ * 而页面的授权流程**只发生在 `/`（标题「授权中…」）那一步** —— 冷启动直接落在设备页时，
+ * 路由守卫查不到令牌（`localStorage` 里的会话项），会把人扔到登录页，页面一个接口都不会发
+ * （实测：`#/login?redirect=%2FdeviceSelector…`）。
+ *
+ * 所以这里只盯一件事：页面的会话令牌一出现（键名带项目名前缀，实测 `hairdryer-wechatWorkH5-token`）
+ * 就把路由切过去，页面随后自己会去查
+ * `controlBox/devices/{id}/info` 渲染左右机。授权没成功（平台会话真的过期）时它什么都不做，
+ * 用户看到的就是页面原本的登录页。
+ */
+private fun buildHairdryerAutoRouteJs(route: String): String = """
+(function() {
+  var route = ${JSONObject.quote(route)};
+  if (window.__cfHairdryerRouted === route) return;
+  window.__cfHairdryerRouted = route;
+  // 页面的存储是按项目名前缀的（实测键名 `hairdryer-wechatWorkH5-token`），
+  // 所以这里扫一遍所有以 -token / -tempToken 结尾的键，不写死具体前缀
+  function token() {
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && /-(temp)?token$/.test(k) && localStorage.getItem(k)) return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+  function go() { if (location.hash !== route) location.hash = route; }
+  var tries = 0;
+  var timer = setInterval(function() {
+    if (++tries > 150) { clearInterval(timer); return; }
+    if (!token()) return;
+    clearInterval(timer);
+    // 页面自己在授权完成后也会 replace 到 /home，所以稍等再落，并补一次
+    setTimeout(go, 400);
+    setTimeout(function() { if (location.hash !== route) go(); }, 1600);
+  }, 300);
+})();
+""".trimIndent()
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun FullScreenWebContent(
@@ -988,6 +1007,8 @@ private fun FullScreenWebContent(
     definition: WebAppDefinition?,
     platformToken: String?,
     pendingAutoScan: String? = null,
+    /** 页面自己授权完成之后才落上去的 hash 路由（U净 吹风机设备页），见 [buildHairdryerAutoRouteJs]。 */
+    pendingHashRoute: String? = null,
     onSslError: (SslErrorHandler, SslError) -> Unit,
     /** 网页被踢回统一认证登录页；[pageUrl] 是当前停留在的那一页（可能为 null），供自愈时回到原地。 */
     onWebAuthRedirect: (pageUrl: String?) -> Unit,
@@ -1324,6 +1345,10 @@ private fun FullScreenWebContent(
                         if (!pendingAutoScan.isNullOrBlank() && isYktXyyyUrl(url)) {
                             view?.evaluateJavascript(buildYktShowerAutoUseJs(pendingAutoScan), null)
                             autoStartHandedOff = true
+                        }
+                        // U净 吹风机：设备页是受保护路由，得等页面自己授权完再切过去
+                        if (!pendingHashRoute.isNullOrBlank() && isHairdryerUrl(url)) {
+                            view?.evaluateJavascript(buildHairdryerAutoRouteJs(pendingHashRoute), null)
                         }
                     }
                     // 通知外层「这个条目的深链自启已经用完」：它存进保存状态，

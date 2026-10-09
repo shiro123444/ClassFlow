@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 吹风机桌面快捷方式预设图标：吹风机（给每台机器挑一个，铺在桌面上好认）。
+     自带底色：浅色 / 深色桌面都能看清，也不依赖 Launcher 的图标底色。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 圆角底色 -->
+    <path
+        android:fillColor="#5C6BC0"
+        android:pathData="M0,24 A24,24 0 0 1 24,0 H84 A24,24 0 0 1 108,24 V84 A24,24 0 0 1 84,108 H24 A24,24 0 0 1 0,84 Z" />
+
+    <!-- 图形主体（彩色底 + 白色图形：远看是一块彩色，近看能分辨） -->
+    <path
+        android:fillType="nonZero"
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M26,36 H74 A10,10 0 0 1 84,46 V62 A10,10 0 0 1 74,72 H26 A10,10 0 0 1 16,62 V46 A10,10 0 0 1 26,36 Z M40,72 H60 V88 A6,6 0 0 1 54,94 H46 A6,6 0 0 1 40,88 Z M84,46 H98 V62 H84 Z" />
+</vector>

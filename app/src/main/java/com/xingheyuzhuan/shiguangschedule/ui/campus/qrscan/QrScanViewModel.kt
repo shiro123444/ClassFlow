@@ -89,7 +89,23 @@ enum class QrTransientNotice {
 sealed interface QrScanEvent {
     data class NavigateToWater(val cd: String) : QrScanEvent
     data class NavigateToWasher(val initialUrl: String?, val pendingAutoScan: String) : QrScanEvent
-    data class OpenHairdryer(val cd: String, val scheme: String, val ulinkUrl: String) : QrScanEvent
+
+    /**
+     * 手机**蓝牙**吹风机：本容器没有蓝牙能力，交回支付宝 U净 小程序（**原体验**：
+     * 本页播品牌过场 + 调起支付宝，中间不再插任何界面）。
+     */
+    data class OpenHairdryer(val cd: String) : QrScanEvent
+
+    /**
+     * 吹风机**需要先判型**（云端要票据 / 这种码格式第一次遇到要确认）：
+     * 交给过渡页 [com.xingheyuzhuan.shiguangschedule.Destination.HairdryerLaunch]。
+     */
+    data class NavigateToHairdryer(
+        val cd: String,
+        /** 扫码原文（探测与支付宝调起都要求逐字回传）。 */
+        val raw: String
+    ) : QrScanEvent
+
     /** 通用链接节点（`/url/{code}`、短别名 `/u/{code}`）。 */
     data class OpenLinkHub(val code: String?, val inline: String?, val origin: String) : QrScanEvent
 
@@ -120,7 +136,8 @@ sealed interface QrScanEvent {
 @HiltViewModel
 class QrScanViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val showerResolver: CampusShowerEntryResolver
+    private val showerResolver: CampusShowerEntryResolver,
+    private val hairdryerRouter: com.xingheyuzhuan.shiguangschedule.data.repository.HairdryerEntryRouter
 ) : ViewModel() {
 
     private var engine = createEngine()
@@ -364,9 +381,7 @@ class QrScanViewModel @Inject constructor(
             }
 
             is com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.Result.Hairdryer -> {
-                val scheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayScheme(ujing.cd)
-                val ulink = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayUrl(ujing.cd)
-                _scanEvent.tryEmit(QrScanEvent.OpenHairdryer(cd = ujing.cd, scheme = scheme, ulinkUrl = ulink))
+                checkHairdryer(ujing)
             }
 
             is com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.Result.Washer -> {
@@ -374,6 +389,28 @@ class QrScanViewModel @Inject constructor(
             }
         }
         return true
+    }
+
+    /**
+     * 吹风机分流：**先问本地**（设置 / 用户裁决 / 历史记录），本地已经能确定是蓝牙机就
+     * 直接走原体验 —— 本页播品牌过场 + 调起支付宝，不经过任何多余界面；
+     * 只有「云端要换票」或「这种码格式第一次遇到要确认」才进过渡页。
+     */
+    private fun checkHairdryer(hairdryer: com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.Result.Hairdryer) {
+        viewModelScope.launch {
+            val local = runCatching {
+                hairdryerRouter.localBluetooth(
+                    cd = hairdryer.cd,
+                    raw = hairdryer.raw,
+                    source = com.xingheyuzhuan.shiguangschedule.data.model.wbu.HairdryerLaunchSource.SCAN
+                )
+            }.getOrDefault(false)
+            if (local) {
+                _scanEvent.tryEmit(QrScanEvent.OpenHairdryer(cd = hairdryer.cd))
+            } else {
+                _scanEvent.tryEmit(QrScanEvent.NavigateToHairdryer(cd = hairdryer.cd, raw = hairdryer.raw))
+            }
+        }
     }
 
     private fun handleWasher(washer: com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.Result.Washer) {

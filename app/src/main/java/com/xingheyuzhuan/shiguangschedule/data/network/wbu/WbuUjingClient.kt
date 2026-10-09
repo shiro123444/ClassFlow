@@ -51,6 +51,19 @@ class WbuUjingClient(
         const val WASHER_APP_ID = 45
         const val ORDER_TYPE_SCAN = 11 // 武汉企业微信渠道 = 扫码/一卡通免密
 
+        /** 吹风机（一卡通「自助吹风」子应用，页面 `hairdryer-h5/wechatWorkH5`）。 */
+        const val HAIRDRYER_APP_ID = 46
+
+        /**
+         * 云端设备（控制盒 / 4G）的 `moduleType`。
+         *
+         * 判据取自页面自身（`hairdryer-h5` 的 `choseDevice`）：企业微信 / 一卡通容器里
+         * `moduleType !== 7` 一律弹「暂不支持蓝牙设备」，只有 `7` 才继续走控制盒下单流程。
+         * 也就是说 `7` = 能在一卡通「自助吹风」页面下单（云端 / 4G）；其余（实测本校区为 1）
+         * = 手机蓝牙直连，只能交给支付宝 / U净 App 这类能开蓝牙的容器。
+         */
+        const val HAIRDRYER_MODULE_TYPE_CLOUD = 7
+
         private const val UA = "Mozilla/5.0 (Linux; Android 16; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/130 Mobile Safari/537.36 wxwork/4.1.36 MicroMessenger/7.0.1"
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
@@ -128,6 +141,57 @@ class WbuUjingClient(
         val rawData: JSONObject
     )
 
+    /**
+     * 吹风机扫码结果（`controlBox/devices/scan`）。
+     *
+     * [createOrderEnabled] 只表示「现在能不能下单」，不能当设备类型用：
+     * 蓝牙设备的控制盒记录同样会回 true（实测本校区全部如此），
+     * 是蓝牙还是云端由 [HairdryerHubInfo.moduleType] 决定。
+     */
+    data class HairdryerScanResult(
+        val deviceId: String?,
+        val createOrderEnabled: Boolean,
+        val status: Int?,
+        val reason: String?
+    )
+
+    /**
+     * 吹风机控制盒（hub）信息（`controlBox/devices/{deviceId}/info`）。
+     *
+     * 一台控制盒带左右两个子机（`subDevice`，status = 3 表示停用），所以扫码拿到的是 hub 的
+     * [deviceId]，而不是某一台吹风机。
+     */
+    data class HairdryerHubInfo(
+        val hubDeviceTypeId: Int,
+        val hubDeviceTypeName: String?,
+        val moduleType: Int,
+        val macAddress: String?,
+        val no: String?,
+        /** 未停用的子机数量（页面会把 status = 3 的子机过滤掉）。 */
+        val availableSubDevices: Int,
+        /**
+         * 第一台可用子机的 ID（左机优先）。
+         *
+         * 页面点进某一台机之后才会用到它（`#/placeOrder?subDeviceId=`），
+         * 这里取来只为查店铺名（`controlBox/devices/{subDeviceId}/model`）。
+         */
+        val availableSubDeviceId: String? = null
+    ) {
+        /** 云端（控制盒 / 4G）设备：一卡通「自助吹风」页面能下单。 */
+        val isCloud: Boolean get() = moduleType == HAIRDRYER_MODULE_TYPE_CLOUD
+    }
+
+    /**
+     * 子机计费 / 门店信息（`controlBox/devices/{subDeviceId}/model`）。
+     *
+     * 店铺名与服务主体名挂在这一层（页面在选择程序那一步才查），也是吹风机记录列表
+     * 大/小标题的来源：[storeName]（如「南B-11」）、[subjectName]（如「武汉商学院26-本部」）。
+     */
+    data class HairdryerModelInfo(
+        val storeName: String?,
+        val subjectName: String?
+    )
+
     private fun ujHeaders(appCode: String = "COA"): Map<String, String> = buildMap {
         put("Content-Type", "application/json; charset=utf-8")
         put("x-app-code", appCode)
@@ -142,7 +206,7 @@ class WbuUjingClient(
      * 建立 U净 会话（跨平台 SSO 换票）。
      *
      * @param platformToken 一卡通平台的 access_token
-     * @param appId 平台子应用 ID（59=饮水，45=洗衣）
+     * @param appId 平台子应用 ID（59=饮水，45=洗衣，46=吹风机）
      */
     suspend fun connect(platformToken: String, appId: Int = WATER_APP_ID): UjingUser = withContext(Dispatchers.IO) {
         // 1. 获取带 ticket 的平台启动跳转地址
@@ -419,6 +483,117 @@ class WbuUjingClient(
                 merchantMobile = merchantMobile,
                 lastUseDeviceId = deviceId,
                 rawData = data
+            )
+        }
+    }
+
+    /**
+     * 吹风机扫码（`controlBox/devices/scan`，`hairdryer-h5` 首页「扫一扫」用的就是它）。
+     *
+     * 响应形如（实测 2026-10-08）：
+     * - 蓝牙设备：`{"deviceId":"7c74…","createOrderEnabled":true,"status":0,"reason":""}`
+     * - 未绑定控制盒：`{"deviceId":"","createOrderEnabled":false,"status":5,"reason":"当前设备未绑定。"}`
+     * - 左右机都不可用：`code = 1116`「当前两台设备不可用，请更换至其他设备!」（抛 [UjingApiException]）
+     *
+     * 注意 [HairdryerScanResult.createOrderEnabled] 对蓝牙设备也可以是 true —— 设备是蓝牙还是
+     * 云端要看 [getHairdryerHubInfo] 的 `moduleType`，别用这个字段判类型。
+     */
+    suspend fun scanHairdryerCode(qrCode: String): HairdryerScanResult = withContext(Dispatchers.IO) {
+        val body = JSONObject().apply { put("qrCode", qrCode) }
+        val req = Request.Builder()
+            .url("$UJING_API/$UJING_CLIENT_PATH/controlBox/devices/scan")
+            .post(body.toString().toRequestBody(JSON_MEDIA))
+            .apply { ujHeaders("COA").forEach { (k, v) -> header(k, v) } }
+            .build()
+
+        httpClient.newCall(req).execute().use { resp ->
+            val bodyStr = resp.body?.string().orEmpty()
+            val json = JSONObject(bodyStr)
+            if (json.optInt("code") != 0) {
+                val msg = json.optString("message").ifBlank { "吹风机扫码未成功 (code=${json.optInt("code")})" }
+                throw UjingApiException(json.optInt("code"), msg)
+            }
+            val data = json.optJSONObject("data") ?: throw IOException("吹风机扫码未返回数据: $bodyStr")
+            HairdryerScanResult(
+                deviceId = data.optString("deviceId").takeIf { it.isNotBlank() },
+                createOrderEnabled = data.optBoolean("createOrderEnabled"),
+                status = if (data.has("status")) data.optInt("status") else null,
+                reason = data.optString("reason").takeIf { it.isNotBlank() }
+            )
+        }
+    }
+
+    /**
+     * 吹风机控制盒信息（`controlBox/devices/{deviceId}/info`）：
+     * 一台控制盒 + 左右两个子机，[HairdryerHubInfo.moduleType] 即「蓝牙 / 云端」的判据。
+     */
+    suspend fun getHairdryerHubInfo(deviceId: String): HairdryerHubInfo = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url("$UJING_API/$UJING_CLIENT_PATH/controlBox/devices/${deviceId}/info")
+            .get()
+            .apply { ujHeaders("COA").forEach { (k, v) -> header(k, v) } }
+            .build()
+
+        httpClient.newCall(req).execute().use { resp ->
+            val bodyStr = resp.body?.string().orEmpty()
+            val json = JSONObject(bodyStr)
+            if (json.optInt("code") != 0) {
+                val msg = json.optString("message").ifBlank { "吹风机设备信息未取到 (code=${json.optInt("code")})" }
+                throw UjingApiException(json.optInt("code"), msg)
+            }
+            val data = json.optJSONObject("data") ?: throw IOException("吹风机设备信息未返回数据: $bodyStr")
+            val subDevices = data.optJSONArray("subDevice")
+            var available = 0
+            var firstAvailableId: String? = null
+            if (subDevices != null) {
+                for (i in 0 until subDevices.length()) {
+                    val sub = subDevices.optJSONObject(i) ?: continue
+                    // 与页面一致：status = 3 是停用，其余（含占用）都算「有这台机」
+                    if (sub.optInt("status") != 3) {
+                        available++
+                        if (firstAvailableId == null) {
+                            firstAvailableId = sub.optString("subDeviceId").takeIf { it.isNotBlank() }
+                        }
+                    }
+                }
+            }
+            HairdryerHubInfo(
+                hubDeviceTypeId = data.optInt("hubDeviceTypeId"),
+                hubDeviceTypeName = data.optString("hubDeviceTypeName").takeIf { it.isNotBlank() },
+                moduleType = data.optInt("moduleType"),
+                macAddress = data.optString("macAddress").takeIf { it.isNotBlank() },
+                no = data.optString("no").takeIf { it.isNotBlank() },
+                availableSubDevices = available,
+                availableSubDeviceId = firstAvailableId
+            )
+        }
+    }
+
+    /**
+     * 子机计费 / 门店信息（`controlBox/devices/{subDeviceId}/model`）。
+     *
+     * 只关心 [HairdryerModelInfo.storeName] / [HairdryerModelInfo.subjectName]：
+     * 一卡通页面把这两项拼在设备卡片上（`store.serviceSubjectName + store.storeName`），
+     * 也是吹风机记录列表的大小标题。取不到就当没有，不影响任何跳转。
+     */
+    suspend fun getHairdryerModel(subDeviceId: String): HairdryerModelInfo = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url("$UJING_API/$UJING_CLIENT_PATH/controlBox/devices/${subDeviceId}/model")
+            .get()
+            .apply { ujHeaders("COA").forEach { (k, v) -> header(k, v) } }
+            .build()
+
+        httpClient.newCall(req).execute().use { resp ->
+            val bodyStr = resp.body?.string().orEmpty()
+            val json = JSONObject(bodyStr)
+            if (json.optInt("code") != 0) {
+                val msg = json.optString("message").ifBlank { "吹风机门店信息未取到 (code=${json.optInt("code")})" }
+                throw UjingApiException(json.optInt("code"), msg)
+            }
+            val store = json.optJSONObject("data")?.optJSONObject("store")
+            HairdryerModelInfo(
+                storeName = store?.optString("storeName")?.takeIf { it.isNotBlank() },
+                subjectName = store?.optString("serviceSubjectName")?.takeIf { it.isNotBlank() }
             )
         }
     }

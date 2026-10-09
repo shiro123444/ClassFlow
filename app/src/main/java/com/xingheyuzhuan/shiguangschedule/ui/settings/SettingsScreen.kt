@@ -274,6 +274,14 @@ fun SettingsScreen(
                         onClick = { navBridge.navigate(Destination.CampusCardPayCode) }
                     )
                     SettingDivider()
+                    // 吹风机：判型设置 + 使用记录 + 桌面快捷方式（蓝牙跳支付宝 / 4G 跳一卡通页面）
+                    SettingTile(
+                        icon = androidx.compose.material.icons.Icons.Rounded.Air,
+                        title = stringResource(R.string.item_hairdryer_hub),
+                        subtitle = stringResource(R.string.desc_hairdryer_hub),
+                        onClick = { navBridge.navigate(Destination.HairdryerHub) }
+                    )
+                    SettingDivider()
                     SettingTile(
                         icon = androidx.compose.material.icons.Icons.Rounded.HowToReg,
                         title = stringResource(R.string.item_course_selection),

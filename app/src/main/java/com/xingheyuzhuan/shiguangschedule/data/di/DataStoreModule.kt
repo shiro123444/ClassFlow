@@ -18,6 +18,8 @@ import javax.inject.Singleton
 val Context.appSettingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "app_settings")
 // 定义通用的 api_config 文件委托
 private val Context.apiConfigDataStore: DataStore<Preferences> by preferencesDataStore(name = "api_config")
+// 吹风机记录 / 判型策略：独立文件，天然不参与 WebDAV 同步（只存本机）
+private val Context.hairdryerHubDataStore: DataStore<Preferences> by preferencesDataStore(name = "hairdryer_hub")
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -51,5 +53,17 @@ object DataStoreModule {
     @Named("ApiConfig")
     fun provideApiConfigDataStore(@ApplicationContext context: Context): DataStore<Preferences> {
         return context.apiConfigDataStore
+    }
+
+    /**
+     * 吹风机页面的本地存储（使用记录 + 判型策略 + 桌面快捷方式图标）。
+     *
+     * 刻意放在独立文件：这些是「这台手机自己的使用习惯」，不属于要跟 WebDAV 同步的设置。
+     */
+    @Provides
+    @Singleton
+    @Named("HairdryerHub")
+    fun provideHairdryerHubDataStore(@ApplicationContext context: Context): DataStore<Preferences> {
+        return context.hairdryerHubDataStore
     }
 }

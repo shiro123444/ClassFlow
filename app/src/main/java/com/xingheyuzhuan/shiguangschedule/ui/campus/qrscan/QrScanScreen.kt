@@ -33,7 +33,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -44,8 +43,6 @@ import com.xingheyuzhuan.shiguangschedule.R
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WasherNoticeDialog
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuAuthTipsScenario
 import com.xingheyuzhuan.shiguangschedule.ui.campus.components.WbuCampusAuthSheet
-import com.xingheyuzhuan.shiguangschedule.ui.campus.ujing.launchUjingHairdryer
-import com.xingheyuzhuan.shiguangschedule.ui.components.LocalEntryOverlayController
 
 /**
  * 扫一扫：以本机已登录的统一认证会话，确认其它端（PC）展示的登录二维码。
@@ -57,7 +54,9 @@ fun QrScanScreen(
     navBridge: NavBridge,
     viewModel: QrScanViewModel = hiltViewModel()
 ) {
-    val context = LocalContext.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    /** 应用级品牌过场：扫码 → 吹风机时本页会被 pop，动画挂在应用层才不会被销毁。 */
+    val entryOverlay = com.xingheyuzhuan.shiguangschedule.ui.components.LocalEntryOverlayController.current
     val state by viewModel.state.collectAsState()
     val transientNotice by viewModel.transientNotice.collectAsState()
     val tlsPrompt by viewModel.tlsPrompt.collectAsState()
@@ -67,9 +66,6 @@ fun QrScanScreen(
     val washerNotice by viewModel.washerNotice.collectAsState()
     val washerLoading by viewModel.washerLoading.collectAsState()
     val showerChecking by viewModel.showerChecking.collectAsState()
-
-    /** 应用级品牌过场：扫码 → 吹风机时本页会被 pop，动画挂在应用层才不会被销毁。 */
-    val entryOverlay = LocalEntryOverlayController.current
 
     var showAuthSheet by remember { mutableStateOf(false) }
 
@@ -122,11 +118,29 @@ fun QrScanScreen(
                     )
                 }
                 is QrScanEvent.OpenHairdryer -> {
-                    // 先请求应用层品牌过场：本页随后会 pop，动画不受影响，正好盖住支付宝冷启动空白期
+                    // 蓝牙吹风机（原体验）：先请求应用层品牌过场（本页随后会 pop，动画挂在应用层
+                    // 才不会被销毁，正好盖住支付宝冷启动的空白期），再调起支付宝 U净 小程序
                     entryOverlay.show(1800)
-                    if (launchUjingHairdryer(context, event.cd, event.scheme, event.ulinkUrl)) {
+                    if (
+                        com.xingheyuzhuan.shiguangschedule.ui.campus.ujing.launchUjingHairdryer(
+                            context = context,
+                            cd = event.cd,
+                            scheme = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayScheme(event.cd),
+                            ulinkUrl = com.xingheyuzhuan.shiguangschedule.data.network.wbu.UjingQrLink.buildHairdryerAlipayUrl(event.cd)
+                        )
+                    ) {
                         navBridge.popBackStack()
                     }
+                }
+                is QrScanEvent.NavigateToHairdryer -> {
+                    // 需要先判型（云端要票据 / 首次确认）：交给过渡页
+                    navBridge.replace(
+                        com.xingheyuzhuan.shiguangschedule.Destination.HairdryerLaunch(
+                            cd = event.cd,
+                            raw = event.raw,
+                            source = com.xingheyuzhuan.shiguangschedule.data.model.wbu.HairdryerLaunchSource.SCAN.name
+                        )
+                    )
                 }
             }
         }

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 吹风机桌面快捷方式预设图标：雪花（给每台机器挑一个，铺在桌面上好认）。
+     自带底色：浅色 / 深色桌面都能看清，也不依赖 Launcher 的图标底色。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 圆角底色 -->
+    <path
+        android:fillColor="#26C6DA"
+        android:pathData="M0,24 A24,24 0 0 1 24,0 H84 A24,24 0 0 1 108,24 V84 A24,24 0 0 1 84,108 H24 A24,24 0 0 1 0,84 Z" />
+
+    <!-- 图形主体（彩色底 + 白色图形：远看是一块彩色，近看能分辨） -->
+    <path
+        android:fillType="nonZero"
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18.00,54.00 L90.00,54.00 L90.00,62.00 L18.00,62.00 Z M39.46,24.82 L75.46,87.18 L68.54,91.18 L32.54,28.82 Z M75.46,28.82 L39.46,91.18 L32.54,87.18 L68.54,24.82 Z M32.54,87.18 L68.54,24.82 L75.46,28.82 L39.46,91.18 Z M68.54,91.18 L32.54,28.82 L39.46,24.82 L75.46,87.18 Z M58.00,22.00 L58.00,94.00 L50.00,94.00 L50.00,22.00 Z" />
+</vector>

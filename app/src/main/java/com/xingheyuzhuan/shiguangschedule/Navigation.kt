@@ -59,6 +59,13 @@ sealed interface Destination : NavKey {
     /** 一卡通付款码（原生取码页面，无需进入平台 WebApp）。 */
     @Serializable data object CampusCardPayCode : Destination
 
+    /**
+     * 吹风机页（校园服务 → 吹风机）：判型设置 + 使用记录 + 桌面快捷方式。
+     *
+     * 记录是**本机**的：扫过哪几台、各自是蓝牙还是 4G、给它们起的名字与图标都只存本地。
+     */
+    @Serializable data object HairdryerHub : Destination
+
     // --- 动态传参页面 ---
 
     @Serializable
@@ -81,7 +88,16 @@ sealed interface Destination : NavKey {
     data class WebApp(
         val appId: String,
         val initialTargetUrl: String? = null,
-        val pendingAutoScan: String? = null
+        val pendingAutoScan: String? = null,
+        /**
+         * 页面**自己授权完成之后**才落上去的 hash 路由（例：U净 吹风机的
+         * `#/deviceSelector?deviceId=…`）。
+         *
+         * 为什么不能直接拼进 [initialTargetUrl]：这类页面把授权流程放在 `/`「授权中」那一步，
+         * 而设备页是 `requireAuth` 路由 —— 冷启动直接落在设备页时，路由守卫拿不到令牌，
+         * 会把人扔到登录页。所以由容器在页面里等令牌出现，再切路由（见 `WebAppScreen`）。
+         */
+        val pendingHashRoute: String? = null
     ) : Destination
 
     @Serializable
@@ -163,6 +179,27 @@ sealed interface Destination : NavKey {
         val webFallbackUrl: String? = null,
         val scanId: Long = 0L
     ) : Destination
+
+    /**
+     * 吹风机分流**过渡页**：先把「这台是手机蓝牙还是云端（控制盒 / 4G）」定下来，再决定去哪。
+     *
+     * 三种入口（扫码 / NFC / 桌面快捷方式与记录直达）共用这一个页面，判型、首次确认弹窗、
+     * 跳转都只写一份：
+     * - 蓝牙（或探测失败兜底）→ 应用层品牌过场 + 调起支付宝 U净 小程序；
+     * - 云端 → 换成 [WebApp]（一卡通「自助吹风」页面，地址已停在左右机选择那一步）。
+     *
+     * [source] 决定这次用哪套判型设置（见 `HairdryerLaunchSource`）：扫码用扫码设置、
+     * NFC 用 NFC 设置、直达用这条记录自己的类型。
+     */
+    @Serializable
+    data class HairdryerLaunch(
+        /** 设备码（`cd`）。 */
+        val cd: String,
+        /** 扫码原文（逐字回传：换成别的写法服务端会答「当前设备未绑定。」）。 */
+        val raw: String = "",
+        val source: String = com.xingheyuzhuan.shiguangschedule.data.model.wbu.HairdryerLaunchSource.SCAN.name,
+        val scanId: Long = 0L
+    ) : Destination
 }
 
 /**
@@ -186,4 +223,6 @@ val Destination.isMainScreen: Boolean
 fun isSeamlessHandoff(from: Destination?, to: Destination?): Boolean =
     (from is Destination.ShowerDirect && to is Destination.WebApp) ||
             (from is Destination.WebApp && to is Destination.ShowerDirect) ||
-            (from is Destination.LinkHub && to is Destination.WebApp)
+            (from is Destination.LinkHub && to is Destination.WebApp) ||
+            // 吹风机过渡页与 WebApp 首屏同为品牌过渡组件，硬切才看不出切换
+            (from is Destination.HairdryerLaunch && to is Destination.WebApp)

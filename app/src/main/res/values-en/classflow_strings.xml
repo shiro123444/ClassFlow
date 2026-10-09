@@ -833,6 +833,7 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="dialog_ujing_washer_unavailable_message">This washing machine is not available right now. Please try again later or use another one.</string>
     <string name="dialog_ujing_washer_merchant_phone">Contact merchant: %1$s</string>
     <string name="ujing_washer_checking">Checking washing machine status...</string>
+    <string name="ujing_hairdryer_checking">Checking hair dryer type...</string>
     <string name="ujing_alipay_not_installed">No app found to handle Alipay request</string>
 
     <!-- Language settings (upstream sync: language tag array + display name array, empty tag = follow system) -->
@@ -1052,4 +1053,61 @@ Overwriting replaces old schedule data and rebinds. Creating a new schedule is r
     <string name="pay_code_action_barcode">Barcode</string>
     <string name="pay_code_action_digits">Digits</string>
     <string name="pay_code_overlay_hint">Tap anywhere to go back</string>
+    <!-- 吹风机（判型 / 使用记录 / 桌面快捷方式） -->
+    <string name="item_hairdryer_hub">Hair dryer</string>
+    <string name="desc_hairdryer_hub">Detection, history and shortcuts</string>
+    <string name="title_hairdryer_hub">Hair dryer</string>
+    <string name="hairdryer_mode_card_title">Scan detection</string>
+    <string name="hairdryer_mode_hint">Decides whether a scan opens Alipay or the campus-card page</string>
+    <string name="hairdryer_action_settings">Settings</string>
+    <string name="hairdryer_section_history">History</string>
+    <string name="hairdryer_history_empty">Nothing yet — scan a hair dryer, or pin one to your home screen, and it will show up here.</string>
+    <string name="hairdryer_history_use_count">Used %1$d times</string>
+    <string name="hairdryer_type_bluetooth">Bluetooth</string>
+    <string name="hairdryer_type_cloud">4G</string>
+    <string name="hairdryer_source_probe">Detected from device info</string>
+    <string name="hairdryer_source_format">Detected from code format</string>
+    <string name="hairdryer_source_manual">Set manually</string>
+    <string name="hairdryer_source_fallback">Detection failed, treated as Bluetooth</string>
+    <string name="hairdryer_action_use">Use now</string>
+    <string name="hairdryer_action_rename">Rename</string>
+    <string name="hairdryer_action_make_bluetooth">Mark as Bluetooth</string>
+    <string name="hairdryer_action_make_cloud">Mark as 4G</string>
+    <string name="hairdryer_action_pin_shortcut">Add to home screen</string>
+    <string name="hairdryer_action_delete">Delete</string>
+    <string name="hairdryer_action_scan">Scan a hair dryer</string>
+    <string name="hairdryer_message_shortcut_requested">Home-screen shortcut requested</string>
+    <string name="hairdryer_message_shortcut_unsupported">目前桌面不支援加入圖示，可在系統桌面裡手動加入</string>
+    <string name="hairdryer_message_names_updated">Device names updated</string>
+    <string name="hairdryer_message_type_changed">Type updated</string>
+    <string name="hairdryer_settings_title">Hair dryer settings</string>
+    <string name="hairdryer_settings_mode_section">Detection mode</string>
+    <string name="hairdryer_mode_auto">Automatic</string>
+    <string name="hairdryer_mode_auto_desc">Uses the code format first (16 digits = Bluetooth, 32 chars = 4G), falls back to device info</string>
+    <string name="hairdryer_mode_auto_device">Automatic (device info only)</string>
+    <string name="hairdryer_mode_auto_device_desc">Always asks the campus-card API (more accurate, slightly slower)</string>
+    <string name="hairdryer_mode_bluetooth">Bluetooth (opens Alipay)</string>
+    <string name="hairdryer_mode_bluetooth_desc">Always opens the Ujing mini program in Alipay</string>
+    <string name="hairdryer_mode_cloud">4G (campus-card page)</string>
+    <string name="hairdryer_mode_cloud_desc">Always opens the campus-card hair-dryer page</string>
+    <string name="hairdryer_settings_nfc_section">NFC tap</string>
+    <string name="hairdryer_nfc_follow">Same as scanning</string>
+    <string name="hairdryer_settings_reset_format">Ask about code formats again</string>
+    <string name="hairdryer_settings_reset_format_desc">Forgets the 16/32-character rule so you are asked again</string>
+    <string name="hairdryer_settings_local_note">These settings and records stay on this device only.</string>
+    <string name="hairdryer_confirm_title">Quick check</string>
+    <string name="hairdryer_confirm_message_bluetooth">This 16-digit code looks like a Bluetooth hair dryer, so Alipay will open. Is that right?</string>
+    <string name="hairdryer_confirm_message_cloud">This 32-character code looks like a 4G (control box) hair dryer, so the campus-card page will open. Is that right?</string>
+    <string name="hairdryer_confirm_correct">Correct</string>
+    <string name="hairdryer_confirm_incorrect">Not correct</string>
+    <string name="hairdryer_confirm_hint">Not sure? You can change this later in Settings → Campus services → Hair dryer.</string>
+    <string name="hairdryer_rename_title">Rename</string>
+    <string name="hairdryer_rename_hint">Leave empty to use the default name</string>
+    <string name="hairdryer_icon_picker_title">Choose an icon</string>
+    <string name="hairdryer_icon_picker_hint">The icon only changes how the shortcut looks</string>
+    <string name="hairdryer_action_refresh_names">Update device names</string>
+    <!-- 吹风机桌面快捷方式的结果提示 -->
+    <string name="hairdryer_message_shortcut_updated">桌面圖示已更新</string>
+    <string name="hairdryer_message_shortcut_already">桌面上已經有這台吹風機的圖示了</string>
+    <string name="hairdryer_message_shortcut_failed">加入失敗，請稍後再試</string>
 </resources>

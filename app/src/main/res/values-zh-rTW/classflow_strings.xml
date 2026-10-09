@@ -833,6 +833,7 @@
     <string name="dialog_ujing_washer_unavailable_message">該洗衣機目前無法下單，請稍後重試或換一台設備。</string>
     <string name="dialog_ujing_washer_merchant_phone">聯繫商家：%1$s</string>
     <string name="ujing_washer_checking">正在核驗洗衣機狀態...</string>
+    <string name="ujing_hairdryer_checking">正在核驗吹風機設備...</string>
     <string name="ujing_alipay_not_installed">未找到可處理支付寶請求的應用</string>
 
     <!-- 語言設定（上游同步：語言 Tag 陣列 + 語言顯示名稱陣列，跟隨系統用空 tag 表示） -->
@@ -1052,4 +1053,61 @@
     <string name="pay_code_action_barcode">條碼</string>
     <string name="pay_code_action_digits">數字碼</string>
     <string name="pay_code_overlay_hint">點擊任意處返回</string>
+    <!-- 吹风机（判型 / 使用记录 / 桌面快捷方式） -->
+    <string name="item_hairdryer_hub">吹風機</string>
+    <string name="desc_hairdryer_hub">掃碼判型、使用記錄與桌面捷徑</string>
+    <string name="title_hairdryer_hub">吹風機</string>
+    <string name="hairdryer_mode_card_title">掃碼判型</string>
+    <string name="hairdryer_mode_hint">決定掃碼後跳支付寶還是一卡通頁面</string>
+    <string name="hairdryer_action_settings">設定</string>
+    <string name="hairdryer_section_history">使用記錄</string>
+    <string name="hairdryer_history_empty">還沒有記錄：掃一台吹風機，或在記錄裡給它建個桌面圖示，這裡就會留下它。</string>
+    <string name="hairdryer_history_use_count">用過 %1$d 次</string>
+    <string name="hairdryer_type_bluetooth">藍牙</string>
+    <string name="hairdryer_type_cloud">4G</string>
+    <string name="hairdryer_source_probe">依裝置資訊判定</string>
+    <string name="hairdryer_source_format">依碼格式判定</string>
+    <string name="hairdryer_source_manual">手動指定</string>
+    <string name="hairdryer_source_fallback">探測失敗，按藍牙處理</string>
+    <string name="hairdryer_action_use">直接使用</string>
+    <string name="hairdryer_action_rename">重新命名</string>
+    <string name="hairdryer_action_make_bluetooth">改為藍牙</string>
+    <string name="hairdryer_action_make_cloud">改為 4G</string>
+    <string name="hairdryer_action_pin_shortcut">加入桌面</string>
+    <string name="hairdryer_action_delete">刪除</string>
+    <string name="hairdryer_action_scan">掃一台吹風機</string>
+    <string name="hairdryer_message_shortcut_requested">已請求加入桌面</string>
+    <string name="hairdryer_message_shortcut_unsupported">当前桌面不支持添加图标，可在系统桌面里手动添加</string>
+    <string name="hairdryer_message_names_updated">裝置名稱已更新</string>
+    <string name="hairdryer_message_type_changed">已按新的類型處理</string>
+    <string name="hairdryer_settings_title">吹風機設定</string>
+    <string name="hairdryer_settings_mode_section">掃碼判型方式</string>
+    <string name="hairdryer_mode_auto">自動</string>
+    <string name="hairdryer_mode_auto_desc">先看碼的格式（16 位數字 = 藍牙，32 位 = 4G），格式不認識時再查裝置資訊</string>
+    <string name="hairdryer_mode_auto_device">自動（只看裝置資訊）</string>
+    <string name="hairdryer_mode_auto_device_desc">不問格式，每次都問一卡通介面（更準、稍慢）</string>
+    <string name="hairdryer_mode_bluetooth">藍牙（跳支付寶）</string>
+    <string name="hairdryer_mode_bluetooth_desc">掃碼一律調起支付寶 U淨 小程式</string>
+    <string name="hairdryer_mode_cloud">4G（跳一卡通頁面）</string>
+    <string name="hairdryer_mode_cloud_desc">掃碼一律開啟一卡通「自助吹風」頁面</string>
+    <string name="hairdryer_settings_nfc_section">NFC 觸碰</string>
+    <string name="hairdryer_nfc_follow">與掃碼一致</string>
+    <string name="hairdryer_settings_reset_format">重新確認碼格式</string>
+    <string name="hairdryer_settings_reset_format_desc">忘掉「16 位 / 32 位碼」的判據，下次遇到時再問一遍</string>
+    <string name="hairdryer_settings_local_note">這些設定與記錄只存本機，不隨帳號同步。</string>
+    <string name="hairdryer_confirm_title">先確認一下</string>
+    <string name="hairdryer_confirm_message_bluetooth">這個 16 位數字碼看著是「手機藍牙」吹風機，會用支付寶 U淨 小程式開啟。對嗎？</string>
+    <string name="hairdryer_confirm_message_cloud">這個 32 位編碼看著是「4G（控制盒）」吹風機，會用一卡通「自助吹風」頁面開啟。對嗎？</string>
+    <string name="hairdryer_confirm_correct">正確</string>
+    <string name="hairdryer_confirm_incorrect">不正確</string>
+    <string name="hairdryer_confirm_hint">選錯了也不要緊：以後可以在「設定 → 校園服務 → 吹風機」裡改。</string>
+    <string name="hairdryer_rename_title">重新命名</string>
+    <string name="hairdryer_rename_hint">留空則用預設名稱</string>
+    <string name="hairdryer_icon_picker_title">選擇桌面圖示</string>
+    <string name="hairdryer_icon_picker_hint">圖示只影響桌面捷徑的外觀</string>
+    <string name="hairdryer_action_refresh_names">補全裝置名稱</string>
+    <!-- 吹风机桌面快捷方式的结果提示 -->
+    <string name="hairdryer_message_shortcut_updated">桌面图标已更新</string>
+    <string name="hairdryer_message_shortcut_already">桌面上已经有这台吹风机的图标了</string>
+    <string name="hairdryer_message_shortcut_failed">添加失败，请稍后再试</string>
 </resources>
